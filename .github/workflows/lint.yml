@@ -19,7 +19,7 @@ jobs:
 
       - name: Install lint tools
         run: |
-          pip install black flake8
+          pip install black==25.11.0 flake8
 
       - name: Run formatter
         run: black --check .
