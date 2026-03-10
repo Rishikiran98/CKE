@@ -31,4 +31,6 @@ class TemplateReasoner:
     def format_reasoning_path(self, context: List[Statement]) -> str:
         if not context:
             return "No path found."
-        return "\n".join(f"{st.subject} -> {st.relation} -> {st.object}" for st in context)
+        return "\n".join(
+            f"{st.subject} -> {st.relation} -> {st.object}" for st in context
+        )

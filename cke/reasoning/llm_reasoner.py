@@ -30,9 +30,15 @@ class LLMReasonerConfig:
 class LLMReasoner:
     """Reasoner that answers using graph context with robust fallback."""
 
-    def __init__(self, config: LLMReasonerConfig | None = None, fallback: TemplateReasoner | None = None) -> None:
+    def __init__(
+        self,
+        config: LLMReasonerConfig | None = None,
+        fallback: TemplateReasoner | None = None,
+    ) -> None:
         self.config = config or LLMReasonerConfig(
-            endpoint=os.getenv("CKE_LLM_ENDPOINT", "https://api.openai.com/v1/chat/completions"),
+            endpoint=os.getenv(
+                "CKE_LLM_ENDPOINT", "https://api.openai.com/v1/chat/completions"
+            ),
             model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
             api_key=os.getenv("CKE_LLM_API_KEY"),
         )
@@ -58,13 +64,15 @@ class LLMReasoner:
         return self.fallback.format_reasoning_path(context)
 
     def _build_prompt(self, question: str, context: List[Statement]) -> str:
-        evidence_lines = [f"- {st.as_text()} (confidence={st.confidence:.2f})" for st in context]
+        evidence_lines = [
+            f"- {st.as_text()} (confidence={st.confidence:.2f})" for st in context
+        ]
         evidence_text = "\n".join(evidence_lines) if evidence_lines else "- (none)"
         return (
             "You are a grounded QA assistant for a knowledge graph.\n"
             "Answer ONLY using the provided graph context evidence.\n"
             "If evidence is insufficient, explicitly say that the graph context is insufficient.\n"
-            "Return JSON only with schema: {\"answer\": \"...\", \"used_evidence\": [\"...\"]}.\n\n"
+            'Return JSON only with schema: {"answer": "...", "used_evidence": ["..."]}.\n\n'
             f"Question: {question}\n"
             "Graph context evidence:\n"
             f"{evidence_text}\n"
@@ -76,7 +84,12 @@ class LLMReasoner:
                 client = OpenAI(api_key=self.config.api_key)
                 response = client.chat.completions.create(
                     model=self.config.model,
-                    messages=[{"role": "user", "content": self._build_prompt(question, context)}],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": self._build_prompt(question, context),
+                        }
+                    ],
                     temperature=0,
                     response_format={"type": "json_object"},
                 )
@@ -87,7 +100,9 @@ class LLMReasoner:
 
         body = {
             "model": self.config.model,
-            "messages": [{"role": "user", "content": self._build_prompt(question, context)}],
+            "messages": [
+                {"role": "user", "content": self._build_prompt(question, context)}
+            ],
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
@@ -96,7 +111,9 @@ class LLMReasoner:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
         }
-        req = request.Request(self.config.endpoint, data=payload, headers=headers, method="POST")
+        req = request.Request(
+            self.config.endpoint, data=payload, headers=headers, method="POST"
+        )
         with request.urlopen(req, timeout=self.config.timeout_s) as resp:
             raw = resp.read().decode("utf-8")
         return json.loads(raw)

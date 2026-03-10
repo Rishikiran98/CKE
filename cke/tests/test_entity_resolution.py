@@ -2,7 +2,9 @@ from cke.entity_resolution.entity_resolver import EntityResolver
 
 
 def test_resolve_entity_aliases():
-    resolver = EntityResolver(aliases={"redis db": "Redis", "remote dictionary server": "Redis"})
+    resolver = EntityResolver(
+        aliases={"redis db": "Redis", "remote dictionary server": "Redis"}
+    )
     assert resolver.resolve_entity("Redis DB") == "Redis"
     assert resolver.resolve_entity("Remote Dictionary Server") == "Redis"
 

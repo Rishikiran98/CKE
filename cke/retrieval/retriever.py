@@ -13,7 +13,9 @@ from cke.router.router import QueryRouter
 class GraphRetriever:
     """Retrieve minimal graph context around routed entities."""
 
-    def __init__(self, graph_engine: KnowledgeGraphEngine, router: QueryRouter | None = None) -> None:
+    def __init__(
+        self, graph_engine: KnowledgeGraphEngine, router: QueryRouter | None = None
+    ) -> None:
         self.graph_engine = graph_engine
         self.router = router or QueryRouter()
 

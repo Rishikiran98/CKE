@@ -59,7 +59,11 @@ def build_reasoner(name: str):
     return TemplateReasoner()
 
 
-def evaluate(items: Iterable[QAItem], extractor_name: str = "rule", reasoner_name: str = "template") -> dict:
+def evaluate(
+    items: Iterable[QAItem],
+    extractor_name: str = "rule",
+    reasoner_name: str = "template",
+) -> dict:
     extractor = build_extractor(extractor_name)
     reasoner = build_reasoner(reasoner_name)
     rag = RAGBaseline()
@@ -107,33 +111,21 @@ def evaluate(items: Iterable[QAItem], extractor_name: str = "rule", reasoner_nam
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=Path, default=None, help="Path to HotpotQA-like json sample")
+    parser.add_argument(
+        "--dataset", type=Path, default=None, help="Path to HotpotQA-like json sample"
+    )
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
     parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
     args = parser.parse_args()
 
-    metrics = evaluate(load_dataset(args.dataset), extractor_name=args.extractor, reasoner_name=args.reasoner)
+    metrics = evaluate(
+        load_dataset(args.dataset),
+        extractor_name=args.extractor,
+        reasoner_name=args.reasoner,
+    )
     print("Experiment results:")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        default=None,
-        help="Path to HotpotQA-like json sample",
-    )
-    parser.add_argument(
-        "--extractor",
-        choices=["rule", "llm"],
-        default="rule",
-        help="Extractor mode to use for graph construction",
-    )
-    args = parser.parse_args()
-
-    metrics = evaluate(load_dataset(args.dataset), extractor_name=args.extractor)
-    print("Experiment results:")
-    for key, value in metrics.items():
-        print(f"  {key}: {value:.4f}" if isinstance(value, float) else f"  {key}: {value}")
 
 
 if __name__ == "__main__":

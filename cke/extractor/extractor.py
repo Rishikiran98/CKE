@@ -25,10 +25,23 @@ class RuleBasedExtractor(BaseExtractor):
     """Simple pattern-based extractor for prototype graph ingestion."""
 
     RELATION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-        (re.compile(r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+supports\s+(?P<o>[A-Za-z0-9_\-/ ]+)", re.I), "supports"),
-        (re.compile(r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+uses\s+(?P<o>[A-Za-z0-9_\-/ ]+)", re.I), "uses"),
         (
-            re.compile(r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+implemented[_ ]via\s+(?P<o>[A-Za-z0-9_\-/ ]+)", re.I),
+            re.compile(
+                r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+supports\s+(?P<o>[A-Za-z0-9_\-/ ]+)", re.I
+            ),
+            "supports",
+        ),
+        (
+            re.compile(
+                r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+uses\s+(?P<o>[A-Za-z0-9_\-/ ]+)", re.I
+            ),
+            "uses",
+        ),
+        (
+            re.compile(
+                r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+implemented[_ ]via\s+(?P<o>[A-Za-z0-9_\-/ ]+)",
+                re.I,
+            ),
             "implemented_via",
         ),
     )

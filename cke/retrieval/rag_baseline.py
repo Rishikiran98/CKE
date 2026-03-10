@@ -46,7 +46,9 @@ class RAGBaseline:
             self.index = faiss.IndexFlatIP(dim)
             self.index.add(self.vectors.astype("float32"))
 
-    def retrieve(self, query: str, top_k: int = 3) -> tuple[List[RetrievalResult], float]:
+    def retrieve(
+        self, query: str, top_k: int = 3
+    ) -> tuple[List[RetrievalResult], float]:
         if not self.chunks:
             return [], 0.0
 
@@ -54,12 +56,22 @@ class RAGBaseline:
         qvec = self._encode([query])
         if self.index is not None and np is not None:
             scores, idx = self.index.search(qvec.astype("float32"), top_k)
-            results = [RetrievalResult(self.chunks[i], float(scores[0][rank])) for rank, i in enumerate(idx[0])]
+            results = [
+                RetrievalResult(self.chunks[i], float(scores[0][rank]))
+                for rank, i in enumerate(idx[0])
+            ]
         else:
             q = qvec[0] if isinstance(qvec[0], list) else qvec[0].tolist()
-            sims = [self._dot(v if isinstance(v, list) else v.tolist(), q) for v in self.vectors]
-            best_idx = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[:top_k]
-            results = [RetrievalResult(self.chunks[i], float(sims[i])) for i in best_idx]
+            sims = [
+                self._dot(v if isinstance(v, list) else v.tolist(), q)
+                for v in self.vectors
+            ]
+            best_idx = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[
+                :top_k
+            ]
+            results = [
+                RetrievalResult(self.chunks[i], float(sims[i])) for i in best_idx
+            ]
 
         return results, (time.perf_counter() - start) * 1000
 
@@ -73,7 +85,9 @@ class RAGBaseline:
 
     def _encode(self, texts: List[str]):
         if self.model is not None and np is not None:
-            return np.array(self.model.encode(texts, normalize_embeddings=True), dtype=np.float32)
+            return np.array(
+                self.model.encode(texts, normalize_embeddings=True), dtype=np.float32
+            )
 
         vectors: list[list[float]] = []
         for text in texts:
