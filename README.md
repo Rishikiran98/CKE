@@ -8,6 +8,7 @@ CKE is a research prototype showing how **structured knowledge graphs + sparse r
 - Optional LLM-based semantic extraction with rule fallback (`extractor/llm_extractor.py`)
 - Canonical entity resolution (aliases + hybrid string/embedding similarity) (`entity_resolution`)
 - Knowledge graph engine powered by NetworkX (`graph_engine`)
+- **SQLite-backed persistence** – save and reload the graph across restarts (`storage`)
 - Query-to-entity routing (`router`)
 - BFS graph retrieval for minimal context (`retrieval/retriever.py`)
 - Template-based reasoning (`reasoning`)
@@ -23,6 +24,7 @@ cke/
   extractor/
   entity_resolution/
   graph_engine/
+  storage/
   router/
   retrieval/
   reasoning/
@@ -109,6 +111,32 @@ Fallback behavior for reliability:
 
 Then CKE automatically falls back to `TemplateReasoner`.
 
+## Persistence
+
+By default, CKE stores the knowledge graph **in-memory only**; data is lost when the process exits.  Pass `--db-path` to enable a **SQLite-backed persistent store** that survives restarts.
+
+### Storage module layout
+
+```text
+cke/storage/
+  adapter.py       # Abstract StorageAdapter interface
+  sqlite_store.py  # SQLite backend (stdlib sqlite3 only)
+```
+
+### How it works
+
+- `KnowledgeGraphEngine(db_path="path/to/cke.db")` initialises the SQLite backend and pre-warms the in-memory graph from stored statements.
+- Every `add_statement` call writes through to both the in-memory graph and the database.
+- On the next startup, the same `db_path` reloads all persisted statements automatically.
+
+### SQLite schema
+
+| Table | Key columns |
+|---|---|
+| `entities` | `entity_id`, `canonical_name`, `entity_type` |
+| `aliases` | `alias`, `entity_id` |
+| `statements` | `subject`, `relation`, `object`, `context` (JSON), `confidence`, `source`, `timestamp` |
+
 ## Run Demo
 
 ```bash
@@ -117,6 +145,10 @@ python demo.py --extractor rule
 python demo.py --extractor llm
 python demo.py --reasoner template
 python demo.py --reasoner llm
+
+# Persistent mode – graph is saved and reloaded across restarts
+python demo.py --db-path .\data\cke.db
+python demo.py --extractor llm --reasoner llm --db-path .\data\cke.db
 ```
 
 Expected flow:
