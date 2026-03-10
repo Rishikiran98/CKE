@@ -28,7 +28,14 @@ class QAItem:
 def load_dataset(path: Path | None = None) -> List[QAItem]:
     if path and path.exists():
         raw = json.loads(path.read_text())
-        return [QAItem(question=i["question"], context=i["context"], answer=i["answer"]) for i in raw]
+        return [
+            QAItem(
+                question=item["question"],
+                context=item["context"],
+                answer=item["answer"],
+            )
+            for item in raw
+        ]
 
     # Tiny built-in sample for local prototype runs.
     return [
@@ -84,8 +91,8 @@ def evaluate(items: Iterable[QAItem], extractor_name: str = "rule", reasoner_nam
         gold = item.answer.lower()
         graph_correct += int(gold in graph_answer.lower())
         rag_correct += int(gold in rag_answer.lower())
-        graph_tokens += sum(len(s.as_text().split()) for s in graph_ctx)
-        rag_tokens += sum(len(r.chunk.split()) for r in rag_ctx)
+        graph_tokens += sum(len(statement.as_text().split()) for statement in graph_ctx)
+        rag_tokens += sum(len(result.chunk.split()) for result in rag_ctx)
 
     n = len(items) or 1
     return {
@@ -109,6 +116,24 @@ def main() -> None:
     print("Experiment results:")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=None,
+        help="Path to HotpotQA-like json sample",
+    )
+    parser.add_argument(
+        "--extractor",
+        choices=["rule", "llm"],
+        default="rule",
+        help="Extractor mode to use for graph construction",
+    )
+    args = parser.parse_args()
+
+    metrics = evaluate(load_dataset(args.dataset), extractor_name=args.extractor)
+    print("Experiment results:")
+    for key, value in metrics.items():
+        print(f"  {key}: {value:.4f}" if isinstance(value, float) else f"  {key}: {value}")
 
 
 if __name__ == "__main__":
