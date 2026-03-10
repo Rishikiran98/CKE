@@ -11,9 +11,7 @@ def test_retrieval_bfs_context_depth():
     graph.add_statements(extractor.extract(text))
 
     retriever = GraphRetriever(graph)
-    context = retriever.retrieve(
-        "What protocol does Redis pub/sub use?", max_depth=2
-    )
+    context = retriever.retrieve("What protocol does Redis pub/sub use?", max_depth=2)
     triples = {(s.subject, s.relation, s.object) for s in context}
     assert ("Redis", "supports", "PubSub") in triples
     assert ("PubSub", "implemented_via", "RESP") in triples

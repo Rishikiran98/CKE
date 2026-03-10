@@ -27,8 +27,7 @@ class RuleBasedExtractor(BaseExtractor):
     RELATION_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         (
             re.compile(
-                r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+supports\s+"
-                r"(?P<o>[A-Za-z0-9_\-/ ]+)",
+                r"(?P<s>[A-Za-z0-9_\-/ ]+)\s+supports\s+" r"(?P<o>[A-Za-z0-9_\-/ ]+)",
                 re.I,
             ),
             "supports",
@@ -65,14 +64,10 @@ class RuleBasedExtractor(BaseExtractor):
 
     @staticmethod
     def _split_sentences(text: str) -> Iterable[str]:
-        return [
-            seg.strip() for seg in re.split(r"[.?!]\s*", text) if seg.strip()
-        ]
+        return [seg.strip() for seg in re.split(r"[.?!]\s*", text) if seg.strip()]
 
     @staticmethod
     def _normalize_token(token: str) -> str:
         cleaned = re.sub(r"\s+", " ", token.strip(" ,;"))
-        cleaned = re.sub(
-            r"\b(protocol|messaging)\b$", "", cleaned, flags=re.I
-        ).strip()
+        cleaned = re.sub(r"\b(protocol|messaging)\b$", "", cleaned, flags=re.I).strip()
         return cleaned

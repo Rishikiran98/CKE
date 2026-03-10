@@ -27,9 +27,7 @@ def _build_reasoner(name: str):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
-    parser.add_argument(
-        "--reasoner", choices=["template", "llm"], default="template"
-    )
+    parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
     args = parser.parse_args()
 
     corpus = [

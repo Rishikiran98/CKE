@@ -22,9 +22,7 @@ class GraphRetriever:
         self.router = router or QueryRouter()
 
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
-        seeds = self.router.detect_entities(
-            query, self.graph_engine.all_entities()
-        )
+        seeds = self.router.detect_entities(query, self.graph_engine.all_entities())
         seen_statements: set[tuple[str, str, str]] = set()
         candidates: list[tuple[int, Statement]] = []
 
@@ -37,10 +35,7 @@ class GraphRetriever:
                 node, depth = queue.popleft()
                 if depth > max_depth:
                     continue
-                if (
-                    node in best_depth_for_node
-                    and depth > best_depth_for_node[node]
-                ):
+                if node in best_depth_for_node and depth > best_depth_for_node[node]:
                     continue
                 best_depth_for_node[node] = depth
 

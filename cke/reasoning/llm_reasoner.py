@@ -66,12 +66,9 @@ class LLMReasoner:
 
     def _build_prompt(self, question: str, context: List[Statement]) -> str:
         evidence_lines = [
-            f"- {st.as_text()} (confidence={st.confidence:.2f})"
-            for st in context
+            f"- {st.as_text()} (confidence={st.confidence:.2f})" for st in context
         ]
-        evidence_text = (
-            "\n".join(evidence_lines) if evidence_lines else "- (none)"
-        )
+        evidence_text = "\n".join(evidence_lines) if evidence_lines else "- (none)"
         return (
             "You are a grounded QA assistant for a knowledge graph.\n"
             "Answer ONLY using the provided graph context evidence.\n"
@@ -84,9 +81,7 @@ class LLMReasoner:
             f"{evidence_text}\n"
         )
 
-    def _call_model(
-        self, question: str, context: List[Statement]
-    ) -> dict[str, Any]:
+    def _call_model(self, question: str, context: List[Statement]) -> dict[str, Any]:
         if OpenAI is not None:
             try:
                 client = OpenAI(api_key=self.config.api_key)

@@ -66,12 +66,11 @@ class RAGBaseline:
                 self._dot(v if isinstance(v, list) else v.tolist(), q)
                 for v in self.vectors
             ]
-            best_idx = sorted(
-                range(len(sims)), key=lambda i: sims[i], reverse=True
-            )[:top_k]
+            best_idx = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)[
+                :top_k
+            ]
             results = [
-                RetrievalResult(self.chunks[i], float(sims[i]))
-                for i in best_idx
+                RetrievalResult(self.chunks[i], float(sims[i])) for i in best_idx
             ]
 
         return results, (time.perf_counter() - start) * 1000

@@ -10,8 +10,7 @@ def test_llm_reasoner_falls_back_without_api_key():
         "What protocol does Redis use?", context
     )
     assert (
-        llm_reasoner.answer("What protocol does Redis use?", context)
-        == template_answer
+        llm_reasoner.answer("What protocol does Redis use?", context) == template_answer
     )
 
 

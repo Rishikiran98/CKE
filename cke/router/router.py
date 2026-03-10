@@ -14,9 +14,7 @@ class QueryRouter:
     ) -> List[str]:
         query_lower = query.lower()
         matches = [
-            entity
-            for entity in candidate_entities
-            if entity.lower() in query_lower
+            entity for entity in candidate_entities if entity.lower() in query_lower
         ]
         if matches:
             return sorted(set(matches))
