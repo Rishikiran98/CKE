@@ -34,7 +34,7 @@ def test_init_schema_creates_tables():
     tables = {
         r[0]
         for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
+            "SELECT name FROM sqlite_master " "WHERE type='table'"
         ).fetchall()
     }
     assert "entities" in tables
