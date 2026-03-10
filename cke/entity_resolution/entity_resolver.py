@@ -50,7 +50,9 @@ class EntityResolver:
         normalized_alias = self._normalize(alias)
         self._aliases[normalized_alias] = canonical_name
         self._canonical_entities.add(canonical_name)
-        self._canonical_by_key[self._canonical_key(canonical_name)] = canonical_name
+        self._canonical_by_key[self._canonical_key(canonical_name)] = (
+            canonical_name
+        )
         self._canonical_by_key[self._canonical_key(alias)] = canonical_name
 
     def resolve_entity(self, name: str) -> str:
@@ -169,7 +171,9 @@ class EntityResolver:
             return self._embedding_cache[text]
 
         if self._model is not None and np is not None:
-            vec = self._model.encode([text], normalize_embeddings=True)[0].tolist()
+            vec = self._model.encode([text], normalize_embeddings=True)[
+                0
+            ].tolist()
         else:
             vec = [0.0] * 128
             for token in re.findall(r"\w+", text.lower()):
@@ -183,6 +187,7 @@ class EntityResolver:
     def _embedding_similarity(self, left: str, right: str) -> float:
         lvec, rvec = self._embed(left), self._embed(right)
         denom = (
-            math.sqrt(sum(v * v for v in lvec)) * math.sqrt(sum(v * v for v in rvec))
+            math.sqrt(sum(v * v for v in lvec))
+            * math.sqrt(sum(v * v for v in rvec))
         ) or 1.0
         return sum(a * b for a, b in zip(lvec, rvec)) / denom

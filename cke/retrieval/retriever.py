@@ -14,25 +14,33 @@ class GraphRetriever:
     """Retrieve minimal graph context around routed entities."""
 
     def __init__(
-        self, graph_engine: KnowledgeGraphEngine, router: QueryRouter | None = None
+        self,
+        graph_engine: KnowledgeGraphEngine,
+        router: QueryRouter | None = None,
     ) -> None:
         self.graph_engine = graph_engine
         self.router = router or QueryRouter()
 
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
-        seeds = self.router.detect_entities(query, self.graph_engine.all_entities())
+        seeds = self.router.detect_entities(
+            query, self.graph_engine.all_entities()
+        )
         seen_statements: set[tuple[str, str, str]] = set()
         candidates: list[tuple[int, Statement]] = []
 
         for seed in seeds:
-            # Keep bounded BFS behavior while tracking shortest discovery depth.
+            # Keep bounded BFS behavior while tracking shortest
+            # discovery depth.
             queue = deque([(seed, 0)])
             best_depth_for_node: dict[str, int] = {}
             while queue:
                 node, depth = queue.popleft()
                 if depth > max_depth:
                     continue
-                if node in best_depth_for_node and depth > best_depth_for_node[node]:
+                if (
+                    node in best_depth_for_node
+                    and depth > best_depth_for_node[node]
+                ):
                     continue
                 best_depth_for_node[node] = depth
 
@@ -44,7 +52,8 @@ class GraphRetriever:
                     if depth + 1 <= max_depth:
                         queue.append((statement.object, depth + 1))
 
-        # Rank by: confidence desc, path length asc, then deterministic text key.
+        # Rank by: confidence desc, path length asc,
+        # then deterministic text key.
         ranked = sorted(
             candidates,
             key=lambda item: (

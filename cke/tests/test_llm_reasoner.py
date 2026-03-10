@@ -10,7 +10,8 @@ def test_llm_reasoner_falls_back_without_api_key():
         "What protocol does Redis use?", context
     )
     assert (
-        llm_reasoner.answer("What protocol does Redis use?", context) == template_answer
+        llm_reasoner.answer("What protocol does Redis use?", context)
+        == template_answer
     )
 
 
@@ -20,7 +21,10 @@ def test_llm_reasoner_parses_openai_style_response_payload():
         "choices": [
             {
                 "message": {
-                    "content": '{"answer": "Redis uses RESP protocol.", "used_evidence": ["Redis uses RESP"]}'
+                    "content": (
+                        '{"answer": "Redis uses RESP protocol.", '
+                        '"used_evidence": ["Redis uses RESP"]}'
+                    )
                 }
             }
         ]

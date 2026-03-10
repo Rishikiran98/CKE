@@ -79,7 +79,9 @@ class KnowledgeGraphEngine:
                     source=edge_data.get("source"),
                     timestamp=edge_data.get("timestamp"),
                 )
-                for _, target, edge_data in self.graph.out_edges(entity, data=True)
+                for _, target, edge_data in self.graph.out_edges(
+                    entity, data=True
+                )
             ]
 
         return [

@@ -41,7 +41,10 @@ def load_dataset(path: Path | None = None) -> List[QAItem]:
     return [
         QAItem(
             question="What protocol does Redis pub/sub use?",
-            context="Redis supports PubSub messaging. PubSub implemented_via RESP protocol.",
+            context=(
+                "Redis supports PubSub messaging. "
+                "PubSub implemented_via RESP protocol."
+            ),
             answer="RESP",
         ),
     ]
@@ -95,7 +98,9 @@ def evaluate(
         gold = item.answer.lower()
         graph_correct += int(gold in graph_answer.lower())
         rag_correct += int(gold in rag_answer.lower())
-        graph_tokens += sum(len(statement.as_text().split()) for statement in graph_ctx)
+        graph_tokens += sum(
+            len(statement.as_text().split()) for statement in graph_ctx
+        )
         rag_tokens += sum(len(result.chunk.split()) for result in rag_ctx)
 
     n = len(items) or 1
@@ -112,10 +117,15 @@ def evaluate(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset", type=Path, default=None, help="Path to HotpotQA-like json sample"
+        "--dataset",
+        type=Path,
+        default=None,
+        help="Path to HotpotQA-like json sample",
     )
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
-    parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
+    parser.add_argument(
+        "--reasoner", choices=["template", "llm"], default="template"
+    )
     args = parser.parse_args()
 
     metrics = evaluate(

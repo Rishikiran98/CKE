@@ -37,7 +37,8 @@ class LLMReasoner:
     ) -> None:
         self.config = config or LLMReasonerConfig(
             endpoint=os.getenv(
-                "CKE_LLM_ENDPOINT", "https://api.openai.com/v1/chat/completions"
+                "CKE_LLM_ENDPOINT",
+                "https://api.openai.com/v1/chat/completions",
             ),
             model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
             api_key=os.getenv("CKE_LLM_API_KEY"),
@@ -65,20 +66,27 @@ class LLMReasoner:
 
     def _build_prompt(self, question: str, context: List[Statement]) -> str:
         evidence_lines = [
-            f"- {st.as_text()} (confidence={st.confidence:.2f})" for st in context
+            f"- {st.as_text()} (confidence={st.confidence:.2f})"
+            for st in context
         ]
-        evidence_text = "\n".join(evidence_lines) if evidence_lines else "- (none)"
+        evidence_text = (
+            "\n".join(evidence_lines) if evidence_lines else "- (none)"
+        )
         return (
             "You are a grounded QA assistant for a knowledge graph.\n"
             "Answer ONLY using the provided graph context evidence.\n"
-            "If evidence is insufficient, explicitly say that the graph context is insufficient.\n"
-            'Return JSON only with schema: {"answer": "...", "used_evidence": ["..."]}.\n\n'
+            "If evidence is insufficient, explicitly say that the graph "
+            "context is insufficient.\n"
+            "Return JSON only with schema: "
+            '{"answer": "...", "used_evidence": ["..."]}.\n\n'
             f"Question: {question}\n"
             "Graph context evidence:\n"
             f"{evidence_text}\n"
         )
 
-    def _call_model(self, question: str, context: List[Statement]) -> dict[str, Any]:
+    def _call_model(
+        self, question: str, context: List[Statement]
+    ) -> dict[str, Any]:
         if OpenAI is not None:
             try:
                 client = OpenAI(api_key=self.config.api_key)
@@ -101,7 +109,10 @@ class LLMReasoner:
         body = {
             "model": self.config.model,
             "messages": [
-                {"role": "user", "content": self._build_prompt(question, context)}
+                {
+                    "role": "user",
+                    "content": self._build_prompt(question, context),
+                }
             ],
             "temperature": 0,
             "response_format": {"type": "json_object"},

@@ -12,7 +12,7 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any, List
-from urllib import error, request
+from urllib import request
 
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
@@ -32,11 +32,14 @@ class LLMExtractor(BaseExtractor):
     """Extract triples via LLM with rule-based fallback."""
 
     def __init__(
-        self, config: LLMConfig | None = None, fallback: BaseExtractor | None = None
+        self,
+        config: LLMConfig | None = None,
+        fallback: BaseExtractor | None = None,
     ) -> None:
         self.config = config or LLMConfig(
             endpoint=os.getenv(
-                "CKE_LLM_ENDPOINT", "https://api.openai.com/v1/chat/completions"
+                "CKE_LLM_ENDPOINT",
+                "https://api.openai.com/v1/chat/completions",
             ),
             model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
             api_key=os.getenv("CKE_LLM_API_KEY"),
