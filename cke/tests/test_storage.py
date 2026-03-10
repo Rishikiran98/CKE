@@ -31,12 +31,8 @@ def test_init_schema_creates_tables():
     store = SQLiteStore(db)
     store.init_schema()
     conn = store._connect()
-    tables = {
-        r[0]
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master " "WHERE type='table'"
-        ).fetchall()
-    }
+    q = "SELECT name FROM sqlite_master WHERE type='table'"
+    tables = {r[0] for r in conn.execute(q).fetchall()}
     assert "entities" in tables
     assert "aliases" in tables
     assert "statements" in tables

@@ -163,7 +163,8 @@ class SQLiteStore(StorageAdapter):
         self._execute(
             """
             INSERT INTO statements
-                (subject, relation, object, context, confidence, source, timestamp)
+                (subject, relation, object, context,
+                 confidence, source, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(subject, relation, object) DO UPDATE SET
                 context    = excluded.context,
@@ -190,7 +191,8 @@ class SQLiteStore(StorageAdapter):
     def get_neighbors(self, entity_name: str) -> List[Statement]:
         rows = self._execute(
             """
-            SELECT subject, relation, object, context, confidence, source, timestamp
+            SELECT subject, relation, object,
+                   context, confidence, source, timestamp
             FROM statements
             WHERE subject = ?
             """,
@@ -201,14 +203,12 @@ class SQLiteStore(StorageAdapter):
     def find_paths(
         self, entity_a: str, entity_b: str, cutoff: int = 3
     ) -> List[List[Statement]]:
-        """BFS over persisted statements; mirrors in-memory graph engine logic."""
-        known = {
-            r["subject"]
-            for r in self._execute("SELECT DISTINCT subject FROM statements").fetchall()
-        } | {
-            r["object"]
-            for r in self._execute("SELECT DISTINCT object FROM statements").fetchall()
-        }
+        # BFS over persisted statements; mirrors in-memory graph engine logic.
+        q_subj = "SELECT DISTINCT subject FROM statements"
+        q_obj = "SELECT DISTINCT object FROM statements"
+        known_subjects = {r["subject"] for r in self._execute(q_subj).fetchall()}
+        known_objects = {r["object"] for r in self._execute(q_obj).fetchall()}
+        known = known_subjects | known_objects
 
         if entity_a not in known or entity_b not in known:
             return []
@@ -236,8 +236,8 @@ class SQLiteStore(StorageAdapter):
 
     def load_all_statements(self) -> List[Statement]:
         rows = self._execute(
-            "SELECT subject, relation, object, context, confidence, source, timestamp"
-            " FROM statements"
+            "SELECT subject, relation, object, context, "
+            "confidence, source, timestamp FROM statements"
         ).fetchall()
         return [self._row_to_statement(r) for r in rows]
 
