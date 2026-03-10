@@ -6,7 +6,7 @@ CKE is a research prototype showing how **structured knowledge graphs + sparse r
 
 - Rule-based semantic extraction (`extractor`)
 - Optional LLM-based semantic extraction with rule fallback (`extractor/llm_extractor.py`)
-- Entity resolution using string + embedding similarity (`entity_resolution`)
+- Canonical entity resolution (aliases + hybrid string/embedding similarity) (`entity_resolution`)
 - Knowledge graph engine powered by NetworkX (`graph_engine`)
 - Query-to-entity routing (`router`)
 - BFS graph retrieval for minimal context (`retrieval/retriever.py`)
@@ -48,6 +48,43 @@ Install with pip:
 ```bash
 pip install networkx sentence-transformers faiss-cpu numpy pytest pydantic fastapi
 ```
+
+
+## Canonical Entity Resolution
+
+`EntityResolver` now maps multiple surface forms to a single canonical entity.
+
+Example:
+- `Redis`
+- `Redis DB`
+- `Redis database`
+
+All resolve to the same canonical node when possible using:
+- alias registration
+- canonical-form normalization
+- hybrid string + embedding similarity (with deterministic offline fallback embeddings)
+
+## Statement Schema
+
+`Statement` supports core triples plus contextual metadata:
+
+- `subject: str`
+- `relation: str`
+- `object: str`
+- `context: dict = {}`
+- `confidence: float = 1.0`
+- `source: str | None = None`
+- `timestamp: str | None = None`
+
+Existing code remains backward compatible: creating `Statement(subject, relation, object)` still works.
+
+## Confidence-aware Graph Retrieval
+
+Graph retrieval remains bounded BFS but results are ranked to prefer:
+1. higher-confidence statements
+2. shorter path distance from detected query entities
+
+This keeps retrieval sparse while prioritizing higher quality evidence.
 
 ## Run Demo
 

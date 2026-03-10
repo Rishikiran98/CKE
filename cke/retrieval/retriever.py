@@ -19,24 +19,38 @@ class GraphRetriever:
 
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
         seeds = self.router.detect_entities(query, self.graph_engine.all_entities())
-        visited_nodes: set[str] = set()
         seen_statements: set[tuple[str, str, str]] = set()
-        results: list[Statement] = []
+        candidates: list[tuple[int, Statement]] = []
 
         for seed in seeds:
+            # Keep bounded BFS behavior while tracking shortest discovery depth.
             queue = deque([(seed, 0)])
+            best_depth_for_node: dict[str, int] = {}
             while queue:
                 node, depth = queue.popleft()
-                if node in visited_nodes or depth > max_depth:
+                if depth > max_depth:
                     continue
-                visited_nodes.add(node)
+                if node in best_depth_for_node and depth > best_depth_for_node[node]:
+                    continue
+                best_depth_for_node[node] = depth
 
                 for statement in self.graph_engine.get_neighbors(node):
-                    key = (statement.subject, statement.relation, statement.object)
+                    key = statement.key()
                     if key not in seen_statements:
                         seen_statements.add(key)
-                        results.append(statement)
+                        candidates.append((depth + 1, statement))
                     if depth + 1 <= max_depth:
                         queue.append((statement.object, depth + 1))
 
-        return results
+        # Rank by: confidence desc, path length asc, then deterministic text key.
+        ranked = sorted(
+            candidates,
+            key=lambda item: (
+                -float(item[1].confidence),
+                item[0],
+                item[1].subject.lower(),
+                item[1].relation.lower(),
+                item[1].object.lower(),
+            ),
+        )
+        return [statement for _, statement in ranked]
