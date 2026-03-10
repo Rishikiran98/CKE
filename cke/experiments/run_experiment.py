@@ -12,6 +12,7 @@ from typing import Iterable, List
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+from cke.reasoning.llm_reasoner import LLMReasoner
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.retrieval.rag_baseline import RAGBaseline
 from cke.retrieval.retriever import GraphRetriever
@@ -40,7 +41,10 @@ def load_dataset(path: Path | None = None) -> List[QAItem]:
     return [
         QAItem(
             question="What protocol does Redis pub/sub use?",
-            context="Redis supports PubSub messaging. PubSub implemented_via RESP protocol.",
+            context=(
+                "Redis supports PubSub messaging. "
+                "PubSub implemented_via RESP protocol."
+            ),
             answer="RESP",
         ),
     ]
@@ -52,9 +56,19 @@ def build_extractor(name: str) -> BaseExtractor:
     return RuleBasedExtractor()
 
 
-def evaluate(items: Iterable[QAItem], extractor_name: str = "rule") -> dict:
+def build_reasoner(name: str):
+    if name == "llm":
+        return LLMReasoner()
+    return TemplateReasoner()
+
+
+def evaluate(
+    items: Iterable[QAItem],
+    extractor_name: str = "rule",
+    reasoner_name: str = "template",
+) -> dict:
     extractor = build_extractor(extractor_name)
-    reasoner = TemplateReasoner()
+    reasoner = build_reasoner(reasoner_name)
     rag = RAGBaseline()
 
     items = list(items)
@@ -106,18 +120,18 @@ def main() -> None:
         default=None,
         help="Path to HotpotQA-like json sample",
     )
-    parser.add_argument(
-        "--extractor",
-        choices=["rule", "llm"],
-        default="rule",
-        help="Extractor mode to use for graph construction",
-    )
+    parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
+    parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
     args = parser.parse_args()
 
-    metrics = evaluate(load_dataset(args.dataset), extractor_name=args.extractor)
+    metrics = evaluate(
+        load_dataset(args.dataset),
+        extractor_name=args.extractor,
+        reasoner_name=args.reasoner,
+    )
     print("Experiment results:")
-    for key, value in metrics.items():
-        print(f"  {key}: {value:.4f}" if isinstance(value, float) else f"  {key}: {value}")
+    for k, v in metrics.items():
+        print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
 
 
 if __name__ == "__main__":

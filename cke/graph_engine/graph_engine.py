@@ -95,17 +95,25 @@ class KnowledgeGraphEngine:
             for item in self.graph.get(entity, [])
         ]
 
-    def find_paths(self, entity_a: str, entity_b: str, cutoff: int = 3) -> List[List[Statement]]:
+    def find_paths(
+        self, entity_a: str, entity_b: str, cutoff: int = 3
+    ) -> List[List[Statement]]:
         if self._use_nx:
             if entity_a not in self.graph or entity_b not in self.graph:
                 return []
             paths: list[list[Statement]] = []
-            for node_path in nx.all_simple_paths(self.graph, source=entity_a, target=entity_b, cutoff=cutoff):
+            for node_path in nx.all_simple_paths(
+                self.graph, source=entity_a, target=entity_b, cutoff=cutoff
+            ):
                 statement_path: list[Statement] = []
                 for i in range(len(node_path) - 1):
                     src, dst = node_path[i], node_path[i + 1]
                     edge_map = self.graph.get_edge_data(src, dst) or {}
-                    edge = edge_map[min(edge_map.keys())] if edge_map else {"relation": "related_to"}
+                    edge = (
+                        edge_map[min(edge_map.keys())]
+                        if edge_map
+                        else {"relation": "related_to"}
+                    )
                     statement_path.append(
                         Statement(
                             subject=src,

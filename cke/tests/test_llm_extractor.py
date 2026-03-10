@@ -14,7 +14,10 @@ def test_llm_extractor_parses_openai_style_response():
         "choices": [
             {
                 "message": {
-                    "content": '{"triples": [{"subject": "Redis", "relation": "implemented via", "object": "RESP"}]}'
+                    "content": (
+                        '{"triples": [{"subject": "Redis", '
+                        '"relation": "implemented via", "object": "RESP"}]}'
+                    )
                 }
             }
         ]

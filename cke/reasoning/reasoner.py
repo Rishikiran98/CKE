@@ -23,7 +23,10 @@ class TemplateReasoner:
         if len(context) >= 2:
             a, b = context[0], context[1]
             if a.object == b.subject:
-                return f"{a.subject} {a.relation} {a.object}, and {a.object} {b.relation} {b.object}."
+                return (
+                    f"{a.subject} {a.relation} {a.object}, "
+                    f"and {a.object} {b.relation} {b.object}."
+                )
 
         top = context[0]
         return f"{top.subject} {top.relation} {top.object}."
@@ -31,4 +34,6 @@ class TemplateReasoner:
     def format_reasoning_path(self, context: List[Statement]) -> str:
         if not context:
             return "No path found."
-        return "\n".join(f"{st.subject} -> {st.relation} -> {st.object}" for st in context)
+        return "\n".join(
+            f"{st.subject} -> {st.relation} -> {st.object}" for st in context
+        )

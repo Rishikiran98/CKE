@@ -93,7 +93,8 @@ class EntityResolver:
         if best_match and (
             best_string_score >= self.string_threshold
             or best_embedding_score >= self.embedding_threshold
-            or best_combined_score >= min(self.string_threshold, self.embedding_threshold)
+            or best_combined_score
+            >= min(self.string_threshold, self.embedding_threshold)
         ):
             self._aliases[normalized] = best_match
             self._canonical_by_key[key] = best_match
@@ -137,7 +138,11 @@ class EntityResolver:
     def _canonical_key(self, text: str) -> str:
         normalized = self._normalize(text)
         normalized = normalized.replace("_", " ").replace("-", " ")
-        tokens = [tok for tok in re.findall(r"[a-z0-9]+", normalized) if tok not in {"db", "database", "server"}]
+        tokens = [
+            tok
+            for tok in re.findall(r"[a-z0-9]+", normalized)
+            if tok not in {"db", "database", "server"}
+        ]
         return " ".join(tokens)
 
     @staticmethod
@@ -177,5 +182,7 @@ class EntityResolver:
 
     def _embedding_similarity(self, left: str, right: str) -> float:
         lvec, rvec = self._embed(left), self._embed(right)
-        denom = (math.sqrt(sum(v * v for v in lvec)) * math.sqrt(sum(v * v for v in rvec))) or 1.0
+        denom = (
+            math.sqrt(sum(v * v for v in lvec)) * math.sqrt(sum(v * v for v in rvec))
+        ) or 1.0
         return sum(a * b for a, b in zip(lvec, rvec)) / denom

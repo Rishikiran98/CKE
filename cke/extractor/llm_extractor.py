@@ -12,7 +12,7 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any, List
-from urllib import error, request
+from urllib import request
 
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
@@ -31,9 +31,16 @@ class LLMConfig:
 class LLMExtractor(BaseExtractor):
     """Extract triples via LLM with rule-based fallback."""
 
-    def __init__(self, config: LLMConfig | None = None, fallback: BaseExtractor | None = None) -> None:
+    def __init__(
+        self,
+        config: LLMConfig | None = None,
+        fallback: BaseExtractor | None = None,
+    ) -> None:
         self.config = config or LLMConfig(
-            endpoint=os.getenv("CKE_LLM_ENDPOINT", "https://api.openai.com/v1/chat/completions"),
+            endpoint=os.getenv(
+                "CKE_LLM_ENDPOINT",
+                "https://api.openai.com/v1/chat/completions",
+            ),
             model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
             api_key=os.getenv("CKE_LLM_API_KEY"),
         )
@@ -71,7 +78,9 @@ class LLMExtractor(BaseExtractor):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
         }
-        req = request.Request(self.config.endpoint, data=payload, headers=headers, method="POST")
+        req = request.Request(
+            self.config.endpoint, data=payload, headers=headers, method="POST"
+        )
         with request.urlopen(req, timeout=self.config.timeout_s) as resp:
             raw = resp.read().decode("utf-8")
         return json.loads(raw)

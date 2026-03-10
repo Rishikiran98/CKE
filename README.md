@@ -11,6 +11,7 @@ CKE is a research prototype showing how **structured knowledge graphs + sparse r
 - Query-to-entity routing (`router`)
 - BFS graph retrieval for minimal context (`retrieval/retriever.py`)
 - Template-based reasoning (`reasoning`)
+- Optional LLM-based reasoner with template fallback (`reasoning/llm_reasoner.py`)
 - Baseline RAG retriever with embeddings + FAISS fallback (`retrieval/rag_baseline.py`)
 - Experiment runner comparing CKE vs RAG (`experiments/run_experiment.py`)
 - Unit tests for core behavior (`tests`)
@@ -86,12 +87,36 @@ Graph retrieval remains bounded BFS but results are ranked to prefer:
 
 This keeps retrieval sparse while prioritizing higher quality evidence.
 
+
+## Reasoner Modes
+
+CKE supports two reasoner modes:
+
+- `template` (default): deterministic, offline-safe heuristic reasoning
+- `llm`: OpenAI-compatible LLM reasoning grounded on retrieved graph statements
+
+LLM reasoner prompt behavior:
+- constrained to provided graph context
+- asks model to report insufficient evidence instead of guessing
+- includes evidence statements in prompt
+- requests JSON output: `{"answer": "...", "used_evidence": [...]}`
+
+Fallback behavior for reliability:
+- if API key is missing
+- if optional client import fails
+- if request fails
+- if model output is malformed
+
+Then CKE automatically falls back to `TemplateReasoner`.
+
 ## Run Demo
 
 ```bash
 python demo.py
 python demo.py --extractor rule
 python demo.py --extractor llm
+python demo.py --reasoner template
+python demo.py --reasoner llm
 ```
 
 Expected flow:
@@ -112,6 +137,8 @@ pytest cke/tests -q
 ```bash
 python -m cke.experiments.run_experiment
 python -m cke.experiments.run_experiment --extractor llm
+python -m cke.experiments.run_experiment --reasoner template
+python -m cke.experiments.run_experiment --reasoner llm
 ```
 
 Optional dataset input:

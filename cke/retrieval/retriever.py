@@ -13,7 +13,11 @@ from cke.router.router import QueryRouter
 class GraphRetriever:
     """Retrieve minimal graph context around routed entities."""
 
-    def __init__(self, graph_engine: KnowledgeGraphEngine, router: QueryRouter | None = None) -> None:
+    def __init__(
+        self,
+        graph_engine: KnowledgeGraphEngine,
+        router: QueryRouter | None = None,
+    ) -> None:
         self.graph_engine = graph_engine
         self.router = router or QueryRouter()
 
@@ -23,7 +27,8 @@ class GraphRetriever:
         candidates: list[tuple[int, Statement]] = []
 
         for seed in seeds:
-            # Keep bounded BFS behavior while tracking shortest discovery depth.
+            # Keep bounded BFS behavior while tracking shortest
+            # discovery depth.
             queue = deque([(seed, 0)])
             best_depth_for_node: dict[str, int] = {}
             while queue:
@@ -42,7 +47,8 @@ class GraphRetriever:
                     if depth + 1 <= max_depth:
                         queue.append((statement.object, depth + 1))
 
-        # Rank by: confidence desc, path length asc, then deterministic text key.
+        # Rank by: confidence desc, path length asc,
+        # then deterministic text key.
         ranked = sorted(
             candidates,
             key=lambda item: (

@@ -7,6 +7,7 @@ import argparse
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+from cke.reasoning.llm_reasoner import LLMReasoner
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.retrieval.retriever import GraphRetriever
 
@@ -17,9 +18,16 @@ def _build_extractor(name: str) -> BaseExtractor:
     return RuleBasedExtractor()
 
 
+def _build_reasoner(name: str):
+    if name == "llm":
+        return LLMReasoner()
+    return TemplateReasoner()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
+    parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
     args = parser.parse_args()
 
     corpus = [
@@ -35,12 +43,13 @@ def main() -> None:
 
     query = "What protocol does Redis PubSub use?"
     retriever = GraphRetriever(graph)
-    reasoner = TemplateReasoner()
+    reasoner = _build_reasoner(args.reasoner)
 
     context = retriever.retrieve(query, max_depth=3)
     answer = reasoner.answer(query, context)
 
     print(f"Extractor: {args.extractor}")
+    print(f"Reasoner: {args.reasoner}")
     print(f'Query:\n"{query}"\n')
     print("Graph reasoning:")
     print(reasoner.format_reasoning_path(context))
