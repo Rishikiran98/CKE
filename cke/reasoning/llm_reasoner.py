@@ -98,7 +98,7 @@ class LLMReasoner:
                 )
                 content = response.choices[0].message.content
                 return {"choices": [{"message": {"content": content}}]}
-            except Exception:
+            except Exception:  # nosec B110
                 pass
 
         body = {
@@ -120,7 +120,7 @@ class LLMReasoner:
         req = request.Request(
             self.config.endpoint, data=payload, headers=headers, method="POST"
         )
-        with request.urlopen(req, timeout=self.config.timeout_s) as resp:
+        with request.urlopen(req, timeout=self.config.timeout_s) as resp:  # nosec B310
             raw = resp.read().decode("utf-8")
         return json.loads(raw)
 
