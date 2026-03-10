@@ -1,0 +1,7 @@
+networkx
+sentence-transformers
+faiss-cpu
+numpy
+pytest
+pydantic
+fastapi
