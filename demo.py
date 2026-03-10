@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
@@ -25,9 +26,18 @@ def _build_reasoner(name: str):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="CKE demo")
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
     parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
+    parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a SQLite database file for persistent storage. "
+            "Omit to use the default in-memory mode."
+        ),
+    )
     args = parser.parse_args()
 
     corpus = [
@@ -37,7 +47,13 @@ def main() -> None:
     ]
 
     extractor = _build_extractor(args.extractor)
-    graph = KnowledgeGraphEngine()
+
+    # --db-path enables persistence; None keeps the original in-memory mode.
+    db_path = args.db_path
+    if db_path is not None:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    graph = KnowledgeGraphEngine(db_path=db_path)
     for doc in corpus:
         graph.add_statements(extractor.extract(doc))
 
@@ -50,9 +66,12 @@ def main() -> None:
 
     print(f"Extractor: {args.extractor}")
     print(f"Reasoner: {args.reasoner}")
-    print(f'Query:\n"{query}"\n')
+    if db_path:
+        print(f"DB path: {db_path}")
+    print(f'\nQuery:\n"{query}"\n')
     print("Graph reasoning:")
-    print(reasoner.format_reasoning_path(context))
+    if hasattr(reasoner, "format_reasoning_path"):
+        print(reasoner.format_reasoning_path(context))
     print("\nAnswer:")
     print(answer)
 

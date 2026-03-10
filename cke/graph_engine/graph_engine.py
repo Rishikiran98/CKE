@@ -1,12 +1,16 @@
 """Knowledge graph storage.
 
 Uses NetworkX when available and a lightweight internal fallback otherwise.
+An optional *storage* backend (e.g. SQLiteStore) can be supplied to persist
+entities and statements across process restarts.  When no backend is provided
+the engine behaves exactly as before (pure in-memory).
 """
 
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from cke.models import Statement
 
@@ -17,15 +21,89 @@ except Exception:  # pragma: no cover
 
 
 class KnowledgeGraphEngine:
-    """Manages entity-relation graph operations."""
+    """Manages entity-relation graph operations.
 
-    def __init__(self) -> None:
+    Parameters
+    ----------
+    db_path:
+        Optional path to a SQLite database file.  When supplied, every
+        ``add_statement`` call is also persisted to disk and the in-memory
+        graph is pre-loaded from the store on initialisation.  Omit (or
+        pass ``None``) to use the original pure in-memory behaviour.
+    """
+
+    def __init__(
+        self,
+        db_path: Optional[str | Path] = None,
+    ) -> None:
+        self._storage = self._init_storage(db_path)
+
+        # --- in-memory graph (always maintained for fast traversal) ---
         self._use_nx = nx is not None
         if self._use_nx:
             self.graph = nx.MultiDiGraph()
         else:
             self.graph: Dict[str, list[dict[str, Any]]] = defaultdict(list)
             self._nodes: set[str] = set()
+
+        # If a storage backend was provided, warm the in-memory graph.
+        if self._storage is not None:
+            for st in self._storage.load_all_statements():
+                self._add_to_memory(
+                    st.subject,
+                    st.relation,
+                    st.object,
+                    context=st.context,
+                    confidence=st.confidence,
+                    source=st.source,
+                    timestamp=st.timestamp,
+                )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _init_storage(db_path: Optional[str | Path]):
+        """Return a ready storage backend or *None* for in-memory mode."""
+        if db_path is None:
+            return None
+        # Lazy import so the storage module is only required when used.
+        from cke.storage.sqlite_store import SQLiteStore  # noqa: PLC0415
+
+        store = SQLiteStore(db_path)
+        store.init_schema()
+        return store
+
+    def _add_to_memory(
+        self,
+        subject: str,
+        relation: str,
+        object_: str,
+        context: dict[str, Any] | None = None,
+        confidence: float = 1.0,
+        source: str | None = None,
+        timestamp: str | None = None,
+    ) -> None:
+        """Write a statement into the in-memory graph only."""
+        payload = {
+            "relation": relation,
+            "context": context or {},
+            "confidence": confidence,
+            "source": source,
+            "timestamp": timestamp,
+        }
+        if self._use_nx:
+            self.graph.add_node(subject)
+            self.graph.add_node(object_)
+            self.graph.add_edge(subject, object_, **payload)
+        else:
+            self._nodes.update([subject, object_])
+            self.graph[subject].append({"object": object_, **payload})
+
+    # ------------------------------------------------------------------
+    # Public API (unchanged surface)
+    # ------------------------------------------------------------------
 
     def add_statement(
         self,
@@ -37,21 +115,25 @@ class KnowledgeGraphEngine:
         source: str | None = None,
         timestamp: str | None = None,
     ) -> None:
-        payload = {
-            "relation": relation,
-            "context": context or {},
-            "confidence": confidence,
-            "source": source,
-            "timestamp": timestamp,
-        }
-
-        if self._use_nx:
-            self.graph.add_node(subject)
-            self.graph.add_node(object_)
-            self.graph.add_edge(subject, object_, **payload)
-        else:
-            self._nodes.update([subject, object_])
-            self.graph[subject].append({"object": object_, **payload})
+        self._add_to_memory(
+            subject,
+            relation,
+            object_,
+            context=context,
+            confidence=confidence,
+            source=source,
+            timestamp=timestamp,
+        )
+        if self._storage is not None:
+            self._storage.upsert_statement(
+                subject,
+                relation,
+                object_,
+                context=context,
+                confidence=confidence,
+                source=source,
+                timestamp=timestamp,
+            )
 
     def add_statements(self, statements: List[Statement]) -> None:
         for st in statements:

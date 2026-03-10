@@ -1,0 +1,8 @@
+# Force LF line endings for all Python files to keep Black and Flake8 happy in CI (Ubuntu)
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.cfg text eol=lf
+*.bandit text eol=lf
+*.txt text eol=lf
+*.ini text eol=lf
