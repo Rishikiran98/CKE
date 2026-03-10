@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
-from cke.extractor.extractor import RuleBasedExtractor
+from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
+from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.retrieval.rag_baseline import RAGBaseline
@@ -38,8 +39,14 @@ def load_dataset(path: Path | None = None) -> List[QAItem]:
     ]
 
 
-def evaluate(items: Iterable[QAItem]) -> dict:
-    extractor = RuleBasedExtractor()
+def build_extractor(name: str) -> BaseExtractor:
+    if name == "llm":
+        return LLMExtractor()
+    return RuleBasedExtractor()
+
+
+def evaluate(items: Iterable[QAItem], extractor_name: str = "rule") -> dict:
+    extractor = build_extractor(extractor_name)
     reasoner = TemplateReasoner()
     rag = RAGBaseline()
 
@@ -87,9 +94,10 @@ def evaluate(items: Iterable[QAItem]) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=Path, default=None, help="Path to HotpotQA-like json sample")
+    parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
     args = parser.parse_args()
 
-    metrics = evaluate(load_dataset(args.dataset))
+    metrics = evaluate(load_dataset(args.dataset), extractor_name=args.extractor)
     print("Experiment results:")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")

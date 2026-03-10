@@ -5,6 +5,7 @@ CKE is a research prototype showing how **structured knowledge graphs + sparse r
 ## Features
 
 - Rule-based semantic extraction (`extractor`)
+- Optional LLM-based semantic extraction with rule fallback (`extractor/llm_extractor.py`)
 - Entity resolution using string + embedding similarity (`entity_resolution`)
 - Knowledge graph engine powered by NetworkX (`graph_engine`)
 - Query-to-entity routing (`router`)
@@ -52,6 +53,8 @@ pip install networkx sentence-transformers faiss-cpu numpy pytest pydantic fasta
 
 ```bash
 python demo.py
+python demo.py --extractor rule
+python demo.py --extractor llm
 ```
 
 Expected flow:
@@ -71,6 +74,7 @@ pytest cke/tests -q
 
 ```bash
 python -m cke.experiments.run_experiment
+python -m cke.experiments.run_experiment --extractor llm
 ```
 
 Optional dataset input:

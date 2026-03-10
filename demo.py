@@ -1,19 +1,34 @@
 """CKE demo script."""
 
-from cke.extractor.extractor import RuleBasedExtractor
+from __future__ import annotations
+
+import argparse
+
+from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
+from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.retrieval.retriever import GraphRetriever
 
 
+def _build_extractor(name: str) -> BaseExtractor:
+    if name == "llm":
+        return LLMExtractor()
+    return RuleBasedExtractor()
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
+    args = parser.parse_args()
+
     corpus = [
         "Redis supports PubSub messaging.",
         "PubSub implemented_via RESP.",
         "Redis uses RESP protocol.",
     ]
 
-    extractor = RuleBasedExtractor()
+    extractor = _build_extractor(args.extractor)
     graph = KnowledgeGraphEngine()
     for doc in corpus:
         graph.add_statements(extractor.extract(doc))
@@ -25,6 +40,7 @@ def main() -> None:
     context = retriever.retrieve(query, max_depth=3)
     answer = reasoner.answer(query, context)
 
+    print(f"Extractor: {args.extractor}")
     print(f'Query:\n"{query}"\n')
     print("Graph reasoning:")
     print(reasoner.format_reasoning_path(context))
