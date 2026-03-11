@@ -1,7 +1,9 @@
 networkx
+pydantic
 sentence-transformers
 faiss-cpu
+tqdm
 numpy
-pytest
-pydantic
-fastapi
+scikit-learn
+openai
+python-dotenv
