@@ -62,7 +62,9 @@ class HotpotDataset(DatasetLoader):
             answer = item.get("answer")
             normalized = {
                 "id": item_id,
-                "question": self._clean_text(str(question)) if question is not None else None,
+                "question": (
+                    self._clean_text(str(question)) if question is not None else None
+                ),
                 "answer": self._clean_text(str(answer)) if answer is not None else None,
                 "documents": self._context_to_documents(item.get("context", [])),
                 "supporting_facts": item.get("supporting_facts", []),
