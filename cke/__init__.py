@@ -1,5 +1,5 @@
 """Convergent Knowledge Engine package."""
 
-__all__ = [
-    "models",
-]
+from .version import __version__
+
+__all__ = ["__version__"]
