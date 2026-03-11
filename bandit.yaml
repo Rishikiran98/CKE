@@ -1,0 +1,4 @@
+exclude_dirs:
+  - cke/tests
+skips:
+  - B101
