@@ -1,0 +1,14 @@
+project:
+  name: cke
+  python_version: "3.11"
+
+architecture:
+  ingestion: cke.extractor
+  memory: cke.graph
+  retrieval: cke.retrieval
+  reasoning: cke.reasoning
+
+runtime:
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  faiss_index_factory: Flat
+  top_k: 5
