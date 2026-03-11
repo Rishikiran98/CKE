@@ -43,7 +43,9 @@ class MSMARCOCorpus:
         self.df = self._load()
 
     def _load(self) -> pd.DataFrame:
-        df = pd.read_csv(self.tsv_path, sep="\t", header=None, dtype=str, keep_default_na=False)
+        df = pd.read_csv(
+            self.tsv_path, sep="\t", header=None, dtype=str, keep_default_na=False
+        )
 
         # Common MS MARCO full-doc layout has 4 columns: doc_id, url, title, body.
         # Fall back gracefully if column count differs.
@@ -66,7 +68,9 @@ class MSMARCOCorpus:
         df["doc_id"] = df["doc_id"].astype(str)
         df["title"] = df["title"].fillna("")
         df["body"] = df["body"].fillna("")
-        df["text"] = (df["title"].str.strip() + "\n" + df["body"].str.strip()).str.strip()
+        df["text"] = (
+            df["title"].str.strip() + "\n" + df["body"].str.strip()
+        ).str.strip()
 
         # Normalize title for fuzzy title-based relevance matching.
         df["title_norm"] = df["title"].str.lower().str.strip()
@@ -112,7 +116,9 @@ class DenseRetriever:
         index.add(embeddings)
         self.index = index
 
-    def search(self, queries: list[str], top_k: int = 10, batch_size: int = 64) -> tuple[np.ndarray, np.ndarray]:
+    def search(
+        self, queries: list[str], top_k: int = 10, batch_size: int = 64
+    ) -> tuple[np.ndarray, np.ndarray]:
         if self.index is None:
             raise RuntimeError("Index has not been built. Call build_index first.")
 
@@ -177,7 +183,9 @@ def _extract_hotpot_relevance(item: dict[str, Any]) -> set[str]:
     return hints
 
 
-def load_hotpot_queries(path: Path, max_queries: int | None = None) -> list[QueryExample]:
+def load_hotpot_queries(
+    path: Path, max_queries: int | None = None
+) -> list[QueryExample]:
     data = _read_json(path)
     if not isinstance(data, list):
         raise ValueError("HotpotQA file should be a JSON list.")
@@ -191,14 +199,18 @@ def load_hotpot_queries(path: Path, max_queries: int | None = None) -> list[Quer
             continue
         hints = _extract_hotpot_relevance(item)
         qid = str(item.get("_id", f"hotpot-{i}"))
-        queries.append(QueryExample(query_id=qid, query_text=question, relevant_hints=hints))
+        queries.append(
+            QueryExample(query_id=qid, query_text=question, relevant_hints=hints)
+        )
         if max_queries is not None and len(queries) >= max_queries:
             break
 
     return queries
 
 
-def load_locomo_queries(path: Path, max_queries: int | None = None) -> list[QueryExample]:
+def load_locomo_queries(
+    path: Path, max_queries: int | None = None
+) -> list[QueryExample]:
     if path.suffix.lower() == ".jsonl":
         data: Iterable[Any] = _read_jsonl(path)
     else:
@@ -233,7 +245,9 @@ def load_locomo_queries(path: Path, max_queries: int | None = None) -> list[Quer
             hints.update(_extract_string_list(item.get(field)))
 
         qid = str(item.get("id", item.get("qid", f"locomo-{i}")))
-        queries.append(QueryExample(query_id=qid, query_text=query_text, relevant_hints=hints))
+        queries.append(
+            QueryExample(query_id=qid, query_text=query_text, relevant_hints=hints)
+        )
         if max_queries is not None and len(queries) >= max_queries:
             break
 
@@ -266,7 +280,9 @@ def evaluate_recall_at_k(
             if doc_row_idx < 0:
                 continue
             row = corpus_df.iloc[int(doc_row_idx)]
-            if _is_relevant(str(row["doc_id"]), str(row["title_norm"]), query.relevant_hints):
+            if _is_relevant(
+                str(row["doc_id"]), str(row["title_norm"]), query.relevant_hints
+            ):
                 found = True
                 break
         if found:
@@ -317,16 +333,38 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="MS MARCO + HotpotQA + LoCoMo retrieval evaluator")
-    parser.add_argument("--msmarco-path", type=Path, required=True, help="Path to MS MARCO fulldocs.tsv")
-    parser.add_argument("--hotpot-path", type=Path, required=True, help="Path to HotpotQA distractor train JSON")
-    parser.add_argument("--locomo-path", type=Path, required=True, help="Path to LoCoMo JSON/JSONL")
-    parser.add_argument("--model-name", type=str, default="sentence-transformers/all-MiniLM-L6-v2")
+    parser = argparse.ArgumentParser(
+        description="MS MARCO + HotpotQA + LoCoMo retrieval evaluator"
+    )
+    parser.add_argument(
+        "--msmarco-path", type=Path, required=True, help="Path to MS MARCO fulldocs.tsv"
+    )
+    parser.add_argument(
+        "--hotpot-path",
+        type=Path,
+        required=True,
+        help="Path to HotpotQA distractor train JSON",
+    )
+    parser.add_argument(
+        "--locomo-path", type=Path, required=True, help="Path to LoCoMo JSON/JSONL"
+    )
+    parser.add_argument(
+        "--model-name", type=str, default="sentence-transformers/all-MiniLM-L6-v2"
+    )
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--max-docs", type=int, default=None, help="Optional cap for indexed MS MARCO docs")
-    parser.add_argument("--max-hotpot", type=int, default=None, help="Optional cap for HotpotQA queries")
-    parser.add_argument("--max-locomo", type=int, default=None, help="Optional cap for LoCoMo queries")
+    parser.add_argument(
+        "--max-docs",
+        type=int,
+        default=None,
+        help="Optional cap for indexed MS MARCO docs",
+    )
+    parser.add_argument(
+        "--max-hotpot", type=int, default=None, help="Optional cap for HotpotQA queries"
+    )
+    parser.add_argument(
+        "--max-locomo", type=int, default=None, help="Optional cap for LoCoMo queries"
+    )
     return parser.parse_args()
 
 
