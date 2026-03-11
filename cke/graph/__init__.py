@@ -1,3 +1,8 @@
+"""Graph memory interfaces for CKE."""
+
+from cke.graph.assertion_validator import AssertionValidator
+
+__all__ = ["AssertionValidator"]
 """Graph memory interfaces and contextual assertion workflows for CKE."""
 
 from cke.graph.assertion import Assertion, Entity, Evidence
