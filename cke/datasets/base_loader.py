@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import random
 from abc import ABC, abstractmethod
 from typing import Any
-import random
+
+
+_SECURE_RANDOM = random.SystemRandom()
 
 
 class DatasetLoader(ABC):
@@ -27,7 +30,7 @@ class DatasetLoader(ABC):
             return []
         if n >= len(self.items):
             return list(self.items)
-        return random.sample(self.items, n)
+        return _SECURE_RANDOM.sample(self.items, n)
 
     def get_item(self, index: int) -> dict[str, Any]:
         """Return the normalized item at ``index``."""
