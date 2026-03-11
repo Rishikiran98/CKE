@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pickle
+import json
 from pathlib import Path
 from typing import Any
 
@@ -93,22 +93,30 @@ class FaissIndex:
         ]
 
     def save(self, path: str | Path) -> None:
-        """Persist index and id->document mapping."""
+        """Persist index and id->document mapping as JSON."""
+        if self._vectors is None and self.index is not None and faiss is not None:
+            self._vectors = np.asarray(self.index.reconstruct_n(0, self.index.ntotal))
+
         payload = {
             "dimension": self.dimension,
             "documents": self.documents,
-            "vectors": self._vectors,
+            "vectors": self._vectors.tolist() if self._vectors is not None else None,
         }
-        with Path(path).open("wb") as handle:
-            pickle.dump(payload, handle)
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload), encoding="utf-8")
 
     def load(self, path: str | Path) -> None:
-        """Restore index and mapping from disk."""
-        with Path(path).open("rb") as handle:
-            payload = pickle.load(handle)
+        """Restore index and mapping from a JSON file."""
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
         self.dimension = payload.get("dimension")
         self.documents = payload.get("documents", [])
-        self._vectors = payload.get("vectors")
+
+        vectors = payload.get("vectors")
+        self._vectors = (
+            None if vectors is None else np.asarray(vectors, dtype=np.float32)
+        )
+
         self.index = None
         if (
             faiss is not None
