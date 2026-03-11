@@ -33,7 +33,9 @@ def top_trusted_assertions(
     graph: KnowledgeGraphEngine, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Return top-K assertions sorted by trust/confidence."""
-    statements = sorted(_all_statements(graph), key=lambda st: float(st.confidence), reverse=True)
+    statements = sorted(
+        _all_statements(graph), key=lambda st: float(st.confidence), reverse=True
+    )
     return [
         {
             "subject": st.subject,

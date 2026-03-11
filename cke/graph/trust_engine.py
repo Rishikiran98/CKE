@@ -30,7 +30,9 @@ class TrustEngine:
 
     def compute_trust(self, assertion: Assertion, now: float | None = None) -> float:
         """Compute trust score with source/evidence weighting and time decay."""
-        source_weight = self.source_weights.get(assertion.source, self.source_weights["unknown"])
+        source_weight = self.source_weights.get(
+            assertion.source, self.source_weights["unknown"]
+        )
         evidence_term = math.log(max(assertion.evidence_count, 0) + 1.0)
         extractor_conf = max(0.0, min(assertion.extractor_confidence, 1.0))
 

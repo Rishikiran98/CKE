@@ -19,7 +19,9 @@ class ConflictEngine:
             return True
         return any(a[key] == b[key] for key in shared)
 
-    def assertions_conflict(self, assertion_a: Assertion, assertion_b: Assertion) -> bool:
+    def assertions_conflict(
+        self, assertion_a: Assertion, assertion_b: Assertion
+    ) -> bool:
         return (
             assertion_a.subject == assertion_b.subject
             and assertion_a.relation == assertion_b.relation
