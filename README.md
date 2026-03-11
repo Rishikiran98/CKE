@@ -5,6 +5,16 @@ Convergent Knowledge Engine (CKE) is a research infrastructure project for graph
 ## Architecture
 
 CKE is organized with clear separation between core system stages:
+
+- **Ingestion** (`extractor`): semantic extraction pipeline.
+- **Memory** (`graph`): contextual knowledge graph storage and memory.
+- **Retrieval** (`retrieval`): sparse retrieval and baseline RAG components.
+- **Reasoning** (`reasoning`): reasoning engine over retrieved evidence.
+
+Additional modules support datasets, routing, evaluation, experiments, and shared utilities.
+
+## Repository Structure
+
 CKE is a Python 3.11 research framework for graph-based reasoning with a modular architecture.
 
 ## Architecture
