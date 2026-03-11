@@ -35,8 +35,7 @@ class GraphUpdatePipeline:
         return self.resolver.resolve_entity(name)
 
     def update_graph(self, assertions: list[Assertion]) -> list[Assertion]:
-        """Update graph by resolving entities, deduplicating, and storing trust/conflicts.
-        """
+        """Update graph by resolving entities, deduplicating, and storing trust/conflicts."""
         resolved: list[Assertion] = []
         for assertion in assertions:
             assertion.subject = self._resolve_entity(assertion.subject)
