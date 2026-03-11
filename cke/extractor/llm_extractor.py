@@ -1,103 +1,117 @@
-"""LLM-backed semantic extractor with rule-based fallback.
-
-This module is intentionally lightweight for local prototype usage:
-- If LLM credentials/config are available, it calls a compatible chat endpoint.
-- If unavailable or the call fails, it falls back to the rule extractor.
-"""
+"""LLM-backed assertion extractor with retry and JSON validation."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
-from typing import Any, List
-from urllib import request
+from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
 
+try:
+    from openai import OpenAI
+except Exception:  # pragma: no cover
+    OpenAI = None
+
+
+class AssertionPayload(BaseModel):
+    subject: str
+    relation: str
+    object: str
+    confidence: float = 1.0
+
 
 @dataclass(slots=True)
 class LLMConfig:
-    """Configuration for a generic OpenAI-compatible chat endpoint."""
-
-    endpoint: str = "https://api.openai.com/v1/chat/completions"
     model: str = "gpt-4o-mini"
     api_key: str | None = None
-    timeout_s: float = 20.0
+    max_retries: int = 2
+    retry_delay_s: float = 0.3
 
 
 class LLMExtractor(BaseExtractor):
-    """Extract triples via LLM with rule-based fallback."""
+    """Extract structured assertions from text using an LLM."""
 
     def __init__(
-        self,
-        config: LLMConfig | None = None,
-        fallback: BaseExtractor | None = None,
+        self, config: LLMConfig | None = None, fallback: BaseExtractor | None = None
     ) -> None:
-        self.config = config or LLMConfig(
-            endpoint=os.getenv(
-                "CKE_LLM_ENDPOINT",
-                "https://api.openai.com/v1/chat/completions",
-            ),
-            model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("CKE_LLM_API_KEY"),
-        )
+        self.config = config or LLMConfig(api_key=os.getenv("CKE_LLM_API_KEY"))
         self.fallback = fallback or RuleBasedExtractor()
+        self.client = (
+            OpenAI(api_key=self.config.api_key)
+            if (OpenAI and self.config.api_key)
+            else None
+        )
 
-    def extract(self, text: str) -> List[Statement]:
-        if not self.config.api_key:
+    def extract(self, text: str) -> list[Statement]:
+        if self.client is None:
             return self.fallback.extract(text)
 
-        try:
-            response_payload = self._call_llm(text)
-            statements = self._parse_response(response_payload)
-            return statements or self.fallback.extract(text)
-        except Exception:
+        last_error: Exception | None = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                payload = self._call_llm(text)
+                statements = self._parse_response(payload)
+                return statements or self.fallback.extract(text)
+            except Exception as exc:  # pragma: no cover - network/runtime variability
+                last_error = exc
+                if attempt < self.config.max_retries:
+                    time.sleep(self.config.retry_delay_s)
+        if last_error:
             return self.fallback.extract(text)
+        return []
 
     def _call_llm(self, text: str) -> dict[str, Any]:
+        if self.client is None:
+            raise RuntimeError("LLM client is not configured.")
+
         prompt = (
-            "Extract subject-relation-object triples from the input text. "
-            "Return ONLY JSON with this schema: "
-            '{"triples":[{"subject":"...","relation":"...","object":"..."}]}. '
-            "Use snake_case relations where possible."
+            "Extract factual assertions as JSON array with keys "
+            "subject, relation, object, confidence. Return only JSON."
         )
-        body = {
-            "model": self.config.model,
-            "messages": [
+        completion = self.client.chat.completions.create(
+            model=self.config.model,
+            temperature=0,
+            messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": text},
             ],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-        }
-        payload = json.dumps(body).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.config.api_key}",
-        }
-        req = request.Request(
-            self.config.endpoint, data=payload, headers=headers, method="POST"
         )
-        with request.urlopen(req, timeout=self.config.timeout_s) as resp:  # nosec B310
-            raw = resp.read().decode("utf-8")
-        return json.loads(raw)
+        content = completion.choices[0].message.content or "[]"
+        return {"choices": [{"message": {"content": content}}]}
 
-    def _parse_response(self, payload: dict[str, Any]) -> List[Statement]:
-        # OpenAI-compatible response payload
+    def _parse_response(self, payload: dict[str, Any]) -> list[Statement]:
         content = payload["choices"][0]["message"]["content"]
         parsed = json.loads(content)
-        triples = parsed.get("triples", [])
+        if isinstance(parsed, dict) and "triples" in parsed:
+            parsed = parsed["triples"]
+        if not isinstance(parsed, list):
+            raise ValueError("LLM response must be a list of assertions.")
 
         statements: list[Statement] = []
-        for triple in triples:
-            subject = self._clean_token(str(triple.get("subject", "")))
-            relation = self._clean_relation(str(triple.get("relation", "")))
-            object_ = self._clean_token(str(triple.get("object", "")))
-            if subject and relation and object_:
-                statements.append(Statement(subject, relation, object_))
+        for item in parsed:
+            try:
+                assertion = AssertionPayload(**item)
+            except ValidationError:
+                continue
+            subject = self._clean_token(assertion.subject)
+            relation = self._clean_relation(assertion.relation)
+            obj = self._clean_token(assertion.object)
+            if subject and relation and obj:
+                statements.append(
+                    Statement(
+                        subject=subject,
+                        relation=relation,
+                        object=obj,
+                        confidence=float(assertion.confidence),
+                    )
+                )
         return statements
 
     @staticmethod

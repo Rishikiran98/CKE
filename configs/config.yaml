@@ -1,0 +1,14 @@
+python:
+  version: "3.11"
+
+architecture:
+  ingestion: extractor
+  memory: graph
+  retrieval: retrieval
+  reasoning: reasoning
+
+logging:
+  level: INFO
+
+experiments:
+  dataset: hotpotqa
