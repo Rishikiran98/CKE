@@ -8,7 +8,8 @@ This script:
 5. Retrieves top-k MS MARCO documents for each query.
 6. Evaluates retrieval with Recall@k.
 
-The implementation is designed to be robust to slight schema differences in dataset files.
+The implementation is designed to be robust to slight schema differences
+in dataset files.
 """
 
 from __future__ import annotations
