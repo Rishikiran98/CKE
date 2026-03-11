@@ -11,6 +11,8 @@ __all__ = [
     "HotpotDataset",
     "LoCoMoDataset",
     "MSMarcoDocumentDataset",
+    "WikiMultiHopDataset",
+    "flatten_contexts",
     "DATASET_REGISTRY",
     "load_dataset",
 ]
