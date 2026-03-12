@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from heapq import nlargest
+from itertools import count
 
 from cke.graph.entity_resolver import EntityResolver
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -34,22 +35,27 @@ class GraphRetriever:
         seeds = [
             self.entity_resolver.resolve(name) for name in query_plan.seed_entities
         ]
-        if mode == "beam":
-            paths = self._beam_search(
+        intent = (query_plan.intent or "").lower()
+
+        if intent == "definition":
+            scored_paths = self._neighborhood_mode(
+                seeds=seeds,
+                max_results=query_plan.max_results,
+            )
+        elif intent == "comparison":
+            scored_paths = self._bridge_mode(
                 seeds=seeds,
                 max_depth=query_plan.max_depth,
-                beam_width=beam_width,
-                max_nodes=max_nodes,
             )
         else:
-            paths = self._bfs_traversal(
+            scored_paths = self._path_mode(
                 seeds=seeds,
                 max_depth=query_plan.max_depth,
+                mode=mode,
                 max_nodes=max_nodes,
+                beam_width=beam_width,
             )
 
-        scored_paths = [(path, self._score_path(path)) for path in paths if path]
-        scored_paths.sort(key=lambda item: item[1], reverse=True)
         evidence = self._select_evidence(
             scored_paths, max_results=query_plan.max_results
         )
@@ -59,15 +65,7 @@ class GraphRetriever:
             "paths": [
                 {
                     "score": score,
-                    "assertions": [
-                        {
-                            "subject": st.subject,
-                            "relation": st.relation,
-                            "object": st.object,
-                            "trust_score": st.confidence,
-                        }
-                        for st in path
-                    ],
+                    "assertions": [self._statement_payload(st) for st in path],
                 }
                 for path, score in scored_paths
             ],
@@ -75,6 +73,139 @@ class GraphRetriever:
                 {edge["subject"] for edge in evidence}
                 | {edge["object"] for edge in evidence}
             ),
+        }
+
+    def _path_mode(
+        self,
+        seeds: list[str],
+        max_depth: int,
+        mode: str,
+        max_nodes: int,
+        beam_width: int,
+    ) -> list[tuple[list[Statement], float]]:
+        if mode == "beam":
+            paths = self._beam_search(
+                seeds=seeds,
+                max_depth=max_depth,
+                beam_width=beam_width,
+                max_nodes=max_nodes,
+            )
+        else:
+            paths = self._bfs_traversal(
+                seeds=seeds,
+                max_depth=max_depth,
+                max_nodes=max_nodes,
+            )
+        scored_paths = [(path, self._score_path(path)) for path in paths if path]
+        scored_paths.sort(key=lambda item: item[1], reverse=True)
+        return scored_paths
+
+    def _neighborhood_mode(
+        self,
+        seeds: list[str],
+        max_results: int,
+    ) -> list[tuple[list[Statement], float]]:
+        scored: list[tuple[list[Statement], float]] = []
+        for seed in seeds:
+            for edge in self.graph_engine.get_neighbors(seed):
+                scored.append(([edge], self._score_neighbor(edge)))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return scored[: max(1, min(max_results, 12))]
+
+    def _bridge_mode(
+        self,
+        seeds: list[str],
+        max_depth: int,
+    ) -> list[tuple[list[Statement], float]]:
+        if len(seeds) < 2:
+            return []
+
+        left = seeds[0]
+        right = seeds[1]
+
+        left_paths = self._paths_from_seed(left, max_depth=max_depth)
+        right_paths = self._paths_from_seed(right, max_depth=max_depth)
+
+        right_by_node: dict[str, list[list[Statement]]] = {}
+        for path in right_paths:
+            bridge_node = path[-1].object
+            right_by_node.setdefault(bridge_node, []).append(path)
+
+        candidates: list[tuple[list[Statement], float]] = []
+        for left_path in left_paths:
+            bridge_node = left_path[-1].object
+            for right_path in right_by_node.get(bridge_node, []):
+                candidate = left_path + self._invert_path(right_path)
+                candidates.append((candidate, self._score_bridge(candidate)))
+
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        return candidates
+
+    def _paths_from_seed(self, seed: str, max_depth: int) -> list[list[Statement]]:
+        queue = deque([(seed, [], 0)])
+        paths: list[list[Statement]] = []
+        visited: set[tuple[str, int]] = set()
+
+        while queue:
+            node, path, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            marker = (node, depth)
+            if marker in visited:
+                continue
+            visited.add(marker)
+
+            for edge in self.graph_engine.get_neighbors(node):
+                next_path = path + [edge]
+                paths.append(next_path)
+                queue.append((edge.object, next_path, depth + 1))
+
+        return paths
+
+    def _invert_path(self, path: list[Statement]) -> list[Statement]:
+        return [
+            Statement(
+                subject=edge.object,
+                relation=f"inverse_{edge.relation}",
+                object=edge.subject,
+                context=edge.context,
+                confidence=edge.confidence,
+                source=edge.source,
+                timestamp=edge.timestamp,
+            )
+            for edge in reversed(path)
+        ]
+
+    def _score_neighbor(self, edge: Statement) -> float:
+        relation_relevance = (
+            1.0 if edge.relation not in {"related_to", "inverse_related_to"} else 0.7
+        )
+        novelty = 1.0
+        return float(edge.confidence) * relation_relevance * novelty
+
+    def _score_bridge(self, path: list[Statement]) -> float:
+        if not path:
+            return 0.0
+        path_trust = sum(float(edge.confidence) for edge in path) / len(path)
+        bridge_nodes = {edge.object for edge in path[:-1]} & {
+            edge.subject for edge in path[1:]
+        }
+        novelty = 1.0 / max(1, len(bridge_nodes))
+        return path_trust * novelty
+
+    def _statement_payload(
+        self, st: Statement, index: int | None = None
+    ) -> dict[str, str | float]:
+        statement_id = (
+            "::".join(st.key()) if index is None else f"{index}:{'::'.join(st.key())}"
+        )
+        return {
+            "id": statement_id,
+            "subject": st.subject,
+            "relation": st.relation,
+            "object": st.object,
+            "trust": float(st.confidence),
+            "trust_score": float(st.confidence),
         }
 
     def _bfs_traversal(
@@ -152,7 +283,8 @@ class GraphRetriever:
         scored_paths: list[tuple[list[Statement], float]],
         max_results: int,
     ) -> list[dict]:
-        min_results = min(8, max_results)
+        cap = min(max_results, 12)
+        min_results = min(8, cap)
         best_by_key: dict[tuple[str, str, str], tuple[float, Statement]] = {}
 
         for path, score in scored_paths:
@@ -166,8 +298,9 @@ class GraphRetriever:
 
         selected: list[dict] = []
         covered_entities: set[str] = set()
+        id_counter = count(1)
         for _, edge in ranked:
-            if len(selected) >= max_results:
+            if len(selected) >= cap:
                 break
             has_new = (
                 edge.subject not in covered_entities
@@ -175,14 +308,7 @@ class GraphRetriever:
             )
             if not has_new and len(selected) >= min_results:
                 continue
-            selected.append(
-                {
-                    "subject": edge.subject,
-                    "relation": edge.relation,
-                    "object": edge.object,
-                    "trust_score": float(edge.confidence),
-                }
-            )
+            selected.append(self._statement_payload(edge, next(id_counter)))
             covered_entities.update([edge.subject, edge.object])
 
         return selected
