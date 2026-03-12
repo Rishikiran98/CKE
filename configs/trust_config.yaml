@@ -1,0 +1,5 @@
+w_src: 0.8
+w_freq: 0.6
+w_conf: 1.0
+tau: 31536000.0
+low_trust_threshold: 0.4

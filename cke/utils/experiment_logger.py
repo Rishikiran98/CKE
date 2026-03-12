@@ -26,6 +26,8 @@ class ExperimentLogger:
         latency: float,
         tokens: int,
         correct: bool,
+        retrieved_nodes: list[str] | None = None,
+        gold_nodes: list[str] | None = None,
     ) -> None:
         """Append one query-level experiment record."""
         self._logs.append(
@@ -36,6 +38,8 @@ class ExperimentLogger:
                 "latency": float(latency),
                 "tokens": int(tokens),
                 "correct": bool(correct),
+                "retrieved_nodes": list(retrieved_nodes or []),
+                "gold_nodes": list(gold_nodes or []),
             }
         )
 

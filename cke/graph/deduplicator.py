@@ -20,12 +20,19 @@ class AssertionDeduplicator:
         return json.dumps(qualifiers or {}, sort_keys=True, separators=(",", ":"))
 
     def assertion_hash(self, assertion: Assertion) -> str:
+        span_text = "||".join(
+            sorted(
+                (e.text or "")
+                for e in assertion.evidence
+                if getattr(e, "text", "")
+            )
+        )
         raw = "||".join(
             [
                 assertion.subject,
                 assertion.relation,
                 assertion.object,
-                self._qualifier_bucket(assertion.qualifiers),
+                span_text,
             ]
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()

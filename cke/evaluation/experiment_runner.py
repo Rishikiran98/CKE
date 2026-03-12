@@ -55,6 +55,8 @@ class ExperimentRunner:
             total_latency += latency
             total_tokens += tokens
 
+            retrieved_nodes = self._extract_nodes(retrieved)
+            gold_nodes = item.get("gold_nodes", [])
             self.logger.log_query(
                 question=question,
                 retrieved_items=retrieved,
@@ -62,6 +64,8 @@ class ExperimentRunner:
                 latency=latency,
                 tokens=tokens,
                 correct=em,
+                retrieved_nodes=retrieved_nodes,
+                gold_nodes=gold_nodes,
             )
 
         return {
@@ -71,6 +75,17 @@ class ExperimentRunner:
             "tokens": total_tokens / total,
             "token_usage": self.token_tracker.to_dict(),
         }
+
+
+    @staticmethod
+    def _extract_nodes(docs: list[dict[str, Any]]) -> list[str]:
+        nodes: set[str] = set()
+        for item in docs:
+            for key in ("subject", "object", "entity", "title"):
+                value = item.get(key)
+                if value:
+                    nodes.add(str(value))
+        return sorted(nodes)
 
     @staticmethod
     def _default_answer_generator(_question: str, docs: list[dict[str, Any]]) -> str:
