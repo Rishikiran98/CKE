@@ -1,4 +1,5 @@
-"""Query router responsible for query planning and adaptive routing."""
+"""Query router that creates graph retrieval plans."""
+
 from __future__ import annotations
 
 import re
@@ -13,12 +14,14 @@ from cke.router.query_plan import QueryPlan
 
 
 class QueryRouter:
+    """Build query plans by entity linking, intent detection, and domain rules."""
+
     def __init__(
         self,
         graph_engine: KnowledgeGraphEngine | None = None,
         domain_classifier: DomainClassifier | None = None,
         domain_registry: DomainRegistry | None = None,
-    ):
+    ) -> None:
         self.graph_engine = graph_engine
         self.entity_linker = EntityLinker(graph_engine)
         self.intent_classifier = IntentClassifier()
@@ -29,7 +32,8 @@ class QueryRouter:
         self,
         query: str,
         candidate_entities: Iterable[str] | None = None,
-    ):
+    ) -> list[str]:
+        """Extract entities using linker or fallback to candidate matching/regex."""
         linked = self.entity_linker.extract_entities(query)
         if linked:
             return linked
@@ -40,9 +44,11 @@ class QueryRouter:
             if matches:
                 return sorted(set(matches))
                 
+        # Fallback to TitleCase word detection
         return sorted(set(re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", query)))
 
-    def classify_domain(self, query: str):
+    def classify_domain(self, query: str) -> list[str]:
+        """Determine relevant knowledge domains based on keywords."""
         q = query.lower()
         domains = []
         
@@ -55,7 +61,13 @@ class QueryRouter:
             
         return domains or ["general"]
 
-    def route(self, query: str, max_depth=None, max_results=12):
+    def route(
+        self, 
+        query: str, 
+        max_depth: int | None = None, 
+        max_results: int = 12
+    ) -> QueryPlan:
+        """Create a QueryPlan containing entities, intent, and retrieval depth."""
         entities = self.entity_linker.extract_entities(query)
         intent = self.intent_classifier.classify(query)
         domains = self.classify_domain(query)
@@ -71,7 +83,8 @@ class QueryRouter:
             max_results=max_results,
         )
 
-    def routing_policy_for_query(self, query: str):
+    def routing_policy_for_query(self, query: str) -> dict:
+        """Adjust retrieval behavior based on the stability/state of the domain."""
         domain = self.domain_classifier.classify_entity(query)
         state = (
             self.domain_registry.get_domain_state(domain)

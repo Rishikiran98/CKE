@@ -9,6 +9,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    """Lazy-load the AssertionValidator to avoid circular imports or overhead."""
     if name == "AssertionValidator":
         from cke.graph.assertion_validator import AssertionValidator
         return AssertionValidator

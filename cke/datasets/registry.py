@@ -22,5 +22,6 @@ def load_dataset(name: str, path: str):
     if key not in DATASET_REGISTRY:
         available = ", ".join(sorted(DATASET_REGISTRY))
         raise ValueError(f"Unknown dataset '{name}'. Available: {available}")
+
     loader = DATASET_REGISTRY[key]()
     return loader.load(path)
