@@ -5,11 +5,14 @@ from __future__ import annotations
 from cke.datasets.hotpot_loader import HotpotDataset
 from cke.datasets.locomo_loader import LoCoMoDataset
 from cke.datasets.msmarco_loader import MSMarcoDocumentDataset
+from cke.datasets.wiki2_loader import WikiMultiHopDataset
 
 DATASET_REGISTRY = {
     "hotpotqa": HotpotDataset,
     "msmarco": MSMarcoDocumentDataset,
     "locomo": LoCoMoDataset,
+    "2wikimultihopqa": WikiMultiHopDataset,
+    "wiki2": WikiMultiHopDataset,
 }
 
 
