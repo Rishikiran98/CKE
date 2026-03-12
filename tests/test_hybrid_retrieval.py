@@ -2,7 +2,11 @@
 
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
-from cke.retrieval.hybrid_retrieval import DENSE_WEIGHT, GRAPH_WEIGHT, HybridRetrievalMerger
+from cke.retrieval.hybrid_retrieval import (
+    DENSE_WEIGHT,
+    GRAPH_WEIGHT,
+    HybridRetrievalMerger,
+)
 from cke.retrieval.rag_baseline import RAGRetriever
 from cke.retrieval.retrieval_router import RetrievalRouter
 from cke.retrieval.retriever import GraphRetriever
