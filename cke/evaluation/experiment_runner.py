@@ -8,6 +8,7 @@ from collections import Counter
 from typing import Any, Callable
 
 from cke.retrieval.rag_baseline import RAGRetriever
+from cke.observability.token_tracker import TokenTracker
 from cke.utils.experiment_logger import ExperimentLogger
 
 
@@ -19,10 +20,12 @@ class ExperimentRunner:
         retriever: RAGRetriever,
         logger: ExperimentLogger | None = None,
         answer_generator: Callable[[str, list[dict[str, Any]]], str] | None = None,
+        token_tracker: TokenTracker | None = None,
     ) -> None:
         self.retriever = retriever
         self.logger = logger or ExperimentLogger()
         self.answer_generator = answer_generator or self._default_answer_generator
+        self.token_tracker = token_tracker or TokenTracker()
 
     def run(self, dataset: list[dict[str, str]], top_k: int = 5) -> dict[str, float]:
         total = max(len(dataset), 1)
@@ -43,6 +46,9 @@ class ExperimentRunner:
             em = self._exact_match(answer, gold_answer)
             f1 = self._f1_score(answer, gold_answer)
             tokens = sum(len(str(doc.get("text", "")).split()) for doc in retrieved)
+            prompt_tokens = len(question.split())
+            completion_tokens = len(answer.split())
+            self.token_tracker.add_usage(prompt_tokens, completion_tokens)
 
             exact_matches += int(em)
             total_f1 += f1
@@ -63,6 +69,7 @@ class ExperimentRunner:
             "f1_score": total_f1 / total,
             "latency": total_latency / total,
             "tokens": total_tokens / total,
+            "token_usage": self.token_tracker.to_dict(),
         }
 
     @staticmethod
