@@ -74,7 +74,6 @@ class EvaluationMetrics:
             )
         return sum(per_path) / len(per_path) if per_path else 0.0
 
-
     @staticmethod
     def path_completeness(
         predicted_nodes: list[str],

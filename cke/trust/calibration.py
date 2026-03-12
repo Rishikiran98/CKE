@@ -64,9 +64,15 @@ class TrustCalibrator:
         contradiction_rate = self._contradiction_rate(assertions)
         evidence_agreement = self._evidence_agreement(assertions)
 
-        self.config.w_src = max(0.05, self.config.w_src * (1.0 - 0.4 * contradiction_rate))
-        self.config.w_freq = max(0.05, self.config.w_freq * (0.8 + 0.4 * evidence_agreement))
-        self.config.w_conf = max(0.05, self.config.w_conf * (0.8 + 0.4 * evidence_agreement))
+        self.config.w_src = max(
+            0.05, self.config.w_src * (1.0 - 0.4 * contradiction_rate)
+        )
+        self.config.w_freq = max(
+            0.05, self.config.w_freq * (0.8 + 0.4 * evidence_agreement)
+        )
+        self.config.w_conf = max(
+            0.05, self.config.w_conf * (0.8 + 0.4 * evidence_agreement)
+        )
         return self.to_dict()
 
     def to_dict(self) -> dict[str, float]:

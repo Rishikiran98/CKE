@@ -70,7 +70,9 @@ class TrustEngine:
             extractor_confidence=assertion.extractor_confidence,
         )
         now_ts = float(time.time()) if now is None else float(now)
-        trust = self.calibrator.apply_decay(trust_0, now=now_ts, observed_ts=assertion.timestamp)
+        trust = self.calibrator.apply_decay(
+            trust_0, now=now_ts, observed_ts=assertion.timestamp
+        )
         assertion.trust_score = trust
         return trust
 

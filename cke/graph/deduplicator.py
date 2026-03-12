@@ -21,11 +21,7 @@ class AssertionDeduplicator:
 
     def assertion_hash(self, assertion: Assertion) -> str:
         span_text = "||".join(
-            sorted(
-                (e.text or "")
-                for e in assertion.evidence
-                if getattr(e, "text", "")
-            )
+            sorted((e.text or "") for e in assertion.evidence if getattr(e, "text", ""))
         )
         raw = "||".join(
             [

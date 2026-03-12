@@ -76,7 +76,6 @@ class ExperimentRunner:
             "token_usage": self.token_tracker.to_dict(),
         }
 
-
     @staticmethod
     def _extract_nodes(docs: list[dict[str, Any]]) -> list[str]:
         nodes: set[str] = set()

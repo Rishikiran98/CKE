@@ -21,7 +21,7 @@ def test_llm_extractor_validates_span_offsets() -> None:
                         '{"subject":"Redis","relation":"uses","object":"RESP",'
                         '"confidence":0.9,'
                         '"evidence":[{"chunk_id":"chunk-1","span_start":'
-                        f"{start},\"span_end\":{end},"
+                        f'{start},"span_end":{end},'
                         '"text":"Redis uses RESP",'
                         '"extractor_confidence":0.93,"source_weight":0.8}]}'
                         "]"
