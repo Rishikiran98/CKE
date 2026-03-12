@@ -17,19 +17,29 @@ class QueryResponse:
 class CKEClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"Invalid base_url: {base_url}. Must start with http:// or https://"
+            )
 
     def _post(self, path: str, payload: dict) -> dict:
+        url = f"{self.base_url}{path}"
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"URL scheme not allowed: {url}")
         req = request.Request(
-            url=f"{self.base_url}{path}",
+            url=url,
             method="POST",
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
-        with request.urlopen(req) as resp:  # noqa: S310 - user-provided URL by design
+        with request.urlopen(req) as resp:  # nosec B310
             return json.loads(resp.read().decode("utf-8"))
 
     def _get(self, path: str) -> dict:
-        with request.urlopen(f"{self.base_url}{path}") as resp:  # noqa: S310
+        url = f"{self.base_url}{path}"
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"URL scheme not allowed: {url}")
+        with request.urlopen(url) as resp:  # nosec B310
             return json.loads(resp.read().decode("utf-8"))
 
     def query(self, question: str, max_depth: int = 3) -> QueryResponse:

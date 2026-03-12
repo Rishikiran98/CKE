@@ -23,9 +23,13 @@ from cke.retrieval.rag_baseline import RAGRetriever
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run CKE benchmark")
-    parser.add_argument("--dataset", required=True, choices=sorted(DATASET_REGISTRY.keys()))
+    parser.add_argument(
+        "--dataset", required=True, choices=sorted(DATASET_REGISTRY.keys())
+    )
     parser.add_argument("--dataset-path", required=True)
-    parser.add_argument("--mode", default="full", choices=["full", "rag_only", "graph_only"])
+    parser.add_argument(
+        "--mode", default="full", choices=["full", "rag_only", "graph_only"]
+    )
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--output-dir", default="results")
     return parser.parse_args()
@@ -42,7 +46,12 @@ def main() -> None:
     docs = []
     for item in data:
         for i, doc in enumerate(item.get("documents", [])):
-            docs.append({"doc_id": f"{item.get('id', 'sample')}_{i}", "text": doc.get("text", "")})
+            docs.append(
+                {
+                    "doc_id": f"{item.get('id', 'sample')}_{i}",
+                    "text": doc.get("text", ""),
+                }
+            )
 
     retriever = RAGRetriever()
     if docs:
@@ -50,7 +59,10 @@ def main() -> None:
 
     token_tracker = TokenTracker()
     runner = ExperimentRunner(retriever=retriever, token_tracker=token_tracker)
-    dataset_rows = [{"question": row.get("question", ""), "answer": row.get("answer", "")} for row in data]
+    dataset_rows = [
+        {"question": row.get("question", ""), "answer": row.get("answer", "")}
+        for row in data
+    ]
     metrics = runner.run(dataset_rows, top_k=5)
 
     def evaluator(item, _variant):
@@ -68,9 +80,15 @@ def main() -> None:
     monitor = SystemMonitor()
     system_metrics = monitor.snapshot()
 
-    (output_dir / f"{args.dataset}_metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    (output_dir / "ablation.json").write_text(json.dumps(ablation, indent=2), encoding="utf-8")
-    (output_dir / "system_metrics.json").write_text(json.dumps(system_metrics, indent=2), encoding="utf-8")
+    (output_dir / f"{args.dataset}_metrics.json").write_text(
+        json.dumps(metrics, indent=2), encoding="utf-8"
+    )
+    (output_dir / "ablation.json").write_text(
+        json.dumps(ablation, indent=2), encoding="utf-8"
+    )
+    (output_dir / "system_metrics.json").write_text(
+        json.dumps(system_metrics, indent=2), encoding="utf-8"
+    )
 
     ReportGenerator().generate(
         output_path=output_dir / "markdown_report.md",

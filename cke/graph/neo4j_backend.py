@@ -82,7 +82,9 @@ class Neo4jBackend:
     def get_neighbors(self, entity: str) -> list[Statement]:
         return self.query_neighbors(entity)
 
-    def multi_hop_search(self, source: str, target: str, max_depth: int = 3) -> list[list[Statement]]:
+    def multi_hop_search(
+        self, source: str, target: str, max_depth: int = 3
+    ) -> list[list[Statement]]:
         with self.driver.session() as session:
             rows = session.run(
                 """
@@ -116,7 +118,9 @@ class Neo4jBackend:
                 paths.append(path)
             return paths
 
-    def find_paths(self, entity_a: str, entity_b: str, cutoff: int = 3) -> list[list[Statement]]:
+    def find_paths(
+        self, entity_a: str, entity_b: str, cutoff: int = 3
+    ) -> list[list[Statement]]:
         return self.multi_hop_search(entity_a, entity_b, max_depth=cutoff)
 
     def all_entities(self) -> list[str]:

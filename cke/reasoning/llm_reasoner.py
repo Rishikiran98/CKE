@@ -117,6 +117,8 @@ class LLMReasoner:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
         }
+        if not self.config.endpoint.startswith(("http://", "https://")):
+            raise ValueError(f"Invalid endpoint scheme: {self.config.endpoint}")
         req = request.Request(
             self.config.endpoint, data=payload, headers=headers, method="POST"
         )

@@ -280,7 +280,9 @@ class KnowledgeGraphEngine:
         return sorted(self._nodes)
 
 
-def GraphEngine(type: str = "memory", **kwargs: Any) -> KnowledgeGraphEngine:  # noqa: A002
+def GraphEngine(
+    type: str = "memory", **kwargs: Any
+) -> KnowledgeGraphEngine:  # noqa: A002
     """Factory for memory or neo4j graph engines."""
     if type == "memory":
         return KnowledgeGraphEngine(db_path=kwargs.get("db_path"))
@@ -288,7 +290,8 @@ def GraphEngine(type: str = "memory", **kwargs: Any) -> KnowledgeGraphEngine:  #
         from cke.graph.neo4j_backend import Neo4jBackend  # noqa: PLC0415
 
         backend = Neo4jBackend(
-            uri=kwargs.get("uri") or os.getenv("CKE_NEO4J_URI", "bolt://localhost:7687"),
+            uri=kwargs.get("uri")
+            or os.getenv("CKE_NEO4J_URI", "bolt://localhost:7687"),
             user=kwargs.get("user") or os.getenv("CKE_NEO4J_USER", "neo4j"),
             password=kwargs.get("password") or os.getenv("CKE_NEO4J_PASSWORD", "neo4j"),
         )

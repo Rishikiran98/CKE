@@ -23,7 +23,9 @@ class TokenTracker:
     @property
     def cost_estimate(self) -> float:
         prompt_cost = (self.tokens_prompt / 1000.0) * self.cost_per_1k_prompt
-        completion_cost = (self.tokens_completion / 1000.0) * self.cost_per_1k_completion
+        completion_cost = (
+            self.tokens_completion / 1000.0
+        ) * self.cost_per_1k_completion
         return prompt_cost + completion_cost
 
     def to_dict(self) -> dict[str, float | int]:

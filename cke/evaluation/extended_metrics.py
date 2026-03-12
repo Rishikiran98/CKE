@@ -34,7 +34,9 @@ class EvaluationMetrics:
         return 2 * precision * recall / (precision + recall)
 
     @staticmethod
-    def evidence_recall(predicted_evidence: list[str], gold_evidence: list[str]) -> float:
+    def evidence_recall(
+        predicted_evidence: list[str], gold_evidence: list[str]
+    ) -> float:
         gold = set(gold_evidence)
         if not gold:
             return 0.0
@@ -64,7 +66,10 @@ class EvaluationMetrics:
             if not path:
                 continue
             per_path.append(
-                sum(float(edge.get("trust_score", edge.get("confidence", 1.0))) for edge in path)
+                sum(
+                    float(edge.get("trust_score", edge.get("confidence", 1.0)))
+                    for edge in path
+                )
                 / len(path)
             )
         return sum(per_path) / len(per_path) if per_path else 0.0

@@ -63,11 +63,15 @@ class GraphStore:
             for _, dst, attrs in self.graph.out_edges(entity, data=True)
         ]
 
-    def find_paths(self, source: str, target: str, max_depth: int = 3) -> list[list[dict[str, Any]]]:
+    def find_paths(
+        self, source: str, target: str, max_depth: int = 3
+    ) -> list[list[dict[str, Any]]]:
         if source not in self.graph or target not in self.graph:
             return []
         out: list[list[dict[str, Any]]] = []
-        for nodes in nx.all_simple_paths(self.graph, source=source, target=target, cutoff=max_depth):
+        for nodes in nx.all_simple_paths(
+            self.graph, source=source, target=target, cutoff=max_depth
+        ):
             path: list[dict[str, Any]] = []
             for i in range(len(nodes) - 1):
                 src, dst = nodes[i], nodes[i + 1]

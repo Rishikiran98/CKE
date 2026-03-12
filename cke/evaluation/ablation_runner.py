@@ -36,14 +36,24 @@ class AblationRunner:
     """Execute variant configurations and persist metrics.json."""
 
     DEFAULT_VARIANTS = [
-        AblationConfig(use_graph=False, use_trust=False, use_conflict=False, use_rag=True),
-        AblationConfig(use_graph=True, use_trust=False, use_conflict=False, use_rag=False),
-        AblationConfig(use_graph=True, use_trust=True, use_conflict=False, use_rag=False),
-        AblationConfig(use_graph=True, use_trust=True, use_conflict=True, use_rag=False),
+        AblationConfig(
+            use_graph=False, use_trust=False, use_conflict=False, use_rag=True
+        ),
+        AblationConfig(
+            use_graph=True, use_trust=False, use_conflict=False, use_rag=False
+        ),
+        AblationConfig(
+            use_graph=True, use_trust=True, use_conflict=False, use_rag=False
+        ),
+        AblationConfig(
+            use_graph=True, use_trust=True, use_conflict=True, use_rag=False
+        ),
         AblationConfig(use_graph=True, use_trust=True, use_conflict=True, use_rag=True),
     ]
 
-    def __init__(self, evaluator: Callable[[dict[str, Any], AblationConfig], dict[str, Any]]) -> None:
+    def __init__(
+        self, evaluator: Callable[[dict[str, Any], AblationConfig], dict[str, Any]]
+    ) -> None:
         self.evaluator = evaluator
 
     def run(
@@ -71,16 +81,40 @@ class AblationRunner:
 
     def _aggregate(self, rows: list[dict[str, Any]]) -> dict[str, float]:
         total = max(len(rows), 1)
-        em = sum(EvaluationMetrics.exact_match(r.get("prediction", ""), r.get("answer", "")) for r in rows) / total
-        f1 = sum(EvaluationMetrics.f1_score(r.get("prediction", ""), r.get("answer", "")) for r in rows) / total
-        evidence_recall = sum(
-            EvaluationMetrics.evidence_recall(r.get("predicted_evidence", []), r.get("gold_evidence", []))
-            for r in rows
-        ) / total
-        evidence_precision = sum(
-            EvaluationMetrics.evidence_precision(r.get("predicted_evidence", []), r.get("gold_evidence", []))
-            for r in rows
-        ) / total
+        em = (
+            sum(
+                EvaluationMetrics.exact_match(
+                    r.get("prediction", ""), r.get("answer", "")
+                )
+                for r in rows
+            )
+            / total
+        )
+        f1 = (
+            sum(
+                EvaluationMetrics.f1_score(r.get("prediction", ""), r.get("answer", ""))
+                for r in rows
+            )
+            / total
+        )
+        evidence_recall = (
+            sum(
+                EvaluationMetrics.evidence_recall(
+                    r.get("predicted_evidence", []), r.get("gold_evidence", [])
+                )
+                for r in rows
+            )
+            / total
+        )
+        evidence_precision = (
+            sum(
+                EvaluationMetrics.evidence_precision(
+                    r.get("predicted_evidence", []), r.get("gold_evidence", [])
+                )
+                for r in rows
+            )
+            / total
+        )
         return {
             "exact_match": em,
             "f1_score": f1,
