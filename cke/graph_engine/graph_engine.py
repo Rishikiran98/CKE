@@ -156,6 +156,31 @@ class KnowledgeGraphEngine:
                 timestamp=timestamp,
             )
 
+    def add_assertion(
+        self,
+        subject: str,
+        relation: str,
+        object_: str,
+        evidence: list[dict[str, Any]] | None = None,
+        context: dict[str, Any] | None = None,
+        confidence: float = 1.0,
+        source: str | None = None,
+        timestamp: str | None = None,
+    ) -> None:
+        """Add an assertion with optional span-level evidence metadata."""
+        merged_context = dict(context or {})
+        if evidence is not None:
+            merged_context["evidence"] = evidence
+        self.add_statement(
+            subject,
+            relation,
+            object_,
+            context=merged_context,
+            confidence=confidence,
+            source=source,
+            timestamp=timestamp,
+        )
+
     def add_statements(self, statements: List[Statement]) -> None:
         for st in statements:
             self.add_statement(

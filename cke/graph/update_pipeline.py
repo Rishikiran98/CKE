@@ -66,12 +66,13 @@ class GraphUpdatePipeline:
                 "evidence_count": assertion.evidence_count,
                 "trust_score": assertion.trust_score,
                 "secondary": id(assertion) in secondary_ids,
-                "evidence": [e.__dict__ for e in assertion.evidence],
+                "evidence": [e.model_dump(mode="python") for e in assertion.evidence],
             }
-            self.graph.add_statement(
+            self.graph.add_assertion(
                 assertion.subject,
                 assertion.relation,
                 assertion.object,
+                evidence=context["evidence"],
                 context=context,
                 confidence=assertion.trust_score,
                 source=assertion.source,

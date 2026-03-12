@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
@@ -22,10 +22,13 @@ except Exception:  # pragma: no cover
 
 
 class AssertionPayload(BaseModel):
+    """Structured assertion payload returned by the LLM."""
+
     subject: str
     relation: str
     object: str
     confidence: float = 1.0
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -62,7 +65,7 @@ class LLMExtractor(BaseExtractor):
         for attempt in range(self.config.max_retries + 1):
             try:
                 payload = self._call_llm(text)
-                statements = self._parse_response(payload)
+                statements = self._parse_response(payload, source_text=text)
                 return statements or self.fallback.extract(text)
             except Exception as exc:  # pragma: no cover - network/runtime variability
                 last_error = exc
@@ -78,7 +81,11 @@ class LLMExtractor(BaseExtractor):
 
         prompt = (
             "Extract factual assertions as JSON array with keys "
-            "subject, relation, object, confidence. Return only JSON."
+            "subject, relation, object, confidence, evidence. "
+            "Each evidence item must include chunk_id, span_start, span_end, "
+            "text, extractor_confidence, source_weight. "
+            "Span offsets are character offsets over the provided text. "
+            "Return only JSON."
         )
         completion = self.client.chat.completions.create(
             model=self.config.model,
@@ -97,7 +104,11 @@ class LLMExtractor(BaseExtractor):
         content = completion.choices[0].message.content or "[]"
         return {"choices": [{"message": {"content": content}}]}
 
-    def _parse_response(self, payload: dict[str, Any]) -> list[Statement]:
+    def _parse_response(
+        self,
+        payload: dict[str, Any],
+        source_text: str | None = None,
+    ) -> list[Statement]:
         content = payload["choices"][0]["message"]["content"]
         parsed = json.loads(content)
         if isinstance(parsed, dict) and "triples" in parsed:
@@ -114,6 +125,9 @@ class LLMExtractor(BaseExtractor):
             subject = self._clean_token(assertion.subject)
             relation = self._clean_relation(assertion.relation)
             obj = self._clean_token(assertion.object)
+            evidence = self._validated_evidence(assertion.evidence, source_text)
+            if source_text is not None and not evidence:
+                continue
             if subject and relation and obj:
                 statements.append(
                     Statement(
@@ -121,9 +135,46 @@ class LLMExtractor(BaseExtractor):
                         relation=relation,
                         object=obj,
                         confidence=float(assertion.confidence),
+                        context={"evidence": evidence},
                     )
                 )
         return statements
+
+    def _validated_evidence(
+        self,
+        evidence_items: list[dict[str, Any]],
+        source_text: str | None,
+    ) -> list[dict[str, Any]]:
+        """Validate span-level evidence and normalize metadata."""
+        if source_text is None:
+            return list(evidence_items)
+
+        validated: list[dict[str, Any]] = []
+        for item in evidence_items:
+            try:
+                start = int(item["span_start"])
+                end = int(item["span_end"])
+                text = str(item["text"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            if start < 0 or end <= start or end > len(source_text):
+                continue
+            if source_text[start:end] != text:
+                continue
+            validated.append(
+                {
+                    "chunk_id": str(item.get("chunk_id", "chunk-0")),
+                    "span_start": start,
+                    "span_end": end,
+                    "text": text,
+                    "extractor_confidence": float(
+                        item.get("extractor_confidence", 1.0)
+                    ),
+                    "source_weight": float(item.get("source_weight", 1.0)),
+                }
+            )
+        return validated
 
     @staticmethod
     def _clean_token(token: str) -> str:

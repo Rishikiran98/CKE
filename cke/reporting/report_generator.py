@@ -8,6 +8,16 @@ from typing import Any
 
 
 class ReportGenerator:
+    @staticmethod
+    def _path_completeness_summary(ablation_results: dict[str, Any]) -> str:
+        """Return a readable summary for path completeness across variants."""
+        lines: list[str] = []
+        for variant, payload in ablation_results.items():
+            metrics = payload.get("metrics", {})
+            if "path_completeness" in metrics:
+                lines.append(f"- {variant}: {metrics['path_completeness']:.3f}")
+        return "\n".join(lines) if lines else "- Not available"
+
     def generate(
         self,
         output_path: str | Path,
@@ -28,6 +38,9 @@ class ReportGenerator:
             "```",
             "",
             "## Ablation Results",
+            "### Path Completeness",
+            self._path_completeness_summary(ablation_results),
+            "",
             "```json",
             json.dumps(ablation_results, indent=2),
             "```",

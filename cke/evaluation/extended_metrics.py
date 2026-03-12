@@ -75,6 +75,18 @@ class EvaluationMetrics:
         return sum(per_path) / len(per_path) if per_path else 0.0
 
     @staticmethod
+    def path_completeness(
+        predicted_nodes: list[str],
+        gold_nodes: list[str],
+    ) -> float:
+        """Share of gold evidence nodes contained in retrieved nodes."""
+        gold = set(gold_nodes)
+        if not gold:
+            return 0.0
+        predicted = set(predicted_nodes)
+        return len(predicted.intersection(gold)) / len(gold)
+
+    @staticmethod
     def latency_ms(start_time: float, end_time: float) -> float:
         return max(0.0, (end_time - start_time) * 1000)
 

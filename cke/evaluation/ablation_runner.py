@@ -115,9 +115,20 @@ class AblationRunner:
             )
             / total
         )
+        path_completeness = (
+            sum(
+                EvaluationMetrics.path_completeness(
+                    r.get("retrieved_nodes", []),
+                    r.get("gold_nodes", []),
+                )
+                for r in rows
+            )
+            / total
+        )
         return {
             "exact_match": em,
             "f1_score": f1,
             "evidence_recall": evidence_recall,
             "evidence_precision": evidence_precision,
+            "path_completeness": path_completeness,
         }
