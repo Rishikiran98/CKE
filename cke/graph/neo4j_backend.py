@@ -43,8 +43,13 @@ class Neo4jBackend:
                 """
                 MERGE (s:Entity {name: $subject})
                 MERGE (o:Entity {name: $object})
-                CREATE (s)-[:RELATED {relation: $relation, context: $context,
-                    confidence: $confidence, source: $source, timestamp: $timestamp}]->(o)
+                CREATE (s)-[:RELATED {
+                    relation: $relation,
+                    context: $context,
+                    confidence: $confidence,
+                    source: $source,
+                    timestamp: $timestamp
+                }]->(o)
                 """,
                 subject=subject,
                 object=object_,
@@ -88,10 +93,16 @@ class Neo4jBackend:
         with self.driver.session() as session:
             rows = session.run(
                 """
-                MATCH p=(s:Entity {name: $source})-[rels:RELATED*1..$depth]->(t:Entity {name: $target})
+                MATCH p=(s:Entity {name: $source})
+                      -[rels:RELATED*1..$depth]->(t:Entity {name: $target})
                 RETURN [n IN nodes(p) | n.name] AS nodes,
-                       [r IN relationships(p) | {relation: r.relation, context: r.context,
-                        confidence: r.confidence, source: r.source, timestamp: r.timestamp}] AS rels
+                       [r IN relationships(p) | {
+                           relation: r.relation,
+                           context: r.context,
+                           confidence: r.confidence,
+                           source: r.source,
+                           timestamp: r.timestamp
+                       }] AS rels
                 """,
                 source=source,
                 target=target,
