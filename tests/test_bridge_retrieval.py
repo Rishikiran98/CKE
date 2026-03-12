@@ -2,6 +2,7 @@
 
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
+from cke.observability.system_monitor import SystemMonitor
 from cke.retrieval.graph_retriever import GraphRetriever
 from cke.router.query_plan import QueryPlan
 
@@ -40,7 +41,8 @@ def _build_bridge_graph() -> KnowledgeGraphEngine:
 
 
 def test_bridge_mode_finds_connector_for_comparison_intent():
-    retriever = GraphRetriever(_build_bridge_graph())
+    monitor = SystemMonitor()
+    retriever = GraphRetriever(_build_bridge_graph(), monitor=monitor)
     plan = QueryPlan(
         seed_entities=["Einstein", "Princeton"],
         intent="comparison",
@@ -60,10 +62,12 @@ def test_bridge_mode_finds_connector_for_comparison_intent():
         and edge["object"] == "Princeton University"
         for edge in flattened
     )
+    assert monitor.bridge_nodes_found >= 1
 
 
 def test_neighborhood_mode_returns_local_context_only():
-    retriever = GraphRetriever(_build_bridge_graph())
+    monitor = SystemMonitor()
+    retriever = GraphRetriever(_build_bridge_graph(), monitor=monitor)
     plan = QueryPlan(
         seed_entities=["Einstein"],
         intent="definition",
@@ -79,3 +83,19 @@ def test_neighborhood_mode_returns_local_context_only():
         {"id", "subject", "relation", "object", "trust"}.issubset(item)
         for item in result["evidence"]
     )
+    assert monitor.neighborhood_nodes_expanded == 2
+
+
+def test_multi_hop_intent_routes_to_path_mode():
+    retriever = GraphRetriever(_build_bridge_graph())
+    plan = QueryPlan(
+        seed_entities=["Einstein"],
+        intent="multi-hop",
+        max_depth=2,
+        max_results=12,
+    )
+
+    result = retriever.retrieve(plan, mode="bfs")
+
+    flattened = [edge for path in result["paths"] for edge in path["assertions"]]
+    assert any(edge["object"] == "Nobel Prize" for edge in flattened)
