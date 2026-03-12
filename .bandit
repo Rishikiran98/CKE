@@ -1,4 +1,4 @@
 [bandit]
 # For `bandit -r .` runs in CI: ignore pytest asserts and test tree.
 skips = B101
-exclude = cke/tests
+exclude = cke/tests,tests
