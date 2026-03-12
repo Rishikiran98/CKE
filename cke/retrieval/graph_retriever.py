@@ -9,6 +9,7 @@ from itertools import count
 from cke.graph.entity_resolver import EntityResolver
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
+from cke.observability.system_monitor import SystemMonitor
 from cke.router.query_plan import QueryPlan
 
 
@@ -19,9 +20,11 @@ class GraphRetriever:
         self,
         graph_engine: KnowledgeGraphEngine,
         entity_resolver: EntityResolver | None = None,
+        monitor: SystemMonitor | None = None,
     ) -> None:
         self.graph_engine = graph_engine
         self.entity_resolver = entity_resolver or EntityResolver()
+        self.monitor = monitor
         for entity in self.graph_engine.all_entities():
             self.entity_resolver.register_alias(entity, entity)
 
@@ -42,6 +45,14 @@ class GraphRetriever:
                 seeds=seeds,
                 max_results=query_plan.max_results,
             )
+        elif intent == "multi-hop":
+            scored_paths = self._path_mode(
+                seeds=seeds,
+                max_depth=query_plan.max_depth,
+                mode=mode,
+                max_nodes=max_nodes,
+                beam_width=beam_width,
+            )
         elif intent == "comparison":
             scored_paths = self._bridge_mode(
                 seeds=seeds,
@@ -54,6 +65,13 @@ class GraphRetriever:
                 mode=mode,
                 max_nodes=max_nodes,
                 beam_width=beam_width,
+            )
+
+        if self.monitor:
+            traversed_nodes = sum(len(path) for path, _ in scored_paths)
+            self.monitor.record_retrieval(
+                steps=len(scored_paths),
+                nodes_traversed=traversed_nodes,
             )
 
         evidence = self._select_evidence(
@@ -106,9 +124,16 @@ class GraphRetriever:
         max_results: int,
     ) -> list[tuple[list[Statement], float]]:
         scored: list[tuple[list[Statement], float]] = []
+        expanded = 0
         for seed in seeds:
-            for edge in self.graph_engine.get_neighbors(seed):
+            neighbors = self.graph_engine.get_neighbors(seed)
+            expanded += len(neighbors)
+            for edge in neighbors:
                 scored.append(([edge], self._score_neighbor(edge)))
+
+        if self.monitor:
+            self.monitor.record_neighborhood_expansion(expanded)
+
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[: max(1, min(max_results, 12))]
 
@@ -132,11 +157,16 @@ class GraphRetriever:
             right_by_node.setdefault(bridge_node, []).append(path)
 
         candidates: list[tuple[list[Statement], float]] = []
+        bridge_nodes_found: set[str] = set()
         for left_path in left_paths:
             bridge_node = left_path[-1].object
             for right_path in right_by_node.get(bridge_node, []):
+                bridge_nodes_found.add(bridge_node)
                 candidate = left_path + self._invert_path(right_path)
                 candidates.append((candidate, self._score_bridge(candidate)))
+
+        if self.monitor:
+            self.monitor.record_bridge_nodes(len(bridge_nodes_found))
 
         candidates.sort(key=lambda item: item[1], reverse=True)
         return candidates
