@@ -9,6 +9,7 @@ the engine behaves exactly as before (pure in-memory).
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,7 +36,15 @@ class KnowledgeGraphEngine:
     def __init__(
         self,
         db_path: Optional[str | Path] = None,
+        backend: Any | None = None,
     ) -> None:
+        self._backend = backend
+        if self._backend is not None:
+            self.graph = None
+            self._storage = None
+            self._use_nx = False
+            return
+
         self._storage = self._init_storage(db_path)
 
         # --- in-memory graph (always maintained for fast traversal) ---
@@ -115,6 +124,18 @@ class KnowledgeGraphEngine:
         source: str | None = None,
         timestamp: str | None = None,
     ) -> None:
+        if self._backend is not None:
+            self._backend.add_assertion(
+                subject,
+                relation,
+                object_,
+                context=context,
+                confidence=confidence,
+                source=source,
+                timestamp=timestamp,
+            )
+            return
+
         self._add_to_memory(
             subject,
             relation,
@@ -148,6 +169,9 @@ class KnowledgeGraphEngine:
             )
 
     def get_neighbors(self, entity: str) -> List[Statement]:
+        if self._backend is not None:
+            return self._backend.query_neighbors(entity)
+
         if self._use_nx:
             if entity not in self.graph:
                 return []
@@ -180,6 +204,9 @@ class KnowledgeGraphEngine:
     def find_paths(
         self, entity_a: str, entity_b: str, cutoff: int = 3
     ) -> List[List[Statement]]:
+        if self._backend is not None:
+            return self._backend.multi_hop_search(entity_a, entity_b, max_depth=cutoff)
+
         if self._use_nx:
             if entity_a not in self.graph or entity_b not in self.graph:
                 return []
@@ -246,6 +273,24 @@ class KnowledgeGraphEngine:
         return results
 
     def all_entities(self) -> list[str]:
+        if self._backend is not None:
+            return self._backend.all_entities()
         if self._use_nx:
             return list(self.graph.nodes)
         return sorted(self._nodes)
+
+
+def GraphEngine(type: str = "memory", **kwargs: Any) -> KnowledgeGraphEngine:  # noqa: A002
+    """Factory for memory or neo4j graph engines."""
+    if type == "memory":
+        return KnowledgeGraphEngine(db_path=kwargs.get("db_path"))
+    if type == "neo4j":
+        from cke.graph.neo4j_backend import Neo4jBackend  # noqa: PLC0415
+
+        backend = Neo4jBackend(
+            uri=kwargs.get("uri") or os.getenv("CKE_NEO4J_URI", "bolt://localhost:7687"),
+            user=kwargs.get("user") or os.getenv("CKE_NEO4J_USER", "neo4j"),
+            password=kwargs.get("password") or os.getenv("CKE_NEO4J_PASSWORD", "neo4j"),
+        )
+        return KnowledgeGraphEngine(backend=backend)
+    raise ValueError(f"Unknown graph engine type: {type}")

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
+from cke.observability.token_tracker import TokenTracker
 
 try:
     from openai import OpenAI
@@ -39,10 +40,14 @@ class LLMExtractor(BaseExtractor):
     """Extract structured assertions from text using an LLM."""
 
     def __init__(
-        self, config: LLMConfig | None = None, fallback: BaseExtractor | None = None
+        self,
+        config: LLMConfig | None = None,
+        fallback: BaseExtractor | None = None,
+        token_tracker: TokenTracker | None = None,
     ) -> None:
         self.config = config or LLMConfig(api_key=os.getenv("CKE_LLM_API_KEY"))
         self.fallback = fallback or RuleBasedExtractor()
+        self.token_tracker = token_tracker or TokenTracker()
         self.client = (
             OpenAI(api_key=self.config.api_key)
             if (OpenAI and self.config.api_key)
@@ -83,6 +88,12 @@ class LLMExtractor(BaseExtractor):
                 {"role": "user", "content": text},
             ],
         )
+        usage = getattr(completion, "usage", None)
+        if usage is not None:
+            self.token_tracker.add_usage(
+                prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+            )
         content = completion.choices[0].message.content or "[]"
         return {"choices": [{"message": {"content": content}}]}
 
