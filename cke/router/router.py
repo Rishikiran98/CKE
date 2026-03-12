@@ -1,4 +1,4 @@
-"""Backward-compatible query router import."""
+"""Backward-compatible entrypoint for the query router."""
 
 from cke.router.query_router import QueryRouter
 

@@ -6,3 +6,5 @@ from cke.router.query_plan import QueryPlan
 from cke.router.query_router import QueryRouter
 
 __all__ = ["EntityLinker", "IntentClassifier", "QueryPlan", "QueryRouter"]
+
+__version__ = "0.1.0"
