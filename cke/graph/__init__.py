@@ -1,3 +1,8 @@
+"""Graph helpers and entity resolution."""
+
+from cke.graph.entity_resolver import EntityResolver
+
+__all__ = ["EntityResolver"]
 """Graph memory interfaces for CKE."""
 
 __all__ = ["AssertionValidator"]
