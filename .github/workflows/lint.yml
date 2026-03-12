@@ -21,10 +21,16 @@ jobs:
 
       - name: Install lint tools
         run: |
-          pip install black==25.11.0 flake8
+          python -m pip install --upgrade pip
+          pip install black==25.11.0 flake8==7.1.2
+
+      - name: Show lint versions
+        run: |
+          black --version
+          flake8 --version
 
       - name: Run formatter
         run: black --check .
 
       - name: Run flake8
-        run: flake8 .
+        run: flake8 --config .flake8 .
