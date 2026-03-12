@@ -13,6 +13,8 @@ class SystemMonitor:
     graph_nodes_traversed: int = 0
     assertions_generated: int = 0
     conflicts_detected: int = 0
+    bridge_nodes_found: int = 0
+    neighborhood_nodes_expanded: int = 0
     _start: float = field(default=0.0, init=False, repr=False)
 
     def start_query(self) -> None:
@@ -32,6 +34,12 @@ class SystemMonitor:
     def record_conflicts(self, count: int) -> None:
         self.conflicts_detected += int(count)
 
+    def record_bridge_nodes(self, count: int) -> None:
+        self.bridge_nodes_found += int(count)
+
+    def record_neighborhood_expansion(self, count: int) -> None:
+        self.neighborhood_nodes_expanded += int(count)
+
     def snapshot(self) -> dict[str, float | int]:
         return {
             "query_latency_ms": round(self.query_latency_ms, 3),
@@ -39,4 +47,6 @@ class SystemMonitor:
             "graph_nodes_traversed": self.graph_nodes_traversed,
             "assertions_added": self.assertions_generated,
             "conflicts_resolved": self.conflicts_detected,
+            "bridge_nodes_found": self.bridge_nodes_found,
+            "neighborhood_nodes_expanded": self.neighborhood_nodes_expanded,
         }
