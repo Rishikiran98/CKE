@@ -18,6 +18,6 @@ extend-exclude = '''
 '''
 
 [tool.bandit]
-exclude_dirs = ["cke/tests"]
+exclude_dirs = ["cke/tests", "tests"]
 skips = ["B101"]
 
