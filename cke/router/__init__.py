@@ -6,3 +6,8 @@ from cke.router.query_plan import QueryPlan
 from cke.router.query_router import QueryRouter
 
 __all__ = ["EntityLinker", "IntentClassifier", "QueryPlan", "QueryRouter"]
+"""Routing components."""
+
+from cke.router.query_router import QueryRouter
+
+__all__ = ["QueryRouter"]

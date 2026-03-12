@@ -22,6 +22,8 @@ class GraphRetriever:
         self.router = router or QueryRouter()
 
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
+        policy = self.router.routing_policy_for_query(query)
+        effective_max_depth = max_depth + int(policy.get("retrieval_depth_delta", 0))
         seeds = self.router.detect_entities(query, self.graph_engine.all_entities())
         seen_statements: set[tuple[str, str, str]] = set()
         candidates: list[tuple[int, Statement]] = []
@@ -33,7 +35,7 @@ class GraphRetriever:
             best_depth_for_node: dict[str, int] = {}
             while queue:
                 node, depth = queue.popleft()
-                if depth > max_depth:
+                if depth > effective_max_depth:
                     continue
                 if node in best_depth_for_node and depth > best_depth_for_node[node]:
                     continue
@@ -44,7 +46,7 @@ class GraphRetriever:
                     if key not in seen_statements:
                         seen_statements.add(key)
                         candidates.append((depth + 1, statement))
-                    if depth + 1 <= max_depth:
+                    if depth + 1 <= effective_max_depth:
                         queue.append((statement.object, depth + 1))
 
         # Rank by: confidence desc, path length asc,
@@ -52,6 +54,12 @@ class GraphRetriever:
         ranked = sorted(
             candidates,
             key=lambda item: (
+                0 if policy.get("prioritize_recent") and item[1].timestamp else 1,
+                (
+                    -float(item[1].timestamp or 0)
+                    if policy.get("prioritize_recent")
+                    else 0
+                ),
                 -float(item[1].confidence),
                 item[0],
                 item[1].subject.lower(),
