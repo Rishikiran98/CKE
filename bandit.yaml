@@ -1,4 +1,5 @@
 exclude_dirs:
   - cke/tests
+  - tests
 skips:
   - B101
