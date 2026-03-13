@@ -95,7 +95,9 @@ class LLMReasoner:
                 subject = item.get("subject")
                 relation = item.get("relation")
                 object_ = item.get("object")
-                if not all(isinstance(v, str) and v for v in (subject, relation, object_)):
+                if not all(
+                    isinstance(v, str) and v for v in (subject, relation, object_)
+                ):
                     continue
                 confidence = item.get("trust_score", item.get("trust", 1.0))
                 try:
