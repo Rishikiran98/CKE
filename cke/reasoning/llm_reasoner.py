@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, Iterable, List
 from urllib import request
 
 from cke.models import Statement
@@ -45,20 +45,22 @@ class LLMReasoner:
         )
         self.fallback = fallback or TemplateReasoner()
 
-    def answer(self, question: str, context: List[Statement]) -> str:
+    def answer(self, question: str, context: Iterable[Any]) -> str:
         """Answer a question grounded in graph statements."""
-        if not self.config.api_key:
-            return self.fallback.answer(question, context)
+        normalized_context = self._normalize_context(context)
 
-        if not context:
-            return self.fallback.answer(question, context)
+        if not self.config.api_key:
+            return self.fallback.answer(question, normalized_context)
+
+        if not normalized_context:
+            return self.fallback.answer(question, normalized_context)
 
         try:
-            payload = self._call_model(question, context)
+            payload = self._call_model(question, normalized_context)
             answer_text = self._parse_answer(payload)
-            return answer_text or self.fallback.answer(question, context)
+            return answer_text or self.fallback.answer(question, normalized_context)
         except Exception:
-            return self.fallback.answer(question, context)
+            return self.fallback.answer(question, normalized_context)
 
     def format_reasoning_path(self, context: List[Statement]) -> str:
         """Expose same interface as TemplateReasoner."""
@@ -66,20 +68,52 @@ class LLMReasoner:
 
     def _build_prompt(self, question: str, context: List[Statement]) -> str:
         evidence_lines = [
-            f"- {st.as_text()} (confidence={st.confidence:.2f})" for st in context
+            f"[E{i}] {st.as_text()} (confidence={st.confidence:.2f})"
+            for i, st in enumerate(context, start=1)
         ]
         evidence_text = "\n".join(evidence_lines) if evidence_lines else "- (none)"
         return (
             "You are a grounded QA assistant for a knowledge graph.\n"
-            "Answer ONLY using the provided graph context evidence.\n"
-            "If evidence is insufficient, explicitly say that the graph "
-            "context is insufficient.\n"
+            "Task: answer the QUESTION, not just summarize evidence.\n"
+            "Use only the provided graph evidence.\n"
+            "If evidence is insufficient, say: 'Insufficient graph evidence.'\n"
+            "Prefer evidence that directly mentions entities/relations "
+            "in the question.\n"
             "Return JSON only with schema: "
             '{"answer": "...", "used_evidence": ["..."]}.\n\n'
-            f"Question: {question}\n"
+            f"QUESTION: {question}\n"
             "Graph context evidence:\n"
             f"{evidence_text}\n"
         )
+
+    def _normalize_context(self, context: Iterable[Any]) -> list[Statement]:
+        normalized: list[Statement] = []
+        for item in context:
+            if isinstance(item, Statement):
+                normalized.append(item)
+                continue
+            if isinstance(item, dict):
+                subject = item.get("subject")
+                relation = item.get("relation")
+                object_ = item.get("object")
+                if not all(
+                    isinstance(v, str) and v for v in (subject, relation, object_)
+                ):
+                    continue
+                confidence = item.get("trust_score", item.get("trust", 1.0))
+                try:
+                    confidence_value = float(confidence)
+                except (TypeError, ValueError):
+                    confidence_value = 1.0
+                normalized.append(
+                    Statement(
+                        subject=subject,
+                        relation=relation,
+                        object=object_,
+                        confidence=confidence_value,
+                    )
+                )
+        return normalized
 
     def _call_model(self, question: str, context: List[Statement]) -> dict[str, Any]:
         if OpenAI is not None:
