@@ -39,7 +39,6 @@ def test_query_router_builds_query_plan():
     assert "Redis" in plan.seed_entities
 
 
-
 def test_query_router_uses_question_entities_when_linker_has_no_match():
     router = QueryRouter()
     plan = router.route("How are Scott Derrickson and Ed Wood connected?")

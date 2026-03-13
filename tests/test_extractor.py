@@ -33,7 +33,6 @@ def test_llm_extractor_parses_valid_json_payload():
     assert statements[0].relation == "uses"
 
 
-
 def test_rule_extractor_filters_generic_relations_and_long_objects():
     extractor = RuleExtractor()
     text = (
@@ -46,5 +45,8 @@ def test_rule_extractor_filters_generic_relations_and_long_objects():
     triples = {(s.subject, s.relation, s.object) for s in statements}
 
     assert not any(relation == "is_a" for _, relation, _ in triples)
-    assert any(subject == "Scott Derrickson" and relation == "uses" for subject, relation, _ in triples)
+    assert any(
+        subject == "Scott Derrickson" and relation == "uses"
+        for subject, relation, _ in triples
+    )
     assert all(len(obj) <= extractor.MAX_OBJECT_LENGTH for _, _, obj in triples)
