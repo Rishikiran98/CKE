@@ -77,7 +77,8 @@ class LLMReasoner:
             "Task: answer the QUESTION, not just summarize evidence.\n"
             "Use only the provided graph evidence.\n"
             "If evidence is insufficient, say: 'Insufficient graph evidence.'\n"
-            "Prefer evidence that directly mentions entities/relations in the question.\n"
+            "Prefer evidence that directly mentions entities/relations "
+            "in the question.\n"
             "Return JSON only with schema: "
             '{"answer": "...", "used_evidence": ["..."]}.\n\n'
             f"QUESTION: {question}\n"
