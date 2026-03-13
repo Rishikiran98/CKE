@@ -35,11 +35,19 @@ class QueryRouter:
         if linked:
             return linked
 
+        matched_entities: list[str] = []
         if candidate_entities:
             q = query.lower()
-            matches = [e for e in candidate_entities if e.lower() in q]
-            if matches:
-                return sorted(set(matches))
+            matched_entities = [e for e in candidate_entities if e.lower() in q]
+            if matched_entities:
+                return sorted(set(matched_entities))
+
+        name_chunks = re.findall(
+            r"\b(?:[A-Z][a-z0-9'/-]+(?:\s+[A-Z][a-z0-9'/-]+)+)\b",
+            query,
+        )
+        if name_chunks:
+            return sorted(set(name_chunks))
 
         return sorted(set(re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", query)))
 
@@ -57,12 +65,15 @@ class QueryRouter:
         return domains or ["general"]
 
     def route(self, query: str, max_depth=None, max_results=12):
-        entities = self.entity_linker.extract_entities(query)
+        graph_entities = self.graph_engine.all_entities() if self.graph_engine else None
+        entities = self.detect_entities(query, graph_entities)
         intent = self.intent_classifier.classify(query)
         domains = self.classify_domain(query)
 
         if max_depth is None:
             max_depth = 3 if intent == "multi-hop" else 2
+        if len(entities) >= 2:
+            max_depth = max(max_depth, 3)
 
         return QueryPlan(
             seed_entities=entities,
