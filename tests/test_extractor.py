@@ -7,7 +7,6 @@ def test_rule_extractor_detects_expected_relations():
     text = "Redis is a database. Redis uses RESP. Redis located in memory."
     statements = extractor.extract(text)
     triples = {(s.subject, s.relation, s.object) for s in statements}
-    assert ("Redis", "is_a", "database") in triples
     assert ("Redis", "uses", "RESP") in triples
     assert ("Redis", "located_in", "memory") in triples
 
@@ -32,3 +31,22 @@ def test_llm_extractor_parses_valid_json_payload():
     assert len(statements) == 1
     assert statements[0].subject == "Redis"
     assert statements[0].relation == "uses"
+
+
+def test_rule_extractor_filters_generic_relations_and_long_objects():
+    extractor = RuleExtractor()
+    text = (
+        "Ed Wood is a song from the 1968 musical film featurette that keeps going. "
+        "Scott Derrickson uses practical effects in a very long production workflow "
+        "that includes many extra details and descriptors."
+    )
+
+    statements = extractor.extract(text)
+    triples = {(s.subject, s.relation, s.object) for s in statements}
+
+    assert not any(relation == "is_a" for _, relation, _ in triples)
+    assert any(
+        subject == "Scott Derrickson" and relation == "uses"
+        for subject, relation, _ in triples
+    )
+    assert all(len(obj) <= extractor.MAX_OBJECT_LENGTH for _, _, obj in triples)

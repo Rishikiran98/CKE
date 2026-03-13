@@ -10,6 +10,9 @@ from cke.models import Statement
 class RuleExtractor:
     """Extract simple assertion patterns from free text."""
 
+    MAX_OBJECT_LENGTH = 80
+    GENERIC_RELATIONS: frozenset[str] = frozenset({"is_a"})
+
     PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         (re.compile(r"(?P<s>[^.]+?)\s+is\s+a\s+(?P<o>[^.]+)", re.I), "is_a"),
         (re.compile(r"(?P<s>[^.]+?)\s+uses\s+(?P<o>[^.]+)", re.I), "uses"),
@@ -27,17 +30,18 @@ class RuleExtractor:
                 match = pattern.search(sentence)
                 if not match:
                     continue
-                subject = self._clean(match.group("s"))
-                obj = self._clean(match.group("o"))
-                if subject and obj:
-                    assertions.append(
-                        Statement(
-                            subject=subject,
-                            relation=relation,
-                            object=obj,
-                            confidence=1.0,
-                        )
+                subject = self._normalize_entity(match.group("s"))
+                obj = self._normalize_object(match.group("o"))
+                if not self._is_valid_statement(subject, relation, obj):
+                    continue
+                assertions.append(
+                    Statement(
+                        subject=subject,
+                        relation=relation,
+                        object=obj,
+                        confidence=1.0,
                     )
+                )
         return assertions
 
     @staticmethod
@@ -47,3 +51,19 @@ class RuleExtractor:
     @staticmethod
     def _clean(token: str) -> str:
         return re.sub(r"\s+", " ", token.strip(" ,;\n\t"))
+
+    def _normalize_entity(self, token: str) -> str:
+        cleaned = self._clean(token)
+        return cleaned.strip("\"'()[]")
+
+    def _normalize_object(self, token: str) -> str:
+        cleaned = self._clean(token)
+        cleaned = cleaned.strip("\"'()[]")
+        return cleaned[: self.MAX_OBJECT_LENGTH].strip()
+
+    def _is_valid_statement(self, subject: str, relation: str, obj: str) -> bool:
+        if not subject or not obj:
+            return False
+        if relation in self.GENERIC_RELATIONS:
+            return False
+        return True
