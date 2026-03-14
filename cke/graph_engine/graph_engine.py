@@ -9,6 +9,7 @@ the engine behaves exactly as before (pure in-memory).
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import re
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -110,6 +111,13 @@ class KnowledgeGraphEngine:
             self._nodes.update([subject, object_])
             self.graph[subject].append({"object": object_, **payload})
 
+
+    @staticmethod
+    def _normalize_entity(entity: str) -> str:
+        """Normalize entity surface form to reduce duplicate nodes."""
+        cleaned = re.sub(r"[^\w\s]", " ", str(entity).lower().replace("_", " "))
+        return " ".join(cleaned.split())
+
     # ------------------------------------------------------------------
     # Public API (unchanged surface)
     # ------------------------------------------------------------------
@@ -124,6 +132,9 @@ class KnowledgeGraphEngine:
         source: str | None = None,
         timestamp: str | None = None,
     ) -> None:
+        subject = self._normalize_entity(subject)
+        object_ = self._normalize_entity(object_)
+
         if self._backend is not None:
             self._backend.add_assertion(
                 subject,
@@ -194,6 +205,7 @@ class KnowledgeGraphEngine:
             )
 
     def get_neighbors(self, entity: str) -> List[Statement]:
+        entity = self._normalize_entity(entity)
         if self._backend is not None:
             return self._backend.query_neighbors(entity)
 
@@ -229,6 +241,8 @@ class KnowledgeGraphEngine:
     def find_paths(
         self, entity_a: str, entity_b: str, cutoff: int = 3
     ) -> List[List[Statement]]:
+        entity_a = self._normalize_entity(entity_a)
+        entity_b = self._normalize_entity(entity_b)
         if self._backend is not None:
             return self._backend.multi_hop_search(entity_a, entity_b, max_depth=cutoff)
 

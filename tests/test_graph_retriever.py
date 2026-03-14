@@ -11,7 +11,7 @@ def _build_graph() -> KnowledgeGraphEngine:
     graph.add_statements(
         [
             Statement("Redis", "supports", "PubSub", confidence=0.95),
-            Statement("PubSub", "implemented_via", "RESP", confidence=0.9),
+            Statement("pubsub", "implemented_via", "resp", confidence=0.9),
             Statement("RESP", "used_by", "Redis", confidence=0.7),
             Statement("Redis", "category", "Database", confidence=0.8),
             Statement("Kafka", "supports", "PubSub", confidence=0.85),
@@ -26,17 +26,17 @@ def test_bfs_traversal_collects_paths():
     triples = {
         (edge.subject, edge.relation, edge.object) for path in paths for edge in path
     }
-    assert ("Redis", "supports", "PubSub") in triples
-    assert ("PubSub", "implemented_via", "RESP") in triples
+    assert ("redis", "supports", "pubsub") in triples
+    assert ("pubsub", "implemented_via", "resp") in triples
 
 
 def test_path_scoring_penalizes_long_or_repeated_entities():
     retriever = GraphRetriever(_build_graph())
-    short_path = [Statement("Redis", "supports", "PubSub", confidence=0.9)]
+    short_path = [Statement("redis", "supports", "pubsub", confidence=0.9)]
     longer_repeating_path = [
-        Statement("Redis", "supports", "PubSub", confidence=0.9),
-        Statement("PubSub", "implemented_via", "RESP", confidence=0.9),
-        Statement("RESP", "used_by", "Redis", confidence=0.9),
+        Statement("redis", "supports", "pubsub", confidence=0.9),
+        Statement("pubsub", "implemented_via", "resp", confidence=0.9),
+        Statement("resp", "used_by", "redis", confidence=0.9),
     ]
 
     assert retriever._score_path(short_path) > retriever._score_path(
@@ -46,7 +46,7 @@ def test_path_scoring_penalizes_long_or_repeated_entities():
 
 def test_evidence_selection_returns_ranked_assertions():
     retriever = GraphRetriever(_build_graph())
-    plan = QueryPlan(seed_entities=["Redis"], domains=["databases"], intent="multi-hop")
+    plan = QueryPlan(query_text="How does Redis do pubsub?", seed_entities=["Redis"], domains=["databases"], intent="multi-hop")
     result = retriever.retrieve(plan, mode="beam", beam_width=3)
 
     assert {"evidence", "paths", "entities"}.issubset(result.keys())
@@ -54,3 +54,24 @@ def test_evidence_selection_returns_ranked_assertions():
     assert 1 <= len(result["evidence"]) <= 20
     top = result["evidence"][0]
     assert {"subject", "relation", "object", "trust_score"}.issubset(top.keys())
+
+
+def test_query_aware_ranking_prefers_relevant_edges():
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Redis", "supports", "PubSub", confidence=0.9),
+            Statement("Redis", "created_by", "Salvatore Sanfilippo", confidence=0.99),
+        ]
+    )
+    retriever = GraphRetriever(graph)
+    plan = QueryPlan(
+        query_text="How does redis pubsub work?",
+        seed_entities=["redis"],
+        intent="definition",
+        max_results=5,
+    )
+
+    result = retriever.retrieve(plan)
+
+    assert result["evidence"][0]["relation"] == "supports"

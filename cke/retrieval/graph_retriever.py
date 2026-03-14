@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import re
 from heapq import nlargest
 from itertools import count
 
@@ -44,6 +45,8 @@ class GraphRetriever:
             scored_paths = self._neighborhood_mode(
                 seeds=seeds,
                 max_results=query_plan.max_results,
+                query_text=query_plan.query_text,
+                seeds_raw=query_plan.seed_entities,
             )
         elif intent == "multi-hop":
             scored_paths = self._path_mode(
@@ -52,11 +55,15 @@ class GraphRetriever:
                 mode=mode,
                 max_nodes=max_nodes,
                 beam_width=beam_width,
+                query_text=query_plan.query_text,
+                seed_entities=query_plan.seed_entities,
             )
         elif intent == "comparison":
             scored_paths = self._bridge_mode(
                 seeds=seeds,
                 max_depth=query_plan.max_depth,
+                query_text=query_plan.query_text,
+                seed_entities=query_plan.seed_entities,
             )
         else:
             scored_paths = self._path_mode(
@@ -65,6 +72,8 @@ class GraphRetriever:
                 mode=mode,
                 max_nodes=max_nodes,
                 beam_width=beam_width,
+                query_text=query_plan.query_text,
+                seed_entities=query_plan.seed_entities,
             )
 
         if self.monitor:
@@ -100,6 +109,8 @@ class GraphRetriever:
         mode: str,
         max_nodes: int,
         beam_width: int,
+        query_text: str,
+        seed_entities: list[str],
     ) -> list[tuple[list[Statement], float]]:
         if mode == "beam":
             paths = self._beam_search(
@@ -107,6 +118,8 @@ class GraphRetriever:
                 max_depth=max_depth,
                 beam_width=beam_width,
                 max_nodes=max_nodes,
+                query_text=query_text,
+                seed_entities=seed_entities,
             )
         else:
             paths = self._bfs_traversal(
@@ -114,7 +127,7 @@ class GraphRetriever:
                 max_depth=max_depth,
                 max_nodes=max_nodes,
             )
-        scored_paths = [(path, self._score_path(path)) for path in paths if path]
+        scored_paths = [(path, self._score_path(path, query_text=query_text, seed_entities=seed_entities)) for path in paths if path]
         scored_paths.sort(key=lambda item: item[1], reverse=True)
         return scored_paths
 
@@ -122,6 +135,8 @@ class GraphRetriever:
         self,
         seeds: list[str],
         max_results: int,
+        query_text: str,
+        seeds_raw: list[str],
     ) -> list[tuple[list[Statement], float]]:
         scored: list[tuple[list[Statement], float]] = []
         expanded = 0
@@ -129,7 +144,7 @@ class GraphRetriever:
             neighbors = self.graph_engine.get_neighbors(seed)
             expanded += len(neighbors)
             for edge in neighbors:
-                scored.append(([edge], self._score_neighbor(edge)))
+                scored.append(([edge], self._score_neighbor(edge, query_text=query_text, seed_entities=seeds_raw)))
 
         if self.monitor:
             self.monitor.record_neighborhood_expansion(expanded)
@@ -141,6 +156,8 @@ class GraphRetriever:
         self,
         seeds: list[str],
         max_depth: int,
+        query_text: str,
+        seed_entities: list[str],
     ) -> list[tuple[list[Statement], float]]:
         if len(seeds) < 2:
             return []
@@ -163,7 +180,7 @@ class GraphRetriever:
             for right_path in right_by_node.get(bridge_node, []):
                 bridge_nodes_found.add(bridge_node)
                 candidate = left_path + self._invert_path(right_path)
-                candidates.append((candidate, self._score_bridge(candidate)))
+                candidates.append((candidate, self._score_bridge(candidate, query_text=query_text, seed_entities=seed_entities)))
 
         if self.monitor:
             self.monitor.record_bridge_nodes(len(bridge_nodes_found))
@@ -206,22 +223,53 @@ class GraphRetriever:
             for edge in reversed(path)
         ]
 
-    def _score_neighbor(self, edge: Statement) -> float:
+    @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+    def _edge_relevance(
+        self,
+        edge: Statement,
+        query_tokens: set[str],
+        seed_tokens: set[str],
+    ) -> float:
+        edge_tokens = (
+            self._tokenize(edge.subject)
+            | self._tokenize(edge.relation)
+            | self._tokenize(edge.object)
+        )
+        if not edge_tokens:
+            return 0.0
+        token_overlap = len(edge_tokens & query_tokens) / len(edge_tokens)
+        entity_overlap = len(
+            (self._tokenize(edge.subject) | self._tokenize(edge.object)) & seed_tokens
+        ) / max(1, len(seed_tokens))
         relation_relevance = (
             1.0 if edge.relation not in {"related_to", "inverse_related_to"} else 0.7
         )
-        novelty = 1.0
-        return float(edge.confidence) * relation_relevance * novelty
+        return 0.45 * token_overlap + 0.35 * entity_overlap + 0.20 * relation_relevance
 
-    def _score_bridge(self, path: list[Statement]) -> float:
+    def _score_neighbor(
+        self,
+        edge: Statement,
+        query_text: str,
+        seed_entities: list[str],
+    ) -> float:
+        query_tokens = self._tokenize(query_text)
+        seed_entities = seed_entities or []
+        seed_tokens = set().union(*(self._tokenize(seed) for seed in seed_entities))
+        relevance = self._edge_relevance(edge, query_tokens, seed_tokens)
+        return float(edge.confidence) * (0.6 + relevance)
+
+    def _score_bridge(
+        self,
+        path: list[Statement],
+        query_text: str,
+        seed_entities: list[str],
+    ) -> float:
         if not path:
             return 0.0
-        path_trust = sum(float(edge.confidence) for edge in path) / len(path)
-        bridge_nodes = {edge.object for edge in path[:-1]} & {
-            edge.subject for edge in path[1:]
-        }
-        novelty = 1.0 / max(1, len(bridge_nodes))
-        return path_trust * novelty
+        return self._score_path(path, query_text=query_text, seed_entities=seed_entities)
 
     def _statement_payload(
         self, st: Statement, index: int | None = None
@@ -273,6 +321,8 @@ class GraphRetriever:
         max_depth: int,
         beam_width: int,
         max_nodes: int,
+        query_text: str,
+        seed_entities: list[str],
     ) -> list[list[Statement]]:
         partial: list[tuple[str, list[Statement]]] = [(seed, []) for seed in seeds]
         complete_paths: list[list[Statement]] = []
@@ -287,7 +337,7 @@ class GraphRetriever:
                 for edge in self.graph_engine.get_neighbors(node):
                     candidate = path + [edge]
                     expanded.append(
-                        (edge.object, candidate, self._score_path(candidate))
+                        (edge.object, candidate, self._score_path(candidate, query_text=query_text, seed_entities=seed_entities))
                     )
                     complete_paths.append(candidate)
             if not expanded:
@@ -297,7 +347,12 @@ class GraphRetriever:
 
         return complete_paths
 
-    def _score_path(self, path: list[Statement]) -> float:
+    def _score_path(
+        self,
+        path: list[Statement],
+        query_text: str = "",
+        seed_entities: list[str] | None = None,
+    ) -> float:
         if not path:
             return 0.0
         base_score = sum(float(edge.confidence) for edge in path) / len(path)
@@ -306,7 +361,19 @@ class GraphRetriever:
         repeated_count = len(entities) - len(set(entities))
         repeat_penalty = 0.12 * repeated_count
         length_penalty = 0.05 * max(0, len(path) - 1)
-        return max(0.0, base_score - repeat_penalty - length_penalty)
+
+        query_tokens = self._tokenize(query_text)
+        seed_entities = seed_entities or []
+        seed_tokens = set().union(*(self._tokenize(seed) for seed in seed_entities))
+        if not query_tokens and seed_tokens:
+            query_tokens = set(seed_tokens)
+        relevance_scores = [
+            self._edge_relevance(edge, query_tokens, seed_tokens)
+            for edge in path
+        ]
+        relevance_bonus = sum(relevance_scores) / len(relevance_scores)
+
+        return max(0.0, base_score + 0.35 * relevance_bonus - repeat_penalty - length_penalty)
 
     def _select_evidence(
         self,
@@ -320,7 +387,7 @@ class GraphRetriever:
         for path, score in scored_paths:
             for edge in path:
                 key = edge.key()
-                weighted = score * float(edge.confidence)
+                weighted = score
                 if key not in best_by_key or weighted > best_by_key[key][0]:
                     best_by_key[key] = (weighted, edge)
 
