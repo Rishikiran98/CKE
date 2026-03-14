@@ -46,3 +46,21 @@ def test_query_router_uses_question_entities_when_linker_has_no_match():
     assert "Scott Derrickson" in plan.seed_entities
     assert "Ed Wood" in plan.seed_entities
     assert plan.max_depth == 3
+
+
+def test_query_router_adapts_depth_for_complex_multi_hop_query():
+    router = QueryRouter()
+    query = "How is Redis connected to RESP via PubSub and then through API services?"
+
+    plan = router.route(query)
+
+    assert plan.intent == "multi-hop"
+    assert plan.max_depth >= 4
+
+
+def test_query_router_respects_manual_depth_when_query_is_simple():
+    router = QueryRouter()
+
+    plan = router.route("What is Redis?", max_depth=6)
+
+    assert plan.max_depth <= 4

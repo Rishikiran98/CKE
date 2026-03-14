@@ -53,9 +53,12 @@ class KnowledgeGraphEngine:
         self._use_nx = nx is not None
         if self._use_nx:
             self.graph = nx.MultiDiGraph()
+            self._adjacency_index: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+            self._relation_index: dict[str, list[tuple[str, str, dict[str, Any]]]] = defaultdict(list)
         else:
             self.graph: Dict[str, list[dict[str, Any]]] = defaultdict(list)
             self._nodes: set[str] = set()
+            self._relation_index: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
 
         # If a storage backend was provided, warm the in-memory graph.
         if self._storage is not None:
@@ -115,9 +118,13 @@ class KnowledgeGraphEngine:
             self.graph.add_node(subject)
             self.graph.add_node(object_)
             self.graph.add_edge(subject, object_, **payload)
+            self._adjacency_index[subject].append((object_, payload))
+            self._relation_index[relation].append((subject, object_, payload))
         else:
             self._nodes.update([subject, object_])
-            self.graph[subject].append({"object": object_, **payload})
+            item = {"object": object_, **payload}
+            self.graph[subject].append(item)
+            self._relation_index[relation].append((subject, item))
 
     @staticmethod
     def _normalize_entity(entity: str) -> str:
@@ -224,7 +231,8 @@ class KnowledgeGraphEngine:
             return self._backend.query_neighbors(entity)
 
         if self._use_nx:
-            if entity not in self.graph:
+            neighbors = self._adjacency_index.get(entity, [])
+            if not neighbors:
                 return []
             return [
                 Statement(
@@ -238,7 +246,7 @@ class KnowledgeGraphEngine:
                     source=edge_data.get("source"),
                     timestamp=edge_data.get("timestamp"),
                 )
-                for _, target, edge_data in self.graph.out_edges(entity, data=True)
+                for target, edge_data in neighbors
             ]
 
         return [
@@ -328,6 +336,51 @@ class KnowledgeGraphEngine:
                     )
                 )
         return results
+
+    def edges_for_relation(self, relation: str) -> list[Statement]:
+        """Return all statements matching a relation label.
+
+        Uses a relation index in memory to avoid graph-wide edge scans.
+        """
+        relation = str(relation)
+        if self._backend is not None:
+            return [
+                st
+                for entity in self._backend.all_entities()
+                for st in self._backend.query_neighbors(entity)
+                if st.relation == relation
+            ]
+
+        if self._use_nx:
+            return [
+                Statement(
+                    subject=self._display_entity(subject),
+                    relation=relation,
+                    object=edge_data.get(
+                        "object_display", self._display_entity(target)
+                    ),
+                    context=dict(edge_data.get("context", {})),
+                    confidence=float(edge_data.get("confidence", 1.0)),
+                    source=edge_data.get("source"),
+                    timestamp=edge_data.get("timestamp"),
+                )
+                for subject, target, edge_data in self._relation_index.get(relation, [])
+            ]
+
+        return [
+            Statement(
+                subject=self._display_entity(subject),
+                relation=relation,
+                object=item.get(
+                    "object_display", self._display_entity(item.get("object", ""))
+                ),
+                context=dict(item.get("context", {})),
+                confidence=float(item.get("confidence", 1.0)),
+                source=item.get("source"),
+                timestamp=item.get("timestamp"),
+            )
+            for subject, item in self._relation_index.get(relation, [])
+        ]
 
     def all_entities(self) -> list[str]:
         if self._backend is not None:
