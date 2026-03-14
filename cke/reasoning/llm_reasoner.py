@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import string
 from dataclasses import dataclass
 from typing import Any, Iterable, List
 from urllib import request
@@ -48,19 +50,20 @@ class LLMReasoner:
     def answer(self, question: str, context: Iterable[Any]) -> str:
         """Answer a question grounded in graph statements."""
         normalized_context = self._normalize_context(context)
+        selected_context = self._select_context(question, normalized_context)
 
         if not self.config.api_key:
-            return self.fallback.answer(question, normalized_context)
+            return self.fallback.answer(question, selected_context)
 
-        if not normalized_context:
-            return self.fallback.answer(question, normalized_context)
+        if not selected_context:
+            return self.fallback.answer(question, selected_context)
 
         try:
-            payload = self._call_model(question, normalized_context)
+            payload = self._call_model(question, selected_context)
             answer_text = self._parse_answer(payload)
-            return answer_text or self.fallback.answer(question, normalized_context)
+            return answer_text or self.fallback.answer(question, selected_context)
         except Exception:
-            return self.fallback.answer(question, normalized_context)
+            return self.fallback.answer(question, selected_context)
 
     def format_reasoning_path(self, context: List[Statement]) -> str:
         """Expose same interface as TemplateReasoner."""
@@ -160,10 +163,40 @@ class LLMReasoner:
             raw = resp.read().decode("utf-8")
         return json.loads(raw)
 
+    def _select_context(
+        self, question: str, context: List[Statement], limit: int = 10
+    ) -> list[Statement]:
+        if len(context) <= limit:
+            return context
+
+        question_tokens = set(re.findall(r"\w+", question.lower()))
+
+        def evidence_score(statement: Statement) -> tuple[int, float]:
+            evidence_tokens = set(
+                re.findall(
+                    r"\w+",
+                    f"{statement.subject} {statement.relation} {statement.object}".lower(),
+                )
+            )
+            overlap = len(question_tokens.intersection(evidence_tokens))
+            return overlap, statement.confidence
+
+        ranked = sorted(context, key=evidence_score, reverse=True)
+        return ranked[:limit]
+
     def _parse_answer(self, payload: dict[str, Any]) -> str:
         content = payload["choices"][0]["message"]["content"]
         parsed = json.loads(content)
         answer = parsed.get("answer")
         if isinstance(answer, str) and answer.strip():
-            return answer.strip()
+            return self._normalize_answer(answer)
         return ""
+
+    def _normalize_answer(self, answer: str) -> str:
+        cleaned = answer.strip()
+        cleaned = cleaned.strip('"\'`“”‘’')
+        cleaned = re.sub(r"^the answer is\s+", "", cleaned, flags=re.IGNORECASE)
+        first_segment = re.split(r"(?<=[.!?])\s+|\n", cleaned, maxsplit=1)[0]
+        normalized = first_segment.strip().strip('"\'`“”‘’')
+        normalized = normalized.strip(string.punctuation + "“”‘’")
+        return normalized.strip()
