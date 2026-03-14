@@ -46,7 +46,12 @@ def test_path_scoring_penalizes_long_or_repeated_entities():
 
 def test_evidence_selection_returns_ranked_assertions():
     retriever = GraphRetriever(_build_graph())
-    plan = QueryPlan(query_text="How does Redis do pubsub?", seed_entities=["Redis"], domains=["databases"], intent="multi-hop")
+    plan = QueryPlan(
+        query_text="How does Redis do pubsub?",
+        seed_entities=["Redis"],
+        domains=["databases"],
+        intent="multi-hop",
+    )
     result = retriever.retrieve(plan, mode="beam", beam_width=3)
 
     assert {"evidence", "paths", "entities"}.issubset(result.keys())

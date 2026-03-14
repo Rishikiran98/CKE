@@ -111,7 +111,6 @@ class KnowledgeGraphEngine:
             self._nodes.update([subject, object_])
             self.graph[subject].append({"object": object_, **payload})
 
-
     @staticmethod
     def _normalize_entity(entity: str) -> str:
         """Normalize entity surface form to reduce duplicate nodes."""

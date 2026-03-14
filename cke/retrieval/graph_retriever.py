@@ -127,7 +127,16 @@ class GraphRetriever:
                 max_depth=max_depth,
                 max_nodes=max_nodes,
             )
-        scored_paths = [(path, self._score_path(path, query_text=query_text, seed_entities=seed_entities)) for path in paths if path]
+        scored_paths = [
+            (
+                path,
+                self._score_path(
+                    path, query_text=query_text, seed_entities=seed_entities
+                ),
+            )
+            for path in paths
+            if path
+        ]
         scored_paths.sort(key=lambda item: item[1], reverse=True)
         return scored_paths
 
@@ -144,7 +153,14 @@ class GraphRetriever:
             neighbors = self.graph_engine.get_neighbors(seed)
             expanded += len(neighbors)
             for edge in neighbors:
-                scored.append(([edge], self._score_neighbor(edge, query_text=query_text, seed_entities=seeds_raw)))
+                scored.append(
+                    (
+                        [edge],
+                        self._score_neighbor(
+                            edge, query_text=query_text, seed_entities=seeds_raw
+                        ),
+                    )
+                )
 
         if self.monitor:
             self.monitor.record_neighborhood_expansion(expanded)
@@ -180,7 +196,16 @@ class GraphRetriever:
             for right_path in right_by_node.get(bridge_node, []):
                 bridge_nodes_found.add(bridge_node)
                 candidate = left_path + self._invert_path(right_path)
-                candidates.append((candidate, self._score_bridge(candidate, query_text=query_text, seed_entities=seed_entities)))
+                candidates.append(
+                    (
+                        candidate,
+                        self._score_bridge(
+                            candidate,
+                            query_text=query_text,
+                            seed_entities=seed_entities,
+                        ),
+                    )
+                )
 
         if self.monitor:
             self.monitor.record_bridge_nodes(len(bridge_nodes_found))
@@ -269,7 +294,9 @@ class GraphRetriever:
     ) -> float:
         if not path:
             return 0.0
-        return self._score_path(path, query_text=query_text, seed_entities=seed_entities)
+        return self._score_path(
+            path, query_text=query_text, seed_entities=seed_entities
+        )
 
     def _statement_payload(
         self, st: Statement, index: int | None = None
@@ -337,7 +364,15 @@ class GraphRetriever:
                 for edge in self.graph_engine.get_neighbors(node):
                     candidate = path + [edge]
                     expanded.append(
-                        (edge.object, candidate, self._score_path(candidate, query_text=query_text, seed_entities=seed_entities))
+                        (
+                            edge.object,
+                            candidate,
+                            self._score_path(
+                                candidate,
+                                query_text=query_text,
+                                seed_entities=seed_entities,
+                            ),
+                        )
                     )
                     complete_paths.append(candidate)
             if not expanded:
@@ -368,12 +403,13 @@ class GraphRetriever:
         if not query_tokens and seed_tokens:
             query_tokens = set(seed_tokens)
         relevance_scores = [
-            self._edge_relevance(edge, query_tokens, seed_tokens)
-            for edge in path
+            self._edge_relevance(edge, query_tokens, seed_tokens) for edge in path
         ]
         relevance_bonus = sum(relevance_scores) / len(relevance_scores)
 
-        return max(0.0, base_score + 0.35 * relevance_bonus - repeat_penalty - length_penalty)
+        return max(
+            0.0, base_score + 0.35 * relevance_bonus - repeat_penalty - length_penalty
+        )
 
     def _select_evidence(
         self,
