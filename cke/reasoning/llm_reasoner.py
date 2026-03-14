@@ -194,9 +194,9 @@ class LLMReasoner:
 
     def _normalize_answer(self, answer: str) -> str:
         cleaned = answer.strip()
-        cleaned = cleaned.strip('"\'`“”‘’')
+        cleaned = cleaned.strip("\"'`“”‘’")
         cleaned = re.sub(r"^the answer is\s+", "", cleaned, flags=re.IGNORECASE)
         first_segment = re.split(r"(?<=[.!?])\s+|\n", cleaned, maxsplit=1)[0]
-        normalized = first_segment.strip().strip('"\'`“”‘’')
+        normalized = first_segment.strip().strip("\"'`“”‘’")
         normalized = normalized.strip(string.punctuation + "“”‘’")
         return normalized.strip()
