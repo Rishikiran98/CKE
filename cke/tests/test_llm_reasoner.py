@@ -28,7 +28,7 @@ def test_llm_reasoner_parses_openai_style_response_payload():
             }
         ]
     }
-    assert reasoner._parse_answer(payload) == "Redis uses RESP protocol."
+    assert reasoner._parse_answer(payload) == "Redis uses RESP protocol"
 
 
 def test_template_reasoner_behavior_unchanged():
@@ -66,3 +66,25 @@ def test_llm_reasoner_prompt_is_question_anchored():
     assert "Task: answer the QUESTION" in prompt
     assert "QUESTION: What protocol does Redis use?" in prompt
     assert "[E1] Redis uses RESP" in prompt
+
+
+def test_llm_reasoner_limits_and_ranks_context_for_question_relevance():
+    reasoner = LLMReasoner(config=LLMReasonerConfig(api_key="dummy"))
+    context = [
+        Statement(f"Noise{i}", "related_to", f"Thing{i}", confidence=0.99)
+        for i in range(12)
+    ]
+    context.append(Statement("Animorphs", "is", "Book series", confidence=0.6))
+
+    selected = reasoner._select_context("What is Animorphs?", context, limit=10)
+
+    assert len(selected) == 10
+    assert any(st.subject == "Animorphs" for st in selected)
+
+
+def test_llm_reasoner_normalizes_short_span_answers():
+    reasoner = LLMReasoner(config=LLMReasonerConfig(api_key="dummy"))
+
+    assert reasoner._normalize_answer("The answer is Animorphs.") == "Animorphs"
+    assert reasoner._normalize_answer('"Chief of Protocol"') == "Chief of Protocol"
+    assert reasoner._normalize_answer("yes") == "yes"
