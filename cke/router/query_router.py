@@ -114,10 +114,14 @@ class QueryRouter:
             "result in",
             "because",
         ]
-        bridge_hits = sum(1 for marker in bridge_markers if marker in f" {lower_query} ")
+        bridge_hits = sum(
+            1 for marker in bridge_markers if marker in f" {lower_query} "
+        )
 
         clause_markers = [" and ", " then ", " after ", " before ", " while "]
-        clause_hits = sum(1 for marker in clause_markers if marker in f" {lower_query} ")
+        clause_hits = sum(
+            1 for marker in clause_markers if marker in f" {lower_query} "
+        )
 
         token_count = len(re.findall(r"[a-z0-9]+", lower_query))
         complexity_bonus = 0

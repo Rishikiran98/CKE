@@ -53,12 +53,18 @@ class KnowledgeGraphEngine:
         self._use_nx = nx is not None
         if self._use_nx:
             self.graph = nx.MultiDiGraph()
-            self._adjacency_index: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
-            self._relation_index: dict[str, list[tuple[str, str, dict[str, Any]]]] = defaultdict(list)
+            self._adjacency_index: dict[str, list[tuple[str, dict[str, Any]]]] = (
+                defaultdict(list)
+            )
+            self._relation_index: dict[str, list[tuple[str, str, dict[str, Any]]]] = (
+                defaultdict(list)
+            )
         else:
             self.graph: Dict[str, list[dict[str, Any]]] = defaultdict(list)
             self._nodes: set[str] = set()
-            self._relation_index: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+            self._relation_index: dict[str, list[tuple[str, dict[str, Any]]]] = (
+                defaultdict(list)
+            )
 
         # If a storage backend was provided, warm the in-memory graph.
         if self._storage is not None:
