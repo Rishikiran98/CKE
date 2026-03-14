@@ -26,8 +26,8 @@ def test_bfs_traversal_collects_paths():
     triples = {
         (edge.subject, edge.relation, edge.object) for path in paths for edge in path
     }
-    assert ("redis", "supports", "pubsub") in triples
-    assert ("pubsub", "implemented_via", "resp") in triples
+    assert ("Redis", "supports", "PubSub") in triples
+    assert ("PubSub", "implemented_via", "resp") in triples
 
 
 def test_path_scoring_penalizes_long_or_repeated_entities():

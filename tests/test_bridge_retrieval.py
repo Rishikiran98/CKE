@@ -53,13 +53,13 @@ def test_bridge_mode_finds_connector_for_comparison_intent():
     result = retriever.retrieve(plan)
 
     assert result["paths"], "Expected at least one bridge candidate path"
-    assert "princeton university" in result["entities"]
+    assert "Princeton University" in result["entities"]
 
     flattened = [edge for path in result["paths"] for edge in path["assertions"]]
     assert any(
-        edge["subject"] == "einstein"
+        edge["subject"] == "Einstein"
         and edge["relation"] == "affiliated_with"
-        and edge["object"] == "princeton university"
+        and edge["object"] == "Princeton University"
         for edge in flattened
     )
     assert monitor.bridge_nodes_found >= 1
@@ -78,7 +78,7 @@ def test_neighborhood_mode_returns_local_context_only():
 
     assert result["evidence"]
     assert len(result["evidence"]) <= 12
-    assert all(item["subject"] == "einstein" for item in result["evidence"])
+    assert all(item["subject"] == "Einstein" for item in result["evidence"])
     assert all(
         {"id", "subject", "relation", "object", "trust"}.issubset(item)
         for item in result["evidence"]
@@ -98,4 +98,4 @@ def test_multi_hop_intent_routes_to_path_mode():
     result = retriever.retrieve(plan, mode="bfs")
 
     flattened = [edge for path in result["paths"] for edge in path["assertions"]]
-    assert any(edge["object"] == "nobel prize" for edge in flattened)
+    assert any(edge["object"] == "Nobel Prize" for edge in flattened)

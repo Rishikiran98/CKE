@@ -10,9 +10,9 @@ def test_entity_normalization_merges_surface_forms():
     graph.add_statement("scott derrickson", "occupation", "Director")
 
     entities = set(graph.all_entities())
-    assert "scott derrickson" in entities
-    assert "Scott Derrickson" not in entities
+    assert "Scott Derrickson" in entities
     assert "Scott_Derrickson" not in entities
+    assert "scott derrickson" not in entities
 
     neighbors = graph.get_neighbors("SCOTT_DERRICKSON")
     relations = {edge.relation for edge in neighbors}

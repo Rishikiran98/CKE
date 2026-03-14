@@ -47,6 +47,7 @@ class KnowledgeGraphEngine:
             return
 
         self._storage = self._init_storage(db_path)
+        self._entity_display: dict[str, str] = {}
 
         # --- in-memory graph (always maintained for fast traversal) ---
         self._use_nx = nx is not None
@@ -67,6 +68,7 @@ class KnowledgeGraphEngine:
                     confidence=st.confidence,
                     source=st.source,
                     timestamp=st.timestamp,
+                    object_display=st.object,
                 )
 
     # ------------------------------------------------------------------
@@ -94,14 +96,20 @@ class KnowledgeGraphEngine:
         confidence: float = 1.0,
         source: str | None = None,
         timestamp: str | None = None,
+        object_display: str | None = None,
     ) -> None:
         """Write a statement into the in-memory graph only."""
+        self._entity_display.setdefault(subject, subject)
+        self._entity_display.setdefault(object_, object_display or object_)
+
         payload = {
             "relation": relation,
             "context": context or {},
             "confidence": confidence,
             "source": source,
             "timestamp": timestamp,
+            "object_display": object_display
+            or self._entity_display.get(object_, object_),
         }
         if self._use_nx:
             self.graph.add_node(subject)
@@ -117,6 +125,9 @@ class KnowledgeGraphEngine:
         cleaned = re.sub(r"[^\w\s]", " ", str(entity).lower().replace("_", " "))
         return " ".join(cleaned.split())
 
+    def _display_entity(self, entity: str) -> str:
+        return self._entity_display.get(entity, entity)
+
     # ------------------------------------------------------------------
     # Public API (unchanged surface)
     # ------------------------------------------------------------------
@@ -131,8 +142,12 @@ class KnowledgeGraphEngine:
         source: str | None = None,
         timestamp: str | None = None,
     ) -> None:
-        subject = self._normalize_entity(subject)
-        object_ = self._normalize_entity(object_)
+        subject_display = str(subject)
+        object_display = str(object_)
+        subject = self._normalize_entity(subject_display)
+        object_ = self._normalize_entity(object_display)
+        self._entity_display.setdefault(subject, subject_display)
+        self._entity_display.setdefault(object_, object_display)
 
         if self._backend is not None:
             self._backend.add_assertion(
@@ -213,9 +228,11 @@ class KnowledgeGraphEngine:
                 return []
             return [
                 Statement(
-                    subject=entity,
+                    subject=self._display_entity(entity),
                     relation=edge_data.get("relation", "related_to"),
-                    object=target,
+                    object=edge_data.get(
+                        "object_display", self._display_entity(target)
+                    ),
                     context=dict(edge_data.get("context", {})),
                     confidence=float(edge_data.get("confidence", 1.0)),
                     source=edge_data.get("source"),
@@ -226,9 +243,11 @@ class KnowledgeGraphEngine:
 
         return [
             Statement(
-                subject=entity,
+                subject=self._display_entity(entity),
                 relation=item.get("relation", "related_to"),
-                object=item.get("object", ""),
+                object=item.get(
+                    "object_display", self._display_entity(item.get("object", ""))
+                ),
                 context=dict(item.get("context", {})),
                 confidence=float(item.get("confidence", 1.0)),
                 source=item.get("source"),
@@ -263,9 +282,9 @@ class KnowledgeGraphEngine:
                     )
                     statement_path.append(
                         Statement(
-                            subject=src,
+                            subject=self._display_entity(src),
                             relation=edge.get("relation", "related_to"),
-                            object=dst,
+                            object=self._display_entity(dst),
                             context=dict(edge.get("context", {})),
                             confidence=float(edge.get("confidence", 1.0)),
                             source=edge.get("source"),
@@ -289,7 +308,7 @@ class KnowledgeGraphEngine:
                 continue
             for item in self.graph.get(node, []):
                 nxt = item.get("object", "")
-                if any(step.object == nxt for step in path):
+                if any(self._normalize_entity(step.object) == nxt for step in path):
                     continue
                 queue.append(
                     (
@@ -297,9 +316,9 @@ class KnowledgeGraphEngine:
                         path
                         + [
                             Statement(
-                                subject=node,
+                                subject=self._display_entity(node),
                                 relation=item.get("relation", "related_to"),
-                                object=nxt,
+                                object=self._display_entity(nxt),
                                 context=dict(item.get("context", {})),
                                 confidence=float(item.get("confidence", 1.0)),
                                 source=item.get("source"),
@@ -314,8 +333,8 @@ class KnowledgeGraphEngine:
         if self._backend is not None:
             return self._backend.all_entities()
         if self._use_nx:
-            return list(self.graph.nodes)
-        return sorted(self._nodes)
+            return [self._display_entity(node) for node in self.graph.nodes]
+        return sorted(self._display_entity(node) for node in self._nodes)
 
 
 def GraphEngine(
