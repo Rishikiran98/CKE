@@ -172,12 +172,10 @@ class LLMReasoner:
         question_tokens = set(re.findall(r"\w+", question.lower()))
 
         def evidence_score(statement: Statement) -> tuple[int, float]:
-            evidence_tokens = set(
-                re.findall(
-                    r"\w+",
-                    f"{statement.subject} {statement.relation} {statement.object}".lower(),
-                )
+            statement_text = (
+                f"{statement.subject} {statement.relation} {statement.object}"
             )
+            evidence_tokens = set(re.findall(r"\w+", statement_text.lower()))
             overlap = len(question_tokens.intersection(evidence_tokens))
             return overlap, statement.confidence
 
