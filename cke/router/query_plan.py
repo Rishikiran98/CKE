@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 @dataclass(slots=True)
 class QueryPlan:
+    query_text: str = ""
     seed_entities: list[str] = field(default_factory=list)
     domains: list[str] = field(default_factory=list)
     intent: str = "factoid"

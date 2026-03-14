@@ -76,6 +76,7 @@ class QueryRouter:
             max_depth = max(max_depth, 3)
 
         return QueryPlan(
+            query_text=query,
             seed_entities=entities,
             domains=domains,
             intent=intent,
