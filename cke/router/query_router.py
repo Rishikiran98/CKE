@@ -70,10 +70,13 @@ class QueryRouter:
         intent = self.intent_classifier.classify(query)
         domains = self.classify_domain(query)
 
-        if max_depth is None:
-            max_depth = 3 if intent == "multi-hop" else 2
-        if len(entities) >= 2:
-            max_depth = max(max_depth, 3)
+        max_depth = self._adaptive_depth(
+            query=query,
+            intent=intent,
+            entities=entities,
+            domains=domains,
+            requested_depth=max_depth,
+        )
 
         return QueryPlan(
             query_text=query,
@@ -83,6 +86,63 @@ class QueryRouter:
             max_depth=max_depth,
             max_results=max_results,
         )
+
+    def _adaptive_depth(
+        self,
+        query: str,
+        intent: str,
+        entities: list[str],
+        domains: list[str],
+        requested_depth: int | None,
+    ) -> int:
+        base_depth = 3 if intent == "multi-hop" else 2
+        if intent == "comparison":
+            base_depth = 3
+
+        if len(entities) >= 2:
+            base_depth = max(base_depth, 3)
+
+        lower_query = query.lower()
+        bridge_markers = [
+            " connected ",
+            "connection",
+            "path",
+            "chain",
+            "through",
+            "via",
+            "lead to",
+            "result in",
+            "because",
+        ]
+        bridge_hits = sum(
+            1 for marker in bridge_markers if marker in f" {lower_query} "
+        )
+
+        clause_markers = [" and ", " then ", " after ", " before ", " while "]
+        clause_hits = sum(
+            1 for marker in clause_markers if marker in f" {lower_query} "
+        )
+
+        token_count = len(re.findall(r"[a-z0-9]+", lower_query))
+        complexity_bonus = 0
+        if bridge_hits >= 2:
+            complexity_bonus += 1
+        if clause_hits >= 2:
+            complexity_bonus += 1
+        if token_count > 18:
+            complexity_bonus += 1
+        if len(domains) > 1:
+            complexity_bonus += 1
+
+        adaptive_depth = base_depth + complexity_bonus
+
+        if requested_depth is None:
+            return max(2, min(8, adaptive_depth))
+
+        # `requested_depth` acts as an operator hint, but we still adapt around it.
+        if complexity_bonus == 0:
+            return max(2, min(8, min(requested_depth, adaptive_depth + 1)))
+        return max(2, min(8, max(requested_depth, adaptive_depth)))
 
     def routing_policy_for_query(self, query: str):
         domain = self.domain_classifier.classify_entity(query)

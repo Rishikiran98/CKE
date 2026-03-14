@@ -16,3 +16,15 @@ def test_graph_find_paths():
     paths = graph.find_paths("Redis", "RESP")
     assert paths
     assert len(paths[0]) == 2
+
+
+def test_graph_edges_for_relation_uses_relation_index():
+    graph = KnowledgeGraphEngine()
+    graph.add_statement("Redis", "supports", "PubSub")
+    graph.add_statement("Redis", "supports", "Streams")
+    graph.add_statement("Postgres", "supports", "SQL")
+
+    edges = graph.edges_for_relation("supports")
+
+    assert len(edges) == 3
+    assert {edge.object for edge in edges} == {"PubSub", "Streams", "SQL"}
