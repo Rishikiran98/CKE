@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
 from cke.observability.token_tracker import TokenTracker
+from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
 
 try:
     from openai import OpenAI
@@ -56,6 +57,7 @@ class LLMExtractor(BaseExtractor):
             if (OpenAI and self.config.api_key)
             else None
         )
+        self.trace_logger = ReasoningTraceLogger()
 
     def extract(self, text: str) -> list[Statement]:
         if self.client is None:
@@ -66,6 +68,26 @@ class LLMExtractor(BaseExtractor):
             try:
                 payload = self._call_llm(text)
                 statements = self._parse_response(payload, source_text=text)
+                if statements:
+                    self.trace_logger.write(
+                        ReasoningTrace(
+                            query=text,
+                            entities=sorted({s.subject for s in statements}),
+                            retrieved_facts=[
+                                {
+                                    "subject": st.subject,
+                                    "relation": st.relation,
+                                    "object": st.object,
+                                    "confidence": st.confidence,
+                                }
+                                for st in statements
+                            ],
+                            confidence_score=sum(st.confidence for st in statements) / max(1, len(statements)),
+                            final_answer="extraction_complete",
+                            operators_used=["llm_extraction"],
+                        ),
+                        stage="llm_extractor",
+                    )
                 return statements or self.fallback.extract(text)
             except Exception as exc:  # pragma: no cover - network/runtime variability
                 last_error = exc

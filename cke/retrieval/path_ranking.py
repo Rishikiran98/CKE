@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cke.models import Statement
+from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
 
 
 @dataclass(slots=True)
@@ -28,6 +29,7 @@ class PathRankingModel:
 
     def __init__(self, weights: dict[str, float] | None = None):
         self.weights = self._resolve_weights(weights)
+        self.trace_logger = ReasoningTraceLogger()
 
     def _resolve_weights(self, weights: dict[str, float] | None) -> PathFeatures:
         if not weights:
@@ -52,12 +54,28 @@ class PathRankingModel:
         )
 
     def rank_score(self, features: PathFeatures) -> float:
-        return (
+        score = (
             self.weights.token_overlap * features.token_overlap
             + self.weights.trust * features.trust
             + self.weights.path_length * features.path_length
             + self.weights.relation_match * features.relation_match
         )
+        self.trace_logger.write(
+            ReasoningTrace(
+                query="path_ranking",
+                confidence_score=score,
+                final_answer="rank_score",
+                operators_used=["linear_rank"],
+                retrieved_facts=[{
+                    "token_overlap": features.token_overlap,
+                    "trust": features.trust,
+                    "path_length": features.path_length,
+                    "relation_match": features.relation_match,
+                }],
+            ),
+            stage="path_ranking",
+        )
+        return score
 
     def train(
         self,
