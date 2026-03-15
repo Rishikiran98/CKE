@@ -1,4 +1,4 @@
-"""Path-based symbolic reasoning with rule inference and confidence scoring."""
+"""Path-based symbolic reasoning with ranked traversal and verification."""
 
 from __future__ import annotations
 
@@ -6,9 +6,15 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List
 
+import numpy as np
+
 from cke.models import Statement
 from cke.reasoning.operators import equality
+from cke.reasoning.pattern_memory import PatternMemory
+from cke.reasoning.reasoner import TemplateReasoner
 from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
+from cke.reasoning.verifier import ReasoningVerifier
+from cke.retrieval.embedding_model import EmbeddingModel
 
 
 @dataclass(slots=True)
@@ -48,7 +54,13 @@ class InferenceRule:
 class PathReasoner:
     """Reason over subject→relation→object chains with probabilistic scoring."""
 
-    def __init__(self, rules: List[InferenceRule] | None = None) -> None:
+    def __init__(
+        self,
+        rules: List[InferenceRule] | None = None,
+        verifier: ReasoningVerifier | None = None,
+        pattern_memory: PatternMemory | None = None,
+        embedding_model: EmbeddingModel | None = None,
+    ) -> None:
         self.rules = rules or [
             InferenceRule(
                 name="located_in_transitivity",
@@ -59,6 +71,10 @@ class PathReasoner:
         ]
         self._last_trace: List[str] = []
         self._trace_logger = ReasoningTraceLogger()
+        self._verifier = verifier or ReasoningVerifier()
+        self._pattern_memory = pattern_memory or PatternMemory()
+        self._embedding_model = embedding_model or EmbeddingModel()
+        self._advanced_reasoner = TemplateReasoner()
 
     def answer(self, query: str, context: Iterable[Statement]) -> str:
         evidence_graph = list(context)
@@ -70,6 +86,41 @@ class PathReasoner:
         inferred, rule_traces = self._apply_rules(evidence_graph)
         full_graph = evidence_graph + inferred
 
+        template_run = self._pattern_memory.execute(query, full_graph)
+        if template_run is not None:
+            operator_checks = list(template_run.operator_checks)
+            verification = self._verifier.verify(
+                query=query,
+                context=full_graph,
+                reasoning_path=template_run.path,
+                answer=template_run.answer,
+                confidence_score=template_run.confidence_score,
+                required_facts=template_run.required_facts,
+                operator_checks=operator_checks,
+            )
+            if verification.passed:
+                self._last_trace = [
+                    *template_run.trace,
+                    *rule_traces,
+                    "Template reasoning verification passed.",
+                ]
+                self._emit_trace(
+                    query=query,
+                    entities=list(template_run.entities),
+                    retrieved_facts=full_graph,
+                    graph_paths=[list(template_run.path)],
+                    confidence_score=template_run.confidence_score,
+                    final_answer=template_run.answer,
+                    operators_used=list(template_run.operators_used),
+                )
+                return template_run.answer
+            return self._fallback_to_advanced_reasoner(
+                query=query,
+                full_graph=full_graph,
+                reason=f"Template verification failed: {verification.summary}",
+                rule_traces=rule_traces,
+            )
+
         subject = self._resolve_subject(query, full_graph)
         target_relation = self._resolve_target_relation(query)
 
@@ -78,17 +129,20 @@ class PathReasoner:
             self._emit_trace(query, [], full_graph, [], 0.0, "", [])
             return "I don't have enough graph context to answer that yet."
 
-        best_path = self._best_path(subject, target_relation, full_graph)
+        best_path, traversal_trace = self._best_path(
+            subject, target_relation, query, full_graph
+        )
         if not best_path:
             self._last_trace = [
                 f"No reasoning path found for subject '{subject}'",
                 *rule_traces,
+                *traversal_trace,
             ]
             self._emit_trace(query, [subject], full_graph, [], 0.0, "", [])
             return "Insufficient graph evidence."
 
         confidence = 1.0
-        trace = []
+        trace = [*traversal_trace]
         for edge in best_path:
             confidence *= edge.confidence
             trace.append(
@@ -96,25 +150,53 @@ class PathReasoner:
                 f"(confidence={edge.confidence:.2f})"
             )
         trace.append(f"Path confidence = {confidence:.4f}")
+        reasoning_confidence = self._reasoning_confidence(best_path, confidence)
+        trace.append(f"Reasoning confidence = {reasoning_confidence:.4f}")
         trace.extend(rule_traces)
 
         operators_used: list[str] = []
         final_answer = best_path[-1].object
+        operator_checks: list[dict[str, object]] = []
         maybe_comparison = self._comparison_answer(query, full_graph)
         if maybe_comparison is not None:
-            final_answer = maybe_comparison
+            final_answer = maybe_comparison.answer
             operators_used.append("equality")
+            operator_checks.append(
+                {
+                    "operator": "equality",
+                    "inputs": maybe_comparison.inputs,
+                    "result": maybe_comparison.result,
+                }
+            )
             trace.append(
                 "Deterministic operator equality applied for comparison query."
             )
 
+        verification = self._verifier.verify(
+            query=query,
+            context=full_graph,
+            reasoning_path=best_path,
+            answer=final_answer,
+            confidence_score=reasoning_confidence,
+            required_facts=self._required_facts_for_query(query, full_graph),
+            operator_checks=operator_checks,
+        )
+        if not verification.passed:
+            return self._fallback_to_advanced_reasoner(
+                query=query,
+                full_graph=full_graph,
+                reason=f"Reasoning verification failed: {verification.summary}",
+                rule_traces=trace,
+            )
+
+        trace.append("Reasoning verification passed.")
         self._last_trace = trace
         self._emit_trace(
             query=query,
             entities=[subject],
             retrieved_facts=full_graph,
             graph_paths=[best_path],
-            confidence_score=confidence,
+            confidence_score=reasoning_confidence,
             final_answer=final_answer,
             operators_used=operators_used,
         )
@@ -148,6 +230,7 @@ class PathReasoner:
                     "relation": st.relation,
                     "object": st.object,
                     "confidence": st.confidence,
+                    "trust_score": self._trust_score(st),
                 }
                 for st in retrieved_facts
             ],
@@ -158,6 +241,7 @@ class PathReasoner:
                         "relation": edge.relation,
                         "object": edge.object,
                         "confidence": edge.confidence,
+                        "trust_score": self._trust_score(edge),
                     }
                     for edge in path
                 ]
@@ -169,7 +253,9 @@ class PathReasoner:
         )
         self._trace_logger.write(trace, stage="path_reasoner")
 
-    def _comparison_answer(self, query: str, graph: list[Statement]) -> str | None:
+    def _comparison_answer(
+        self, query: str, graph: list[Statement]
+    ) -> _ComparisonResult | None:
         lowered = query.lower()
         if "same nationality" not in lowered:
             return None
@@ -194,7 +280,12 @@ class PathReasoner:
         )
         if left_nat is None or right_nat is None:
             return None
-        return "yes" if equality(left_nat, right_nat) else "no"
+        result = equality(left_nat, right_nat)
+        return _ComparisonResult(
+            answer="yes" if result else "no",
+            inputs=(left_nat, right_nat),
+            result=result,
+        )
 
     def _apply_rules(
         self, statements: List[Statement]
@@ -236,22 +327,62 @@ class PathReasoner:
             return match.group(1)
         return None
 
-    def _edge_rank(self, edge: Statement, target_relation: str | None) -> float:
-        relation_bonus = (
-            1.0 if target_relation and edge.relation == target_relation else 0.6
+    def _edge_rank(
+        self, edge: Statement, query: str, query_embedding: np.ndarray
+    ) -> float:
+        semantic_similarity = self._semantic_similarity(edge, query, query_embedding)
+        return semantic_similarity * self._trust_score(edge)
+
+    @staticmethod
+    def _trust_score(edge: Statement) -> float:
+        for key in ("trust_score", "resolved_trust", "confidence_score"):
+            value = edge.context.get(key)
+            if value is None:
+                continue
+            try:
+                return max(0.0, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                continue
+        return max(0.0, min(1.0, float(edge.confidence)))
+
+    def _semantic_similarity(
+        self,
+        edge: Statement,
+        query: str,
+        query_embedding: np.ndarray,
+    ) -> float:
+        edge_text = " ".join(
+            [
+                edge.subject,
+                edge.relation,
+                edge.object,
+                str(edge.context.get("text", "")),
+            ]
+        ).strip()
+        edge_embedding = self._embedding_model.embed_text(edge_text)
+        query_norm = float(np.linalg.norm(query_embedding))
+        edge_norm = float(np.linalg.norm(edge_embedding))
+        if query_norm == 0.0 or edge_norm == 0.0:
+            return 0.0
+        similarity = float(
+            np.dot(query_embedding, edge_embedding) / (query_norm * edge_norm)
         )
-        return edge.confidence * relation_bonus
+        return max(0.0, similarity)
 
     def _best_path(
         self,
         subject: str,
         target_relation: str | None,
+        query: str,
         graph: List[Statement],
         min_confidence: float = 0.85,
         info_gain_epsilon: float = 0.05,
-    ) -> List[Statement]:
+        max_neighbors: int = 3,
+    ) -> tuple[List[Statement], list[str]]:
         frontier: list[tuple[str, List[Statement], float]] = [(subject, [], 1.0)]
         best: tuple[List[Statement], int, float] | None = None
+        traversal_trace: list[str] = []
+        query_embedding = self._embedding_model.embed_text(query)
 
         while frontier:
             node, path, score = frontier.pop(0)
@@ -260,11 +391,16 @@ class PathReasoner:
             outgoing = [edge for edge in graph if edge.subject == node]
             ranked_outgoing = sorted(
                 outgoing,
-                key=lambda edge: self._edge_rank(edge, target_relation),
+                key=lambda edge: self._edge_rank(edge, query, query_embedding),
                 reverse=True,
-            )[:3]
-
-            for edge in ranked_outgoing:
+            )[:max_neighbors]
+            for rank, edge in enumerate(ranked_outgoing, start=1):
+                rank_score = self._edge_rank(edge, query, query_embedding)
+                traversal_trace.append(
+                    "Ranked expansion "
+                    f"{node} -> {edge.object} via {edge.relation} "
+                    f"(rank={rank}, score={rank_score:.4f})"
+                )
                 new_path = path + [edge]
                 new_score = score * edge.confidence
                 info_gain = abs(new_score - score)
@@ -292,5 +428,60 @@ class PathReasoner:
                 frontier.append((edge.object, new_path, new_score))
 
         if best:
-            return best[0]
-        return []
+            return best[0], traversal_trace
+        return [], traversal_trace
+
+    @staticmethod
+    def _reasoning_confidence(path: list[Statement], path_confidence: float) -> float:
+        if not path:
+            return 0.0
+        depth = max(1, len(path))
+        return max(0.0, min(1.0, path_confidence ** (1.0 / depth)))
+
+    def _required_facts_for_query(
+        self,
+        query: str,
+        graph: list[Statement],
+    ) -> list[tuple[str, str]]:
+        lowered = query.lower()
+        if "same nationality" not in lowered:
+            return []
+        entities = sorted({st.subject for st in graph if st.relation == "nationality"})[
+            :2
+        ]
+        return [(entity, "nationality") for entity in entities]
+
+    def _fallback_to_advanced_reasoner(
+        self,
+        query: str,
+        full_graph: list[Statement],
+        reason: str,
+        rule_traces: list[str],
+    ) -> str:
+        answer = self._advanced_reasoner.answer(query, full_graph)
+        self._last_trace = [*rule_traces, reason, "Fallback route -> advanced_reasoner"]
+        self._emit_trace(
+            query=query,
+            entities=self._resolve_entities(full_graph),
+            retrieved_facts=full_graph,
+            graph_paths=[],
+            confidence_score=0.0,
+            final_answer=answer,
+            operators_used=["advanced_reasoner_fallback"],
+        )
+        return answer
+
+    @staticmethod
+    def _resolve_entities(graph: list[Statement]) -> list[str]:
+        entities: set[str] = set()
+        for st in graph:
+            entities.add(st.subject)
+            entities.add(st.object)
+        return sorted(entities)
+
+
+@dataclass(slots=True)
+class _ComparisonResult:
+    answer: str
+    inputs: tuple[str, str]
+    result: bool
