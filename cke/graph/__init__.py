@@ -8,6 +8,7 @@ __all__ = [
     "GraphStore",
     "GraphAssertion",
     "GraphEntity",
+    "GraphQueryEngine",
 ]
 
 
@@ -16,6 +17,10 @@ def __getattr__(name: str):
         from cke.graph.assertion_validator import AssertionValidator
 
         return AssertionValidator
+    if name == "GraphQueryEngine":
+        from cke.graph.query_engine import GraphQueryEngine
+
+        return GraphQueryEngine
     if name in {"GraphStore", "GraphAssertion", "GraphEntity"}:
         from cke.graph.graph_store import GraphAssertion, GraphEntity, GraphStore
 

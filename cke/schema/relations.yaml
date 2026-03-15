@@ -1,0 +1,23 @@
+relations:
+  directed:
+    aliases:
+      - directed
+      - director_of
+      - was_director_of
+  acted_in:
+    aliases:
+      - starred_in
+      - acted_in
+      - featured_in
+  born_in:
+    aliases:
+      - born_in
+      - birthplace
+  located_in:
+    aliases:
+      - located_in
+      - situated_in
+  member_of:
+    aliases:
+      - member_of
+      - belongs_to
