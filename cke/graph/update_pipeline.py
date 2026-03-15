@@ -80,3 +80,12 @@ class GraphUpdatePipeline:
             )
 
         return merged
+
+    def ingest_delta(
+        self, assertions: list[Assertion], mode: str = "upsert"
+    ) -> list[Assertion]:
+        """Incremental ingestion entrypoint for delta updates."""
+        merged = self.update_graph(assertions)
+        if mode.strip().lower() not in {"upsert", "append"}:
+            raise ValueError("mode must be 'upsert' or 'append'")
+        return merged
