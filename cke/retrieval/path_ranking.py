@@ -15,23 +15,48 @@ class PathFeatures:
     relation_match: float
 
 
+DEFAULT_PATH_WEIGHTS = PathFeatures(
+    token_overlap=0.25,
+    trust=0.20,
+    path_length=0.10,
+    relation_match=0.45,
+)
+
+
 class PathRankingModel:
     """Lightweight linear ranking model trained via configurable weights."""
 
     def __init__(self, weights: dict[str, float] | None = None):
-        self.weights = weights or {
-            "token_overlap": 0.25,
-            "trust": 0.20,
-            "path_length": 0.10,
-            "relation_match": 0.45,
-        }
+        self.weights = self._resolve_weights(weights)
+
+    def _resolve_weights(self, weights: dict[str, float] | None) -> PathFeatures:
+        if not weights:
+            return PathFeatures(
+                token_overlap=DEFAULT_PATH_WEIGHTS.token_overlap,
+                trust=DEFAULT_PATH_WEIGHTS.trust,
+                path_length=DEFAULT_PATH_WEIGHTS.path_length,
+                relation_match=DEFAULT_PATH_WEIGHTS.relation_match,
+            )
+
+        return PathFeatures(
+            token_overlap=float(
+                weights.get("token_overlap", DEFAULT_PATH_WEIGHTS.token_overlap)
+            ),
+            trust=float(weights.get("trust", DEFAULT_PATH_WEIGHTS.trust)),
+            path_length=float(
+                weights.get("path_length", DEFAULT_PATH_WEIGHTS.path_length)
+            ),
+            relation_match=float(
+                weights.get("relation_match", DEFAULT_PATH_WEIGHTS.relation_match)
+            ),
+        )
 
     def rank_score(self, features: PathFeatures) -> float:
         return (
-            self.weights["token_overlap"] * features.token_overlap
-            + self.weights["trust"] * features.trust
-            + self.weights["path_length"] * features.path_length
-            + self.weights["relation_match"] * features.relation_match
+            self.weights.token_overlap * features.token_overlap
+            + self.weights.trust * features.trust
+            + self.weights.path_length * features.path_length
+            + self.weights.relation_match * features.relation_match
         )
 
     def train(
@@ -56,7 +81,8 @@ class PathRankingModel:
                 grads["relation_match"] += error * features.relation_match
             n = float(len(examples))
             for key in keys:
-                self.weights[key] -= lr * grads[key] / n
+                value = getattr(self.weights, key) - lr * grads[key] / n
+                setattr(self.weights, key, value)
 
 
 def relation_match_score(
