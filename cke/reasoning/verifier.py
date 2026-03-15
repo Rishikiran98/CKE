@@ -56,7 +56,8 @@ class ReasoningVerifier:
         confidence_valid = confidence_score >= self.confidence_threshold
         if not confidence_valid:
             issues.append(
-                f"confidence_below_threshold:{confidence_score:.3f}<{self.confidence_threshold:.3f}"
+                "confidence_below_threshold:"
+                f"{confidence_score:.3f}<{self.confidence_threshold:.3f}"
             )
 
         passed = evidence_complete and logical_valid and confidence_valid
