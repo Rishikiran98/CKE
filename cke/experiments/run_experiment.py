@@ -13,6 +13,7 @@ from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.reasoning.llm_reasoner import LLMReasoner
+from cke.reasoning.path_reasoner import PathReasoner
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.retrieval.rag_baseline import RAGBaseline
 from cke.retrieval.retriever import GraphRetriever
@@ -59,7 +60,9 @@ def build_extractor(name: str) -> BaseExtractor:
 def build_reasoner(name: str):
     if name == "llm":
         return LLMReasoner()
-    return TemplateReasoner()
+    if name == "template":
+        return TemplateReasoner()
+    return PathReasoner()
 
 
 def evaluate(
@@ -121,7 +124,9 @@ def main() -> None:
         help="Path to HotpotQA-like json sample",
     )
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
-    parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
+    parser.add_argument(
+        "--reasoner", choices=["template", "path", "llm"], default="path"
+    )
     args = parser.parse_args()
 
     metrics = evaluate(

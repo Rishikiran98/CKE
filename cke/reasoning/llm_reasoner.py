@@ -11,6 +11,7 @@ from typing import Any, Iterable, List
 from urllib import request
 
 from cke.models import Statement
+from cke.reasoning.path_reasoner import PathReasoner
 from cke.reasoning.reasoner import TemplateReasoner
 
 try:  # pragma: no cover - optional dependency
@@ -35,7 +36,7 @@ class LLMReasoner:
     def __init__(
         self,
         config: LLMReasonerConfig | None = None,
-        fallback: TemplateReasoner | None = None,
+        fallback: PathReasoner | TemplateReasoner | None = None,
     ) -> None:
         self.config = config or LLMReasonerConfig(
             endpoint=os.getenv(
@@ -45,7 +46,7 @@ class LLMReasoner:
             model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
             api_key=os.getenv("CKE_LLM_API_KEY"),
         )
-        self.fallback = fallback or TemplateReasoner()
+        self.fallback = fallback or PathReasoner()
 
     def answer(self, question: str, context: Iterable[Any]) -> str:
         """Answer a question grounded in graph statements."""
