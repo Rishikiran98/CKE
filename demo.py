@@ -9,6 +9,7 @@ from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.reasoning.llm_reasoner import LLMReasoner
+from cke.reasoning.path_reasoner import PathReasoner
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.retrieval.retriever import GraphRetriever
 
@@ -22,13 +23,17 @@ def _build_extractor(name: str) -> BaseExtractor:
 def _build_reasoner(name: str):
     if name == "llm":
         return LLMReasoner()
-    return TemplateReasoner()
+    if name == "template":
+        return TemplateReasoner()
+    return PathReasoner()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CKE demo")
     parser.add_argument("--extractor", choices=["rule", "llm"], default="rule")
-    parser.add_argument("--reasoner", choices=["template", "llm"], default="template")
+    parser.add_argument(
+        "--reasoner", choices=["template", "path", "llm"], default="path"
+    )
     parser.add_argument(
         "--db-path",
         type=Path,

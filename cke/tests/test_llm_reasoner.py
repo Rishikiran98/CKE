@@ -1,16 +1,20 @@
 from cke.models import Statement
 from cke.reasoning.llm_reasoner import LLMReasoner, LLMReasonerConfig
+from cke.reasoning.path_reasoner import PathReasoner
 from cke.reasoning.reasoner import TemplateReasoner
 
 
 def test_llm_reasoner_falls_back_without_api_key():
-    context = [Statement("Redis", "uses", "RESP")]
+    context = [
+        Statement("Top Gun", "starred", "Tom Cruise", confidence=0.9),
+        Statement("Top Gun", "directed_by", "Tony Scott", confidence=0.95),
+        Statement("Tony Scott", "nationality", "British", confidence=0.8),
+    ]
     llm_reasoner = LLMReasoner(config=LLMReasonerConfig(api_key=None))
-    template_answer = TemplateReasoner().answer(
-        "What protocol does Redis use?", context
-    )
+
     assert (
-        llm_reasoner.answer("What protocol does Redis use?", context) == template_answer
+        llm_reasoner.answer("What is Top Gun director nationality?", context)
+        == "British"
     )
 
 
@@ -41,19 +45,19 @@ def test_template_reasoner_behavior_unchanged():
 
 
 def test_llm_reasoner_normalizes_dict_evidence_for_fallback():
-    llm_reasoner = LLMReasoner(config=LLMReasonerConfig(api_key=None))
+    llm_reasoner = LLMReasoner(
+        config=LLMReasonerConfig(api_key=None),
+        fallback=PathReasoner(),
+    )
     context = [
         {
-            "subject": "Redis",
-            "relation": "uses",
-            "object": "RESP",
+            "subject": "Tony Scott",
+            "relation": "nationality",
+            "object": "British",
             "trust_score": 0.91,
         }
     ]
-    assert (
-        llm_reasoner.answer("What protocol does Redis use?", context)
-        == "Redis uses RESP protocol."
-    )
+    assert llm_reasoner.answer("What is Tony Scott nationality?", context) == "British"
 
 
 def test_llm_reasoner_prompt_is_question_anchored():
