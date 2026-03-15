@@ -10,3 +10,5 @@ python-dotenv
 fastapi
 uvicorn
 neo4j
+PyYAML
+rapidfuzz
