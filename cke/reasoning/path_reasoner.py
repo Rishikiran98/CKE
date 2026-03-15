@@ -129,7 +129,9 @@ class PathReasoner:
             self._emit_trace(query, [], full_graph, [], 0.0, "", [])
             return "I don't have enough graph context to answer that yet."
 
-        best_path, traversal_trace = self._best_path(subject, target_relation, query, full_graph)
+        best_path, traversal_trace = self._best_path(
+            subject, target_relation, query, full_graph
+        )
         if not best_path:
             self._last_trace = [
                 f"No reasoning path found for subject '{subject}'",
@@ -251,7 +253,9 @@ class PathReasoner:
         )
         self._trace_logger.write(trace, stage="path_reasoner")
 
-    def _comparison_answer(self, query: str, graph: list[Statement]) -> _ComparisonResult | None:
+    def _comparison_answer(
+        self, query: str, graph: list[Statement]
+    ) -> _ComparisonResult | None:
         lowered = query.lower()
         if "same nationality" not in lowered:
             return None
@@ -323,7 +327,9 @@ class PathReasoner:
             return match.group(1)
         return None
 
-    def _edge_rank(self, edge: Statement, query: str, query_embedding: np.ndarray) -> float:
+    def _edge_rank(
+        self, edge: Statement, query: str, query_embedding: np.ndarray
+    ) -> float:
         semantic_similarity = self._semantic_similarity(edge, query, query_embedding)
         return semantic_similarity * self._trust_score(edge)
 
@@ -358,7 +364,9 @@ class PathReasoner:
         edge_norm = float(np.linalg.norm(edge_embedding))
         if query_norm == 0.0 or edge_norm == 0.0:
             return 0.0
-        similarity = float(np.dot(query_embedding, edge_embedding) / (query_norm * edge_norm))
+        similarity = float(
+            np.dot(query_embedding, edge_embedding) / (query_norm * edge_norm)
+        )
         return max(0.0, similarity)
 
     def _best_path(
@@ -423,7 +431,6 @@ class PathReasoner:
             return best[0], traversal_trace
         return [], traversal_trace
 
-
     @staticmethod
     def _reasoning_confidence(path: list[Statement], path_confidence: float) -> float:
         if not path:
@@ -439,7 +446,9 @@ class PathReasoner:
         lowered = query.lower()
         if "same nationality" not in lowered:
             return []
-        entities = sorted({st.subject for st in graph if st.relation == "nationality"})[:2]
+        entities = sorted({st.subject for st in graph if st.relation == "nationality"})[
+            :2
+        ]
         return [(entity, "nationality") for entity in entities]
 
     def _fallback_to_advanced_reasoner(

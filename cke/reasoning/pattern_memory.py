@@ -58,7 +58,9 @@ class PatternMemory:
         if "same nationality" not in query.lower():
             return None
 
-        entities = sorted({st.subject for st in context_list if st.relation == "nationality"})
+        entities = sorted(
+            {st.subject for st in context_list if st.relation == "nationality"}
+        )
         if len(entities) < 2:
             return None
 

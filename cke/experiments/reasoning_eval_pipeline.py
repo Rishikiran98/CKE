@@ -90,7 +90,9 @@ class ReasoningEvalPipeline:
 
     def _edges_traversed(self) -> int:
         trace = self.reasoner.format_reasoning_path()
-        ranked = [line for line in trace.splitlines() if line.startswith("Ranked expansion")]
+        ranked = [
+            line for line in trace.splitlines() if line.startswith("Ranked expansion")
+        ]
         return len(ranked)
 
     @staticmethod
@@ -98,7 +100,9 @@ class ReasoningEvalPipeline:
         return re.findall(r"\w+", text.lower())
 
     def _exact_match(self, prediction: str, target: str) -> bool:
-        return " ".join(self._normalize(prediction)) == " ".join(self._normalize(target))
+        return " ".join(self._normalize(prediction)) == " ".join(
+            self._normalize(target)
+        )
 
     def _f1_score(self, prediction: str, target: str) -> float:
         pred_tokens = self._normalize(prediction)

@@ -14,7 +14,9 @@ def test_verifier_fails_when_required_evidence_missing():
         answer="yes",
         confidence_score=0.95,
         required_facts=[("A", "nationality"), ("B", "nationality")],
-        operator_checks=[{"operator": "equality", "inputs": ("US", "US"), "result": True}],
+        operator_checks=[
+            {"operator": "equality", "inputs": ("US", "US"), "result": True}
+        ],
     )
 
     assert not result.passed
