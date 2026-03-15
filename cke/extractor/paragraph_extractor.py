@@ -12,7 +12,9 @@ class ParagraphExtractor:
         self.window_size = max(1, window_size)
 
     def sentence_windows(self, document: str) -> list[str]:
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", document) if s.strip()]
+        sentences = [
+            s.strip() for s in re.split(r"(?<=[.!?])\s+", document) if s.strip()
+        ]
         if not sentences:
             return []
         if len(sentences) <= self.window_size:

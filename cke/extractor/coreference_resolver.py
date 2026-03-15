@@ -60,7 +60,9 @@ class CoreferenceResolver:
         return "".join(output_tokens).strip()
 
     def _resolve_heuristic(self, document: str) -> str:
-        sentences = [seg.strip() for seg in re.split(r"(?<=[.!?])\s+", document) if seg.strip()]
+        sentences = [
+            seg.strip() for seg in re.split(r"(?<=[.!?])\s+", document) if seg.strip()
+        ]
         antecedent = ""
         rewritten: list[str] = []
         for sentence in sentences:

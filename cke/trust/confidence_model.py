@@ -43,16 +43,20 @@ class ConfidenceModel:
         linear = (
             self.weights["bias"]
             + self.weights["span_quality"] * self._clip(features.span_quality)
-            + self.weights["entity_link_confidence"] * self._clip(features.entity_link_confidence)
+            + self.weights["entity_link_confidence"]
+            * self._clip(features.entity_link_confidence)
             + self.weights["llm_logprob"] * self._clip_logprob(features.llm_logprob)
-            + self.weights["source_reliability"] * self._clip(features.source_reliability)
+            + self.weights["source_reliability"]
+            * self._clip(features.source_reliability)
             + self.weights["relation_prior"] * relation_prior
         )
         return self._sigmoid(linear)
 
     def _coerce_features(self, assertion: Any) -> ConfidenceFeatures:
         context = getattr(assertion, "context", {}) or {}
-        relation = getattr(assertion, "relation", context.get("relation_type", "related_to"))
+        relation = getattr(
+            assertion, "relation", context.get("relation_type", "related_to")
+        )
         return ConfidenceFeatures(
             span_quality=float(context.get("span_quality", 0.7)),
             relation_type=str(relation),

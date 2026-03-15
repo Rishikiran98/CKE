@@ -16,7 +16,9 @@ class RelationMapper:
 
     def __init__(self, schema_path: str | None = None, threshold: float = 0.78) -> None:
         self.threshold = threshold
-        self.schema_path = schema_path or str(Path(__file__).with_name("relations.yaml"))
+        self.schema_path = schema_path or str(
+            Path(__file__).with_name("relations.yaml")
+        )
         self.relations = self._load_relations()
         self.alias_to_relation = self._build_alias_index(self.relations)
 
@@ -53,7 +55,9 @@ class RelationMapper:
             payload = yaml.safe_load(handle) or {}
         return payload.get("relations", {})
 
-    def _build_alias_index(self, relations: dict[str, dict[str, list[str]]]) -> dict[str, str]:
+    def _build_alias_index(
+        self, relations: dict[str, dict[str, list[str]]]
+    ) -> dict[str, str]:
         alias_map: dict[str, str] = {}
         for canonical, config in relations.items():
             normalized_canonical = self._normalize(canonical)

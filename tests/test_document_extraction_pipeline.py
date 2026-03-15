@@ -67,7 +67,9 @@ def test_confidence_model_outputs_probability():
 
 def test_extraction_pipeline_integrates_components():
     graph = KnowledgeGraphEngine()
-    pipeline = ExtractionPipeline(graph_engine=graph, extractor=StubExtractor(), window_size=2)
+    pipeline = ExtractionPipeline(
+        graph_engine=graph, extractor=StubExtractor(), window_size=2
+    )
     doc = "Christopher Nolan directed Inception. He later directed Interstellar."
 
     assertions = pipeline.process_document(doc, source="unit-test")

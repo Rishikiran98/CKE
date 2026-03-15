@@ -24,15 +24,21 @@ class ExtractionPipeline:
         self.relation_mapper = RelationMapper()
         self.confidence_model = ConfidenceModel()
 
-    def process_document(self, document: str, source: str | None = None) -> list[Statement]:
+    def process_document(
+        self, document: str, source: str | None = None
+    ) -> list[Statement]:
         resolved_doc = self.coref.resolve(document)
         windows = self.paragraph_extractor.sentence_windows(resolved_doc)
         assertions: list[Statement] = []
 
         for window in windows:
             for statement in self.extractor.extract(window):
-                subject_result = self.entity_resolver.resolve_with_score(statement.subject)
-                object_result = self.entity_resolver.resolve_with_score(statement.object)
+                subject_result = self.entity_resolver.resolve_with_score(
+                    statement.subject
+                )
+                object_result = self.entity_resolver.resolve_with_score(
+                    statement.object
+                )
                 relation = self.relation_mapper.map(statement.relation)
 
                 context = dict(statement.context)

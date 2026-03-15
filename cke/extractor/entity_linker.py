@@ -79,7 +79,9 @@ class EntityResolver:
 
         canonical = self._title_case(entity)
         self.aliases[normalized] = canonical
-        return ResolutionResult(canonical=canonical, confidence=max(best_fuzzy, best_emb, 0.6))
+        return ResolutionResult(
+            canonical=canonical, confidence=max(best_fuzzy, best_emb, 0.6)
+        )
 
     def _graph_candidates(self) -> list[str]:
         getter = getattr(self.graph_engine, "get_entities", None)
@@ -89,7 +91,9 @@ class EntityResolver:
             entities = self.graph_engine.all_entities()
         return [str(e) for e in entities if str(e).strip()]
 
-    def _best_fuzzy(self, mention: str, candidates: list[str]) -> tuple[str | None, float]:
+    def _best_fuzzy(
+        self, mention: str, candidates: list[str]
+    ) -> tuple[str | None, float]:
         best: str | None = None
         best_score = 0.0
         for candidate in candidates:
@@ -99,7 +103,9 @@ class EntityResolver:
                 best_score = score
         return best, best_score
 
-    def _best_embedding(self, mention: str, candidates: list[str]) -> tuple[str | None, float]:
+    def _best_embedding(
+        self, mention: str, candidates: list[str]
+    ) -> tuple[str | None, float]:
         best: str | None = None
         best_score = 0.0
         for candidate in candidates:
@@ -118,7 +124,11 @@ class EntityResolver:
     @staticmethod
     def _title_case(text: str) -> str:
         compact = re.sub(r"\s+", " ", str(text)).strip()
-        return " ".join(part.capitalize() for part in compact.split()) if compact else compact
+        return (
+            " ".join(part.capitalize() for part in compact.split())
+            if compact
+            else compact
+        )
 
     @staticmethod
     def _fuzzy_score(left: str, right: str) -> float:
