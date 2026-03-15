@@ -5,13 +5,14 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.graph.domain_classifier import DomainClassifier
 from cke.graph.domain_registry import DomainRegistry
+from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.router.entity_linker import EntityLinker
 from cke.router.intent_classifier import IntentClassifier
 from cke.router.query_decomposer import QueryDecomposer
 from cke.router.query_plan import QueryPlan
+from cke.trust.confidence_model import ConfidenceModel, ReasoningConfidenceSignals
 
 
 class QueryRouter:
@@ -27,6 +28,7 @@ class QueryRouter:
         self.domain_classifier = domain_classifier or DomainClassifier()
         self.domain_registry = domain_registry
         self.query_decomposer = QueryDecomposer()
+        self.confidence_model = ConfidenceModel()
 
     def detect_entities(
         self,
@@ -81,6 +83,10 @@ class QueryRouter:
         )
 
         decomposition = self.query_decomposer.decompose(query, entities)
+        confidence_score = self._estimate_confidence(
+            intent, entities, decomposition.steps
+        )
+        reasoning_route = self._reasoning_route(confidence_score)
 
         return QueryPlan(
             query_text=query,
@@ -97,7 +103,31 @@ class QueryRouter:
             intent=intent,
             max_depth=max_depth,
             max_results=max_results,
+            confidence_score=confidence_score,
+            reasoning_route=reasoning_route,
         )
+
+    def _estimate_confidence(
+        self, intent: str, entities: list[str], steps: list[object]
+    ) -> float:
+        relation_steps = [
+            step for step in steps if getattr(step, "step_type", "") == "relation"
+        ]
+        signals = ReasoningConfidenceSignals(
+            fact_completeness=min(1.0, len(entities) / 2),
+            graph_coherence=0.9 if intent in {"factoid", "comparison"} else 0.7,
+            operator_validity=0.85 if relation_steps else 0.6,
+            retrieval_relevance=min(1.0, len(steps) / 4),
+        )
+        return self.confidence_model.reasoning_confidence(signals)
+
+    @staticmethod
+    def _reasoning_route(confidence_score: float) -> str:
+        if confidence_score > 0.8:
+            return "answer_immediately"
+        if confidence_score > 0.6:
+            return "graph_traversal"
+        return "advanced_reasoner"
 
     def _adaptive_depth(
         self,
@@ -151,7 +181,6 @@ class QueryRouter:
         if requested_depth is None:
             return max(2, min(8, adaptive_depth))
 
-        # `requested_depth` acts as an operator hint, but we still adapt around it.
         if complexity_bonus == 0:
             return max(2, min(8, min(requested_depth, adaptive_depth + 1)))
         return max(2, min(8, max(requested_depth, adaptive_depth)))

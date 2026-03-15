@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 
@@ -60,20 +61,24 @@ class TrustEngine:
         )
 
     def compute_trust(self, assertion: Assertion, now: float | None = None) -> float:
-        """Compute trust score with calibrated weighting and time decay."""
+        """Compute ingestion trust from source, extraction confidence, and decay."""
         source_weight = self.source_weights.get(
             assertion.source, self.source_weights["unknown"]
         )
-        trust_0 = self.calibrator.calibrate(
-            source_weight=source_weight,
-            evidence_count=assertion.evidence_count,
-            extractor_confidence=assertion.extractor_confidence,
-        )
         now_ts = float(time.time()) if now is None else float(now)
-        trust = self.calibrator.apply_decay(
-            trust_0, now=now_ts, observed_ts=assertion.timestamp
+        observed = float(assertion.timestamp)
+        age = max(0.0, now_ts - observed)
+        tau = max(float(self.calibrator.config.tau), 1e-9)
+        temporal_decay = math.exp(-(age / tau))
+        extraction_confidence = max(
+            0.0, min(1.0, float(assertion.extractor_confidence))
+        )
+
+        trust = max(
+            0.0, min(1.0, source_weight * extraction_confidence * temporal_decay)
         )
         assertion.trust_score = trust
+        assertion.confidence = trust
         return trust
 
     def fit_from_graph(self, graph: object) -> dict[str, float]:

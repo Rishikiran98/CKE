@@ -14,3 +14,5 @@ class QueryPlan:
     intent: str = "factoid"
     max_depth: int = 2
     max_results: int = 12
+    confidence_score: float = 0.0
+    reasoning_route: str = "advanced_reasoner"

@@ -47,4 +47,6 @@ class ConflictEngine:
         else:
             winner, loser = assertion_b, assertion_a
         loser.secondary = True
+        loser.qualifiers = {**loser.qualifiers, "contradiction_flag": True}
+        winner.qualifiers = {**winner.qualifiers, "contradiction_flag": False}
         return winner, loser
