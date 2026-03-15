@@ -388,6 +388,10 @@ class KnowledgeGraphEngine:
             for subject, item in self._relation_index.get(relation, [])
         ]
 
+    def get_entities(self) -> list[str]:
+        """Backward-compatible entity listing alias for linkers."""
+        return self.all_entities()
+
     def all_entities(self) -> list[str]:
         if self._backend is not None:
             return self._backend.all_entities()
