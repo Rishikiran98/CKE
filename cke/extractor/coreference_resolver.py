@@ -30,12 +30,18 @@ class CoreferenceResolver:
         if spacy is None:
             return None
         for model_name in ("en_coreference_web_trf", "en_core_web_sm"):
-            try:
-                return spacy.load(model_name)
-            except Exception:
-                # Model not present or incompatible; try the next configured model.
-                pass
+            model = self._try_load_spacy_model(model_name)
+            if model is not None:
+                return model
         return None
+
+    @staticmethod
+    def _try_load_spacy_model(model_name: str):
+        try:
+            return spacy.load(model_name)
+        except Exception:
+            # Model not present or incompatible in current runtime.
+            return None
 
     def _resolve_with_spacy(self, document: str) -> str | None:
         if self._nlp is None:
