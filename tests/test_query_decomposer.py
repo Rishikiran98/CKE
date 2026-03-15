@@ -3,7 +3,10 @@ from cke.router.query_decomposer import QueryDecomposer
 
 def test_query_decomposer_hotpot_style_chain():
     decomposer = QueryDecomposer()
-    query = "What nationality is the director of the film that starred Tom Cruise in Top Gun?"
+    query = (
+        "What nationality is the director of the film that starred Tom Cruise "
+        "in Top Gun?"
+    )
     result = decomposer.decompose(query, entities=["Top Gun", "Tom Cruise"])
 
     values = [(step.step_type, step.value) for step in result.steps]
