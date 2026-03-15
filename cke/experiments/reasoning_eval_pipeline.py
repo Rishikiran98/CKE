@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cke.datasets.registry import load_dataset
+from cke.datasets.registry import DATASET_REGISTRY
 from cke.models import Statement
 from cke.reasoning.path_reasoner import PathReasoner
 
@@ -36,7 +36,7 @@ class ReasoningEvalPipeline:
         dataset_path: str,
         max_samples: int | None = None,
     ) -> DatasetMetrics:
-        loader = load_dataset(dataset_name, dataset_path)
+        loader = self._load_registered_dataset(dataset_name, dataset_path)
         items = loader.items[:max_samples] if max_samples else loader.items
         if not items:
             return DatasetMetrics(0.0, 0.0, 0.0, 0.0, 0.0)
@@ -70,6 +70,17 @@ class ReasoningEvalPipeline:
             edges_traversed=total_edges / count,
             latency=total_latency / count,
         )
+
+    @staticmethod
+    def _load_registered_dataset(dataset_name: str, dataset_path: str):
+        key = dataset_name.lower()
+        if key not in DATASET_REGISTRY:
+            available = ", ".join(sorted(DATASET_REGISTRY))
+            raise ValueError(
+                f"Unknown dataset '{dataset_name}'. Available: {available}"
+            )
+        loader = DATASET_REGISTRY[key]()
+        return loader.load(dataset_path)
 
     def evaluate(
         self,
