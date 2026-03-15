@@ -64,3 +64,15 @@ def test_query_router_respects_manual_depth_when_query_is_simple():
     plan = router.route("What is Redis?", max_depth=6)
 
     assert plan.max_depth <= 4
+
+
+def test_query_router_populates_decomposition_steps():
+    router = QueryRouter()
+    plan = router.route("What nationality is the director of Top Gun?")
+
+    assert plan.decomposition
+    relation_values = {
+        step["value"] for step in plan.decomposition if step["type"] == "relation"
+    }
+    assert "directed_by" in relation_values
+    assert "nationality" in relation_values
