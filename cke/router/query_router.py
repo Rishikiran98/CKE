@@ -83,7 +83,9 @@ class QueryRouter:
         )
 
         decomposition = self.query_decomposer.decompose(query, entities)
-        confidence_score = self._estimate_confidence(intent, entities, decomposition.steps)
+        confidence_score = self._estimate_confidence(
+            intent, entities, decomposition.steps
+        )
         reasoning_route = self._reasoning_route(confidence_score)
 
         return QueryPlan(
@@ -105,8 +107,12 @@ class QueryRouter:
             reasoning_route=reasoning_route,
         )
 
-    def _estimate_confidence(self, intent: str, entities: list[str], steps: list[object]) -> float:
-        relation_steps = [step for step in steps if getattr(step, "step_type", "") == "relation"]
+    def _estimate_confidence(
+        self, intent: str, entities: list[str], steps: list[object]
+    ) -> float:
+        relation_steps = [
+            step for step in steps if getattr(step, "step_type", "") == "relation"
+        ]
         signals = ReasoningConfidenceSignals(
             fact_completeness=min(1.0, len(entities) / 2),
             graph_coherence=0.9 if intent in {"factoid", "comparison"} else 0.7,

@@ -70,9 +70,13 @@ class TrustEngine:
         age = max(0.0, now_ts - observed)
         tau = max(float(self.calibrator.config.tau), 1e-9)
         temporal_decay = math.exp(-(age / tau))
-        extraction_confidence = max(0.0, min(1.0, float(assertion.extractor_confidence)))
+        extraction_confidence = max(
+            0.0, min(1.0, float(assertion.extractor_confidence))
+        )
 
-        trust = max(0.0, min(1.0, source_weight * extraction_confidence * temporal_decay))
+        trust = max(
+            0.0, min(1.0, source_weight * extraction_confidence * temporal_decay)
+        )
         assertion.trust_score = trust
         assertion.confidence = trust
         return trust

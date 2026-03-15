@@ -104,7 +104,9 @@ class PathReasoner:
         if maybe_comparison is not None:
             final_answer = maybe_comparison
             operators_used.append("equality")
-            trace.append("Deterministic operator equality applied for comparison query.")
+            trace.append(
+                "Deterministic operator equality applied for comparison query."
+            )
 
         self._last_trace = trace
         self._emit_trace(
@@ -175,11 +177,19 @@ class PathReasoner:
         if len(entities) < 2:
             return None
         left_nat = next(
-            (st.object for st in graph if st.subject == entities[0] and st.relation == "nationality"),
+            (
+                st.object
+                for st in graph
+                if st.subject == entities[0] and st.relation == "nationality"
+            ),
             None,
         )
         right_nat = next(
-            (st.object for st in graph if st.subject == entities[1] and st.relation == "nationality"),
+            (
+                st.object
+                for st in graph
+                if st.subject == entities[1] and st.relation == "nationality"
+            ),
             None,
         )
         if left_nat is None or right_nat is None:
@@ -227,7 +237,9 @@ class PathReasoner:
         return None
 
     def _edge_rank(self, edge: Statement, target_relation: str | None) -> float:
-        relation_bonus = 1.0 if target_relation and edge.relation == target_relation else 0.6
+        relation_bonus = (
+            1.0 if target_relation and edge.relation == target_relation else 0.6
+        )
         return edge.confidence * relation_bonus
 
     def _best_path(
@@ -261,9 +273,15 @@ class PathReasoner:
                     target_relation is None or edge.relation == target_relation
                 )
                 if relation_match:
-                    effective_score = new_score + (0.25 if edge.context.get("inferred") else 0.0)
+                    effective_score = new_score + (
+                        0.25 if edge.context.get("inferred") else 0.0
+                    )
                     candidate = (new_path, len(new_path), effective_score)
-                    if best is None or candidate[1] > best[1] or (candidate[1] == best[1] and candidate[2] > best[2]):
+                    if (
+                        best is None
+                        or candidate[1] > best[1]
+                        or (candidate[1] == best[1] and candidate[2] > best[2])
+                    ):
                         best = candidate
                     if new_score >= min_confidence:
                         continue

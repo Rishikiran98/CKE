@@ -66,12 +66,14 @@ class PathRankingModel:
                 confidence_score=score,
                 final_answer="rank_score",
                 operators_used=["linear_rank"],
-                retrieved_facts=[{
-                    "token_overlap": features.token_overlap,
-                    "trust": features.trust,
-                    "path_length": features.path_length,
-                    "relation_match": features.relation_match,
-                }],
+                retrieved_facts=[
+                    {
+                        "token_overlap": features.token_overlap,
+                        "trust": features.trust,
+                        "path_length": features.path_length,
+                        "relation_match": features.relation_match,
+                    }
+                ],
             ),
             stage="path_ranking",
         )

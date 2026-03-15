@@ -82,7 +82,8 @@ class LLMExtractor(BaseExtractor):
                                 }
                                 for st in statements
                             ],
-                            confidence_score=sum(st.confidence for st in statements) / max(1, len(statements)),
+                            confidence_score=sum(st.confidence for st in statements)
+                            / max(1, len(statements)),
                             final_answer="extraction_complete",
                             operators_used=["llm_extraction"],
                         ),

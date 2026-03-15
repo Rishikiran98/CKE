@@ -42,5 +42,7 @@ class ReasoningTraceLogger:
         payload = trace.to_dict()
         payload["stage"] = stage
         payload["logged_at"] = ts
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         return path

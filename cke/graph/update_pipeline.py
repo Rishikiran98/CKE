@@ -68,7 +68,9 @@ class GraphUpdatePipeline:
                 "confidence_score": assertion.trust_score,
                 "source_count": max(1, assertion.evidence_count),
                 "timestamp": assertion.timestamp,
-                "contradiction_flag": bool(assertion.qualifiers.get("contradiction_flag", False)),
+                "contradiction_flag": bool(
+                    assertion.qualifiers.get("contradiction_flag", False)
+                ),
                 "secondary": id(assertion) in secondary_ids,
                 "evidence": [e.model_dump(mode="python") for e in assertion.evidence],
             }
