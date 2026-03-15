@@ -2,7 +2,6 @@ from cke.extractor.coreference_resolver import CoreferenceResolver
 from cke.extractor.entity_linker import EntityResolver
 from cke.extractor.extraction_pipeline import ExtractionPipeline
 from cke.extractor.paragraph_extractor import ParagraphExtractor
-from cke.extractor.rule_extractor import RuleExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 from cke.schema.relation_mapper import RelationMapper

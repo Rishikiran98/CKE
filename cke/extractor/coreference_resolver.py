@@ -68,8 +68,14 @@ class CoreferenceResolver:
         for sentence in sentences:
             sentence_rewritten = sentence
             if antecedent:
+                pronoun_pattern = (
+                    r"\b("
+                    r"He|She|They|It|he|she|they|it|"
+                    r"His|Her|Their|Its|his|her|their|its"
+                    r")\b"
+                )
                 sentence_rewritten = re.sub(
-                    r"\b(He|She|They|It|he|she|they|it|His|Her|Their|Its|his|her|their|its)\b",
+                    pronoun_pattern,
                     antecedent,
                     sentence_rewritten,
                 )
