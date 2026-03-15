@@ -33,7 +33,8 @@ class CoreferenceResolver:
             try:
                 return spacy.load(model_name)
             except Exception:
-                continue
+                # Model not present or incompatible; try the next configured model.
+                pass
         return None
 
     def _resolve_with_spacy(self, document: str) -> str | None:
