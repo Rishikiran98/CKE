@@ -120,7 +120,8 @@ class PathReasoner:
                 left, right = premises
                 traces.append(
                     "Rule applied "
-                    f"{rule.name}: {left.as_text()} + {right.as_text()} -> {candidate.as_text()}"
+                    f"{rule.name}: {left.as_text()} + "
+                    f"{right.as_text()} -> {candidate.as_text()}"
                 )
 
         return inferred, traces
