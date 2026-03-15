@@ -61,7 +61,7 @@ class TrustEngine:
         )
 
     def compute_trust(self, assertion: Assertion, now: float | None = None) -> float:
-        """Compute ingestion trust: source_weight × extraction_confidence × temporal_decay."""
+        """Compute ingestion trust from source, extraction confidence, and decay."""
         source_weight = self.source_weights.get(
             assertion.source, self.source_weights["unknown"]
         )
