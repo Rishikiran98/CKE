@@ -9,7 +9,7 @@ the engine behaves exactly as before (pure in-memory).
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from hashlib import md5
+from hashlib import sha256
 import re
 import os
 from pathlib import Path
@@ -167,13 +167,15 @@ class KnowledgeGraphEngine:
     def _compute_shard(self, entity: str, payload: dict[str, Any] | None = None) -> int:
         if self._shard_strategy == "domain_partitions":
             domain = str((payload or {}).get("context", {}).get("domain", "default"))
-            return int(md5(domain.encode("utf-8")).hexdigest(), 16) % self._shard_count
+            return (
+                int(sha256(domain.encode("utf-8")).hexdigest(), 16) % self._shard_count
+            )
         if self._shard_strategy == "topic_clusters":
             topic = str((payload or {}).get("context", {}).get("topic", "default"))
             relation = str((payload or {}).get("relation", ""))
             key = f"{topic}:{relation}"
-            return int(md5(key.encode("utf-8")).hexdigest(), 16) % self._shard_count
-        return int(md5(entity.encode("utf-8")).hexdigest(), 16) % self._shard_count
+            return int(sha256(key.encode("utf-8")).hexdigest(), 16) % self._shard_count
+        return int(sha256(entity.encode("utf-8")).hexdigest(), 16) % self._shard_count
 
     # ------------------------------------------------------------------
     # Public API (unchanged surface)
