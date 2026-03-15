@@ -10,6 +10,7 @@ from cke.graph.domain_classifier import DomainClassifier
 from cke.graph.domain_registry import DomainRegistry
 from cke.router.entity_linker import EntityLinker
 from cke.router.intent_classifier import IntentClassifier
+from cke.router.query_decomposer import QueryDecomposer
 from cke.router.query_plan import QueryPlan
 
 
@@ -25,6 +26,7 @@ class QueryRouter:
         self.intent_classifier = IntentClassifier()
         self.domain_classifier = domain_classifier or DomainClassifier()
         self.domain_registry = domain_registry
+        self.query_decomposer = QueryDecomposer()
 
     def detect_entities(
         self,
@@ -78,9 +80,19 @@ class QueryRouter:
             requested_depth=max_depth,
         )
 
+        decomposition = self.query_decomposer.decompose(query, entities)
+
         return QueryPlan(
             query_text=query,
             seed_entities=entities,
+            decomposition=[
+                {
+                    "type": step.step_type,
+                    "value": step.value,
+                    "confidence": step.confidence,
+                }
+                for step in decomposition.steps
+            ],
             domains=domains,
             intent=intent,
             max_depth=max_depth,

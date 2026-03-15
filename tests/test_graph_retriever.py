@@ -80,3 +80,46 @@ def test_query_aware_ranking_prefers_relevant_edges():
     result = retriever.retrieve(plan)
 
     assert result["evidence"][0]["relation"] == "supports"
+
+
+def test_astar_traversal_returns_ranked_paths():
+    retriever = GraphRetriever(_build_graph())
+    plan = QueryPlan(
+        query_text="How is Redis connected to RESP via pubsub?",
+        seed_entities=["Redis"],
+        intent="multi-hop",
+        decomposition=[
+            {"type": "relation", "value": "supports"},
+            {"type": "relation", "value": "implemented_via"},
+        ],
+        max_depth=3,
+    )
+
+    result = retriever.retrieve(plan, mode="astar")
+
+    assert result["paths"]
+    assert "evidence_graph" in result
+    assert result["evidence_graph"]["paths"]
+
+
+def test_path_ranking_prefers_relation_match():
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Film", "directed_by", "Director", confidence=0.75),
+            Statement("Film", "genre", "Action", confidence=0.98),
+        ]
+    )
+    retriever = GraphRetriever(graph)
+    plan = QueryPlan(
+        query_text="Who directed the film?",
+        seed_entities=["Film"],
+        intent="multi-hop",
+        decomposition=[{"type": "relation", "value": "directed_by"}],
+        max_depth=1,
+        max_results=5,
+    )
+
+    result = retriever.retrieve(plan, mode="astar")
+
+    assert result["evidence"][0]["relation"] == "directed_by"
