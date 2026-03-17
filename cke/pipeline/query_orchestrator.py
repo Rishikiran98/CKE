@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
+import logging
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from cke.pipeline.types import QueryResult, ReasoningContext, ResolvedEntity
 
 if TYPE_CHECKING:
     from cke.router.query_router import QueryRouter
+
+
+logger = logging.getLogger(__name__)
 
 
 class QueryOrchestrator:
@@ -47,12 +50,22 @@ class QueryOrchestrator:
             for entity in detected_entities
         ]
 
+        retrieved_chunks = []
+        evidence_facts = []
+        if self.retriever is not None and self.assembler is not None:
+            retrieved_chunks, facts = self.retriever.retrieve(query)
+            evidence_facts = self.assembler.assemble(query, retrieved_chunks, facts)
+
+        logger.info(
+            "Passing %s evidence facts to downstream reasoning.", len(evidence_facts)
+        )
+
         context = ReasoningContext(
             query=query,
             query_plan=query_plan,
             resolved_entities=resolved_entities,
-            retrieved_chunks=[],
-            evidence_facts=[],
+            retrieved_chunks=retrieved_chunks,
+            evidence_facts=evidence_facts,
             candidate_paths=[],
             subgraph=None,
             decomposition=[],
@@ -67,7 +80,7 @@ class QueryOrchestrator:
             answer="NOT_IMPLEMENTED",
             confidence=0.0,
             reasoning_route=query_plan.reasoning_route,
-            evidence_facts=[],
+            evidence_facts=evidence_facts,
             candidate_paths=[],
             verification_summary="not_executed",
             trace_id=trace_id,

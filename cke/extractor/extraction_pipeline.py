@@ -30,8 +30,10 @@ class ExtractionPipeline:
         resolved_doc = self.coref.resolve(document)
         windows = self.paragraph_extractor.sentence_windows(resolved_doc)
         assertions: list[Statement] = []
+        source_doc_id = source or "unknown_doc"
 
-        for window in windows:
+        for index, window in enumerate(windows):
+            chunk_id = f"{source_doc_id}::chunk-{index}"
             for statement in self.extractor.extract(window):
                 subject_result = self.entity_resolver.resolve_with_score(
                     statement.subject
@@ -62,6 +64,8 @@ class ExtractionPipeline:
                     context=context,
                     confidence=confidence,
                     source=source,
+                    chunk_id=chunk_id,
+                    source_doc_id=source_doc_id,
                 )
                 self.graph_engine.add_statement(
                     final.subject,
