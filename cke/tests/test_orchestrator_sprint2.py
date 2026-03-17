@@ -89,7 +89,7 @@ def test_orchestrator_sprint2_retrieval_evidence_flow():
     result = orchestrator.answer("Who is the president of the United States?")
 
     assert isinstance(result, QueryResult)
-    assert result.answer == "NOT_IMPLEMENTED"
+    assert result.answer != "NOT_IMPLEMENTED"
     assert orchestrator.last_context is not None
     assert orchestrator.last_context.retrieved_chunks
     assert result.evidence_facts

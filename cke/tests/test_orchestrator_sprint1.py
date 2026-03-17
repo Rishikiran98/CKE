@@ -26,8 +26,8 @@ def test_orchestrator_sprint1_pipeline_skeleton_runs():
 
     assert isinstance(result, QueryResult)
     assert result.reasoning_route is not None
-    assert result.answer == "NOT_IMPLEMENTED"
-    assert result.failure_mode == "not_implemented"
+    assert result.answer == "INSUFFICIENT_EVIDENCE"
+    assert result.failure_mode == "no_evidence_facts"
 
     assert orchestrator.last_context is not None
     assert orchestrator.last_context.resolved_entities
