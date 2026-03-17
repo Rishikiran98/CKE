@@ -6,7 +6,8 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from cke.pipeline.types import QueryResult, ReasoningContext, ResolvedEntity
+from cke.pipeline.types import QueryResult, ReasonerOutcome, ReasoningContext, ResolvedEntity
+from cke.reasoning.verifier import ReasoningVerifier
 
 if TYPE_CHECKING:
     from cke.router.query_router import QueryRouter
@@ -37,7 +38,7 @@ class QueryOrchestrator:
             self.reasoner = PathReasoner()
         else:
             self.reasoner = reasoner
-        self.verifier = verifier
+        self.verifier = verifier or ReasoningVerifier()
         self.last_context: ReasoningContext | None = None
 
     def answer(self, query: str) -> QueryResult:
@@ -96,28 +97,24 @@ class QueryOrchestrator:
         trace_id = str(uuid4())
 
         if not context.evidence_facts:
-            return QueryResult(
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
                 answer="INSUFFICIENT_EVIDENCE",
-                confidence=0.0,
-                reasoning_route=query_plan.reasoning_route,
-                evidence_facts=context.evidence_facts,
-                candidate_paths=context.candidate_paths,
-                verification_summary="reasoning_not_executed",
-                trace_id=trace_id,
-                failure_mode="no_evidence_facts",
+                summary="reasoning_not_executed",
+                failure_mode="no_evidence",
             )
 
         statements = [fact.statement for fact in context.evidence_facts]
         if not statements:
-            return QueryResult(
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
                 answer="INSUFFICIENT_EVIDENCE",
-                confidence=0.0,
-                reasoning_route=query_plan.reasoning_route,
-                evidence_facts=context.evidence_facts,
-                candidate_paths=context.candidate_paths,
-                verification_summary="reasoning_not_executed",
-                trace_id=trace_id,
-                failure_mode="no_statements",
+                summary="reasoning_not_executed",
+                failure_mode="no_evidence",
             )
 
         entity_terms = [
@@ -128,8 +125,7 @@ class QueryOrchestrator:
         has_entity_grounding = (
             any(
                 any(
-                    term in statement.subject.lower()
-                    or term in statement.object.lower()
+                    term in statement.subject.lower() or term in statement.object.lower()
                     for term in entity_terms
                 )
                 for statement in statements
@@ -138,58 +134,137 @@ class QueryOrchestrator:
             else True
         )
         if not has_entity_grounding:
-            return QueryResult(
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
                 answer="INSUFFICIENT_EVIDENCE",
-                confidence=0.0,
-                reasoning_route=query_plan.reasoning_route,
-                evidence_facts=context.evidence_facts,
-                candidate_paths=context.candidate_paths,
-                verification_summary="reasoning_not_executed",
-                trace_id=trace_id,
-                failure_mode="entity_not_grounded",
+                summary="reasoning_not_executed",
+                failure_mode="not_grounded",
             )
 
+        reasoner_outcome = self._run_reasoner(query, statements)
+        logger.info("Reasoner executed: %s", reasoner_outcome is not None)
+        if reasoner_outcome is None:
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
+                answer="REASONING_FAILED",
+                summary="reasoning_failed",
+                failure_mode="reasoning_failed",
+            )
+
+        verification = self.verifier.verify(
+            query=query,
+            context=statements,
+            reasoning_path=reasoner_outcome.reasoning_path,
+            answer=reasoner_outcome.answer,
+            confidence_score=reasoner_outcome.confidence,
+            required_facts=reasoner_outcome.required_facts,
+            operator_checks=reasoner_outcome.operator_checks,
+        )
+        logger.info("Verifier executed: True")
+        logger.info("Verification passed: %s", verification.passed)
+        logger.info("Verification issues: %s", verification.issues)
+        logger.info("Contradiction detected: %s", verification.contradictory)
+
+        if not verification.passed:
+            abstain_answer, failure_mode = self._verification_failure_policy(verification.issues)
+            logger.info("Abstention reason: %s", failure_mode)
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
+                answer=abstain_answer,
+                summary=verification.summary,
+                failure_mode=failure_mode,
+            )
+
+        if not reasoner_outcome.reasoning_path and reasoner_outcome.answer not in {"yes", "no"}:
+            logger.info("Abstention reason: verification_failed")
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
+                answer="INSUFFICIENT_EVIDENCE",
+                summary="verification_failed:empty_reasoning_path",
+                failure_mode="verification_failed",
+            )
+
+        return QueryResult(
+            answer=reasoner_outcome.answer,
+            confidence=reasoner_outcome.confidence,
+            reasoning_route=query_plan.reasoning_route,
+            evidence_facts=context.evidence_facts,
+            candidate_paths=context.candidate_paths,
+            verification_summary=verification.summary,
+            trace_id=trace_id,
+            failure_mode=None,
+        )
+
+    def _run_reasoner(self, query: str, statements):
         try:
+            if hasattr(self.reasoner, "reason"):
+                outcome = self.reasoner.reason(query, statements)
+                if isinstance(outcome, ReasonerOutcome):
+                    return outcome
             answer = self.reasoner.answer(query, statements)
-            logger.info("Reasoner executed: True")
         except Exception:
             logger.exception("Reasoner execution failed")
-            logger.info("Reasoner executed: False")
-            return QueryResult(
-                answer="INSUFFICIENT_EVIDENCE",
-                confidence=0.0,
-                reasoning_route=query_plan.reasoning_route,
-                evidence_facts=context.evidence_facts,
-                candidate_paths=context.candidate_paths,
-                verification_summary="reasoning_failed",
-                trace_id=trace_id,
-                failure_mode="reasoner_error",
-            )
+            return None
 
         if (
             not answer
             or "don't have enough" in answer.lower()
             or "insufficient" in answer.lower()
         ):
-            return QueryResult(
+            return ReasonerOutcome(
                 answer="INSUFFICIENT_EVIDENCE",
                 confidence=0.0,
-                reasoning_route=query_plan.reasoning_route,
-                evidence_facts=context.evidence_facts,
-                candidate_paths=context.candidate_paths,
-                verification_summary="not_verified_yet",
-                trace_id=trace_id,
-                failure_mode="insufficient_evidence",
+                reasoning_path=[],
+                required_facts=[],
+                operator_checks=[],
+                summary="reasoner_abstained",
             )
 
-        confidence = min(1.0, 0.2 + 0.1 * len(context.evidence_facts))
-        return QueryResult(
+        confidence = 0.8 if statements else 0.0
+        return ReasonerOutcome(
             answer=answer,
             confidence=confidence,
-            reasoning_route=query_plan.reasoning_route,
+            reasoning_path=[st for st in statements if st.object.lower() == answer.lower()],
+            required_facts=[],
+            operator_checks=[],
+            summary="reasoner_completed",
+        )
+
+    def _verification_failure_policy(self, issues: list[str]) -> tuple[str, str]:
+        if "contradictory_evidence" in issues:
+            return "CONFLICTING_EVIDENCE", "contradictory_evidence"
+        if "confidence_below_threshold" in issues:
+            return "INSUFFICIENT_EVIDENCE", "low_confidence"
+        if "not_grounded" in issues:
+            return "INSUFFICIENT_EVIDENCE", "not_grounded"
+        if "evidence_incomplete" in issues:
+            return "INSUFFICIENT_EVIDENCE", "no_evidence"
+        return "INSUFFICIENT_EVIDENCE", "verification_failed"
+
+    def _abstain(
+        self,
+        reasoning_route: str,
+        context: ReasoningContext,
+        trace_id: str,
+        answer: str,
+        summary: str,
+        failure_mode: str,
+    ) -> QueryResult:
+        return QueryResult(
+            answer=answer,
+            confidence=0.0,
+            reasoning_route=reasoning_route,
             evidence_facts=context.evidence_facts,
             candidate_paths=context.candidate_paths,
-            verification_summary="not_verified_yet",
+            verification_summary=summary,
             trace_id=trace_id,
-            failure_mode=None,
+            failure_mode=failure_mode,
         )

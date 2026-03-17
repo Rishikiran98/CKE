@@ -55,6 +55,16 @@ class ReasoningContext:
 
 
 @dataclass(slots=True)
+class ReasonerOutcome:
+    answer: str
+    confidence: float
+    reasoning_path: list[Statement] = field(default_factory=list)
+    required_facts: list[tuple[str, str]] = field(default_factory=list)
+    operator_checks: list[dict[str, Any]] = field(default_factory=list)
+    summary: str = ""
+
+
+@dataclass(slots=True)
 class QueryResult:
     answer: str
     confidence: float
