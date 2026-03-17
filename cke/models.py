@@ -25,6 +25,14 @@ class Statement:
     confidence: float = 1.0
     source: str | None = None
     timestamp: str | None = None
+    statement_id: str | None = None
+    chunk_id: str | None = None
+    source_doc_id: str | None = None
+    canonical_subject_id: str | None = None
+    canonical_object_id: str | None = None
+    trust_score: float | None = None
+    retrieval_score: float | None = None
+    supporting_span: tuple[int, int] | None = None
 
     def as_text(self) -> str:
         """Render statement in compact text form for metrics/reasoning."""
