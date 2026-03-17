@@ -6,11 +6,12 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from cke.entity_resolution.alias_registry import AliasRegistry
+from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.pipeline.types import (
     QueryResult,
     ReasonerOutcome,
     ReasoningContext,
-    ResolvedEntity,
 )
 from cke.reasoning.operator_executor import OperatorExecutor
 from cke.reasoning.operator_selector import OperatorSelector
@@ -36,6 +37,7 @@ class QueryOrchestrator:
         verifier=None,
         operator_selector: OperatorSelector | None = None,
         operator_executor: OperatorExecutor | None = None,
+        entity_resolver: EntityResolver | None = None,
     ):
         self.graph_engine = graph_engine
         self.router = router
@@ -51,24 +53,26 @@ class QueryOrchestrator:
         self.operator_selector = operator_selector or OperatorSelector()
         self.operator_executor = operator_executor or OperatorExecutor()
         self.last_context: ReasoningContext | None = None
+        self.entity_resolver = entity_resolver or EntityResolver()
 
     def answer(self, query: str) -> QueryResult:
         query_plan = self.router.route(query)
 
-        detected_entities = self.router.detect_entities(query)
-        resolved_entities = [
-            ResolvedEntity(
-                surface_form=entity,
-                canonical_name=entity,
-                entity_id=entity,
-                link_confidence=0.7,
-                aliases_matched=[entity],
-            )
-            for entity in detected_entities
-        ]
+        candidate_entities = self.router.detect_entities(query)
+        for entity in candidate_entities:
+            self.entity_resolver.register_alias(entity, entity)
+        resolved_entities = self.entity_resolver.resolve_mentions(
+            query,
+            candidate_entities=candidate_entities,
+        )
+        target_relations = list(getattr(query_plan, "target_relations", []))
 
         if self.retriever is not None and self.assembler is not None:
-            retrieved_chunks, facts = self.retriever.retrieve(query)
+            retrieved_chunks, facts = self.retriever.retrieve(
+                query,
+                resolved_entities=resolved_entities,
+                target_relations=target_relations,
+            )
             context = self.assembler.assemble(
                 query=query,
                 query_plan=query_plan,
@@ -93,6 +97,34 @@ class QueryOrchestrator:
                 trace_metadata={},
             )
 
+        context.trace_metadata.setdefault("target_relations", target_relations)
+        context.trace_metadata.setdefault(
+            "resolved_entities",
+            [
+                {
+                    "surface_form": e.surface_form,
+                    "canonical_name": e.canonical_name,
+                    "entity_id": e.entity_id,
+                    "link_confidence": e.link_confidence,
+                }
+                for e in resolved_entities
+            ],
+        )
+
+        logger.info(
+            "Mentions detected: %s", [e.surface_form for e in resolved_entities]
+        )
+        logger.info(
+            "Canonical resolution results: %s",
+            [
+                (e.surface_form, e.canonical_name, e.link_confidence)
+                for e in resolved_entities
+            ],
+        )
+        logger.info(
+            "Alias matches used: %s", [e.aliases_matched for e in resolved_entities]
+        )
+        logger.info("Target relations inferred: %s", target_relations)
         logger.info("Resolved entities: %s", len(resolved_entities))
         logger.info("Retrieved chunks: %s", len(context.retrieved_chunks))
         logger.info(
@@ -128,16 +160,28 @@ class QueryOrchestrator:
                 failure_mode="no_evidence",
             )
 
-        entity_terms = [
-            entity.canonical_name.lower()
+        entity_terms = {
+            AliasRegistry.normalize(entity.canonical_name)
             for entity in resolved_entities
             if entity.canonical_name
-        ]
+        }
+        entity_terms.update(
+            AliasRegistry.normalize(entity.entity_id)
+            for entity in resolved_entities
+            if entity.entity_id
+        )
         has_entity_grounding = (
             any(
                 any(
-                    term in statement.subject.lower()
-                    or term in statement.object.lower()
+                    term
+                    and (
+                        term == AliasRegistry.normalize(statement.subject)
+                        or term == AliasRegistry.normalize(statement.object)
+                        or term
+                        == AliasRegistry.normalize(statement.canonical_subject_id or "")
+                        or term
+                        == AliasRegistry.normalize(statement.canonical_object_id or "")
+                    )
                     for term in entity_terms
                 )
                 for statement in statements

@@ -17,3 +17,4 @@ class QueryPlan:
     confidence_score: float = 0.0
     reasoning_route: str = "advanced_reasoner"
     operator_hint: str | None = None
+    target_relations: list[str] = field(default_factory=list)
