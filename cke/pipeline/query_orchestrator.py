@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from cke.pipeline.types import QueryResult, ReasoningContext, ResolvedEntity
-from cke.reasoning.path_reasoner import PathReasoner
 
 if TYPE_CHECKING:
     from cke.router.query_router import QueryRouter
@@ -32,7 +31,12 @@ class QueryOrchestrator:
         self.router = router
         self.retriever = retriever
         self.assembler = assembler
-        self.reasoner = reasoner or PathReasoner()
+        if reasoner is None:
+            from cke.reasoning.path_reasoner import PathReasoner
+
+            self.reasoner = PathReasoner()
+        else:
+            self.reasoner = reasoner
         self.verifier = verifier
         self.last_context: ReasoningContext | None = None
 
