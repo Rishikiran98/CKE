@@ -6,7 +6,12 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from cke.pipeline.types import QueryResult, ReasonerOutcome, ReasoningContext, ResolvedEntity
+from cke.pipeline.types import (
+    QueryResult,
+    ReasonerOutcome,
+    ReasoningContext,
+    ResolvedEntity,
+)
 from cke.reasoning.verifier import ReasoningVerifier
 
 if TYPE_CHECKING:
@@ -125,7 +130,8 @@ class QueryOrchestrator:
         has_entity_grounding = (
             any(
                 any(
-                    term in statement.subject.lower() or term in statement.object.lower()
+                    term in statement.subject.lower()
+                    or term in statement.object.lower()
                     for term in entity_terms
                 )
                 for statement in statements
@@ -170,7 +176,9 @@ class QueryOrchestrator:
         logger.info("Contradiction detected: %s", verification.contradictory)
 
         if not verification.passed:
-            abstain_answer, failure_mode = self._verification_failure_policy(verification.issues)
+            abstain_answer, failure_mode = self._verification_failure_policy(
+                verification.issues
+            )
             logger.info("Abstention reason: %s", failure_mode)
             return self._abstain(
                 query_plan.reasoning_route,
@@ -181,7 +189,10 @@ class QueryOrchestrator:
                 failure_mode=failure_mode,
             )
 
-        if not reasoner_outcome.reasoning_path and reasoner_outcome.answer not in {"yes", "no"}:
+        if not reasoner_outcome.reasoning_path and reasoner_outcome.answer not in {
+            "yes",
+            "no",
+        }:
             logger.info("Abstention reason: verification_failed")
             return self._abstain(
                 query_plan.reasoning_route,
@@ -232,7 +243,9 @@ class QueryOrchestrator:
         return ReasonerOutcome(
             answer=answer,
             confidence=confidence,
-            reasoning_path=[st for st in statements if st.object.lower() == answer.lower()],
+            reasoning_path=[
+                st for st in statements if st.object.lower() == answer.lower()
+            ],
             required_facts=[],
             operator_checks=[],
             summary="reasoner_completed",

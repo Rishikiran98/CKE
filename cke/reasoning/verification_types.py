@@ -17,4 +17,3 @@ class VerificationOutcome:
     contradictory: bool
     summary: str
     issues: list[str] = field(default_factory=list)
-
