@@ -104,10 +104,12 @@ class EvidenceAssembler:
             )
 
             entity_match = int(
-                subject in target_entities
-                or obj in target_entities
-                or (subject_id and subject_id in target_entities)
-                or (object_id and object_id in target_entities)
+                bool(
+                    subject in target_entities
+                    or obj in target_entities
+                    or (subject_id and subject_id in target_entities)
+                    or (object_id and object_id in target_entities)
+                )
             )
             relation_match = int(
                 any(term == relation or term in relation for term in relation_terms)
