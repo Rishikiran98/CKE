@@ -107,6 +107,7 @@ class QueryRouter:
             confidence_score=confidence_score,
             reasoning_route=reasoning_route,
             operator_hint=operator_hint,
+            target_relations=list(decomposition.target_relations),
         )
 
     def _detect_operator_hint(self, query: str) -> str | None:

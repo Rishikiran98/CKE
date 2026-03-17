@@ -1,111 +1,152 @@
-"""Entity resolution module.
-
-Combines canonical alias mapping, string similarity, and embedding similarity
-for robust canonicalization.
-"""
+"""Deterministic entity mention detection and canonical resolution."""
 
 from __future__ import annotations
 
-import math
 import re
-from difflib import SequenceMatcher
-from typing import Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable
 
-try:
-    import numpy as np
-except Exception:  # pragma: no cover
-    np = None
+from cke.entity_resolution.alias_registry import AliasRegistry
 
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception:  # pragma: no cover - optional runtime dependency
-    SentenceTransformer = None
+if TYPE_CHECKING:
+    from cke.pipeline.types import ResolvedEntity
 
 
 class EntityResolver:
-    """Resolve mentions to canonical entity names."""
+    """Resolve query mentions into structured canonical entities."""
 
-    def __init__(
-        self,
-        aliases: Optional[Dict[str, str]] = None,
-        string_threshold: float = 0.82,
-        embedding_threshold: float = 0.75,
-    ) -> None:
+    def __init__(self, aliases: dict[str, str] | None = None) -> None:
+        self.registry = AliasRegistry()
         self._canonical_entities: set[str] = set()
-        self._aliases: dict[str, str] = {}
-        self._canonical_by_key: dict[str, str] = {}
-        self.string_threshold = string_threshold
-        self.embedding_threshold = embedding_threshold
-
-        self._model = self._load_embedding_model()
-        self._embedding_cache: dict[str, list[float]] = {}
-
         if aliases:
+            canonical_to_aliases: dict[str, list[str]] = {}
             for alias, canonical in aliases.items():
-                self.register_alias(alias, canonical)
+                canonical_to_aliases.setdefault(canonical, []).append(alias)
+            for canonical, values in canonical_to_aliases.items():
+                self.register_aliases(canonical, values)
 
     def register_alias(self, alias: str, canonical: str) -> None:
-        """Register alias -> canonical and maintain canonical form mappings."""
-        canonical_name = self._title_case_entity(canonical)
-        normalized_alias = self._normalize(alias)
-        self._aliases[normalized_alias] = canonical_name
+        self.register_aliases(canonical, [alias])
+
+    def register_aliases(self, canonical: str, aliases: list[str]) -> None:
+        canonical_name = str(canonical).strip()
+        if not canonical_name:
+            return
         self._canonical_entities.add(canonical_name)
-        self._canonical_by_key[self._canonical_key(canonical_name)] = canonical_name
-        self._canonical_by_key[self._canonical_key(alias)] = canonical_name
+        self.registry.add(canonical_name, aliases)
+
+    @staticmethod
+    def _canonical_key(text: str) -> str:
+        normalized = AliasRegistry.normalize(text).replace("_", " ").replace("-", " ")
+        tokens = [
+            tok
+            for tok in re.findall(r"[a-z0-9]+", normalized)
+            if tok not in {"db", "database", "server"}
+        ]
+        return " ".join(tokens)
 
     def resolve_entity(self, name: str) -> str:
-        """Resolve mention to canonical entity using hybrid matching."""
-        normalized = self._normalize(name)
-        if normalized in self._aliases:
-            return self._aliases[normalized]
-
+        resolved = self.registry.resolve(name)
+        if resolved:
+            return resolved
+        normalized = AliasRegistry.normalize(name)
         key = self._canonical_key(name)
-        if key in self._canonical_by_key:
-            canonical = self._canonical_by_key[key]
-            self._aliases[normalized] = canonical
-            return canonical
-
-        if not self._canonical_entities:
-            canonical = self._title_case_entity(name)
-            self.register_alias(name, canonical)
-            return canonical
-
-        best_match: Optional[str] = None
-        best_string_score = -1.0
-        best_embedding_score = -1.0
-        best_combined_score = -1.0
-
         for canonical in self._canonical_entities:
-            normalized_canonical = self._normalize(canonical)
-            key_canonical = self._canonical_key(canonical)
-            string_score = max(
-                self._string_similarity(normalized, normalized_canonical),
-                self._string_similarity(key, key_canonical),
-            )
-            embedding_score = self._embedding_similarity(name, canonical)
-            combined_score = 0.65 * string_score + 0.35 * embedding_score
-            if combined_score > best_combined_score:
-                best_match = canonical
-                best_string_score = string_score
-                best_embedding_score = embedding_score
-                best_combined_score = combined_score
-
-        if best_match and (
-            best_string_score >= self.string_threshold
-            or best_embedding_score >= self.embedding_threshold
-            or best_combined_score
-            >= min(self.string_threshold, self.embedding_threshold)
-        ):
-            self._aliases[normalized] = best_match
-            self._canonical_by_key[key] = best_match
-            return best_match
-
+            if AliasRegistry.normalize(canonical) == normalized or self._canonical_key(canonical) == key:
+                return canonical
         canonical = self._title_case_entity(name)
         self.register_alias(name, canonical)
         return canonical
 
+    def detect_mentions(
+        self,
+        query: str,
+        candidate_entities: Iterable[str] | None = None,
+    ) -> list[str]:
+        q = query or ""
+        lowered = q.lower()
+        mentions: list[str] = []
+
+        for canonical in sorted(set(candidate_entities or []), key=len, reverse=True):
+            if canonical and canonical.lower() in lowered:
+                mentions.append(canonical)
+
+        for canonical, aliases in self.registry.canonical_to_aliases.items():
+            for alias in aliases:
+                if alias and alias.lower() in lowered:
+                    mentions.append(alias)
+                    if canonical.lower() in lowered:
+                        mentions.append(canonical)
+
+        name_chunks = re.findall(
+            r"\b(?:[A-Z][a-z0-9'/-]+(?:\s+[A-Z][a-z0-9'/-]+)+)\b",
+            q,
+        )
+        mentions.extend(name_chunks)
+
+        if not mentions:
+            mentions.extend(re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", q))
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for mention in mentions:
+            key = AliasRegistry.normalize(mention)
+            if key and key not in seen:
+                deduped.append(mention)
+                seen.add(key)
+        return deduped
+
+    def resolve_mentions(
+        self,
+        query: str,
+        candidate_entities: Iterable[str] | None = None,
+    ) -> list["ResolvedEntity"]:
+        mentions = self.detect_mentions(query, candidate_entities)
+        from cke.pipeline.types import ResolvedEntity
+
+        resolved_entities: list[ResolvedEntity] = []
+
+        for mention in mentions:
+            confidence = 0.50
+            aliases_matched: list[str] = []
+            canonical = None
+
+            if mention in self._canonical_entities:
+                canonical = mention
+                confidence = 0.95
+                aliases_matched = self.registry.aliases_for(canonical)
+            else:
+                direct = self.registry.resolve(mention)
+                if direct:
+                    canonical = direct
+                    confidence = 0.90
+                    aliases_matched = [mention]
+                else:
+                    norm = AliasRegistry.normalize(mention)
+                    key = self._canonical_key(mention)
+                    for known in self._canonical_entities:
+                        if AliasRegistry.normalize(known) == norm or self._canonical_key(known) == key:
+                            canonical = known
+                            confidence = 0.75
+                            aliases_matched = [mention]
+                            break
+
+            if canonical is None:
+                canonical = self.resolve_entity(mention)
+                aliases_matched = [mention]
+
+            resolved_entities.append(
+                ResolvedEntity(
+                    surface_form=mention,
+                    canonical_name=canonical,
+                    entity_id=AliasRegistry.normalize(canonical),
+                    link_confidence=confidence,
+                    aliases_matched=sorted(set(aliases_matched)),
+                )
+            )
+
+        return resolved_entities
+
     def merge_entities(self, entity_a: str, entity_b: str) -> str:
-        """Merge two entities and return the surviving canonical name."""
         canonical_a = self.resolve_entity(entity_a)
         canonical_b = self.resolve_entity(entity_b)
         if canonical_a == canonical_b:
@@ -114,36 +155,16 @@ class EntityResolver:
         survivor = min([canonical_a, canonical_b], key=len)
         removed = canonical_b if survivor == canonical_a else canonical_a
 
-        for alias, canonical in list(self._aliases.items()):
-            if canonical == removed:
-                self._aliases[alias] = survivor
+        for alias in self.registry.aliases_for(removed):
+            self.register_alias(alias, survivor)
 
-        for form, canonical in list(self._canonical_by_key.items()):
-            if canonical == removed:
-                self._canonical_by_key[form] = survivor
-
-        self._canonical_entities.discard(removed)
+        if removed in self._canonical_entities:
+            self._canonical_entities.remove(removed)
         self._canonical_entities.add(survivor)
-        self._canonical_by_key[self._canonical_key(survivor)] = survivor
         return survivor
 
     def known_entities(self) -> Iterable[str]:
-        """List known canonical entities."""
         return sorted(self._canonical_entities)
-
-    @staticmethod
-    def _normalize(text: str) -> str:
-        return re.sub(r"\s+", " ", text.strip().lower())
-
-    def _canonical_key(self, text: str) -> str:
-        normalized = self._normalize(text)
-        normalized = normalized.replace("_", " ").replace("-", " ")
-        tokens = [
-            tok
-            for tok in re.findall(r"[a-z0-9]+", normalized)
-            if tok not in {"db", "database", "server"}
-        ]
-        return " ".join(tokens)
 
     @staticmethod
     def _title_case_entity(text: str) -> str:
@@ -151,38 +172,3 @@ class EntityResolver:
         if clean.isupper() or len(clean) <= 5:
             return clean
         return " ".join(part.capitalize() for part in clean.split())
-
-    @staticmethod
-    def _string_similarity(left: str, right: str) -> float:
-        return SequenceMatcher(a=left, b=right).ratio()
-
-    def _load_embedding_model(self):
-        if SentenceTransformer is None:
-            return None
-        try:
-            return SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception:
-            return None
-
-    def _embed(self, text: str) -> list[float]:
-        if text in self._embedding_cache:
-            return self._embedding_cache[text]
-
-        if self._model is not None and np is not None:
-            vec = self._model.encode([text], normalize_embeddings=True)[0].tolist()
-        else:
-            vec = [0.0] * 128
-            for token in re.findall(r"\w+", text.lower()):
-                vec[hash(token) % 128] += 1.0
-            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-            vec = [v / norm for v in vec]
-
-        self._embedding_cache[text] = vec
-        return vec
-
-    def _embedding_similarity(self, left: str, right: str) -> float:
-        lvec, rvec = self._embed(left), self._embed(right)
-        denom = (
-            math.sqrt(sum(v * v for v in lvec)) * math.sqrt(sum(v * v for v in rvec))
-        ) or 1.0
-        return sum(a * b for a, b in zip(lvec, rvec)) / denom

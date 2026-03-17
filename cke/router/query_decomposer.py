@@ -21,41 +21,37 @@ class DecomposedQuery:
     original_query: str
     steps: list[QueryStep] = field(default_factory=list)
     operator_hint: str | None = None
+    target_relations: list[str] = field(default_factory=list)
 
 
 class QueryDecomposer:
     """Heuristic decomposer that derives relation chains from natural language."""
 
-    _QUESTION_PREFIXES = (
-        "what",
-        "which",
-        "who",
-        "where",
-        "when",
-        "how",
-    )
-
     _RELATION_PATTERNS = [
         ("starred", "starred_in"),
+        ("nationality", "nationality"),
+        ("citizenship", "nationality"),
         ("directed", "directed_by"),
         ("director", "directed_by"),
         ("written", "written_by"),
         ("author", "written_by"),
-        ("nationality", "nationality"),
-        ("born", "born_in"),
+        ("born", "birth_date"),
+        ("birth", "birth_date"),
         ("located", "located_in"),
-        ("capital", "capital_of"),
-        ("part of", "part_of"),
-        ("uses", "uses"),
-        ("supports", "supports"),
-        ("through", "via"),
-        ("via", "via"),
+        ("release year", "release_year"),
+        ("released", "release_year"),
+        ("member of", "member_of"),
+        ("part of", "member_of"),
+        ("children", "child"),
+        ("child", "child"),
+        ("employer", "employer"),
     ]
+
+
 
     def decompose(
         self, query: str, entities: list[str] | None = None
     ) -> DecomposedQuery:
-        """Decompose a query into ordered entity + relation steps."""
         normalized = (query or "").strip()
         entities = entities or []
 
@@ -65,39 +61,22 @@ class QueryDecomposer:
         for entity in entities:
             key = ("entity", entity)
             if key not in seen:
-                steps.append(
-                    QueryStep(step_type="entity", value=entity, confidence=0.95)
-                )
+                steps.append(QueryStep(step_type="entity", value=entity, confidence=0.95))
                 seen.add(key)
 
         lower_query = normalized.lower()
-        for marker, relation in self._RELATION_PATTERNS:
-            if marker in lower_query:
-                key = ("relation", relation)
-                if key in seen:
-                    continue
-                confidence = 0.9 if marker in {"through", "via"} else 0.86
-                steps.append(
-                    QueryStep(
-                        step_type="relation", value=relation, confidence=confidence
-                    )
-                )
-                seen.add(key)
-
-        tail_relation = self._infer_target_relation(lower_query)
-        if tail_relation:
-            key = ("relation", tail_relation)
+        inferred_relations = self._infer_target_relations(lower_query)
+        for relation in inferred_relations:
+            key = ("relation", relation)
             if key not in seen:
-                steps.append(
-                    QueryStep(
-                        step_type="relation", value=tail_relation, confidence=0.82
-                    )
-                )
+                steps.append(QueryStep(step_type="relation", value=relation, confidence=0.86))
+                seen.add(key)
 
         return DecomposedQuery(
             original_query=normalized,
             steps=steps,
             operator_hint=self._detect_operator_hint(lower_query),
+            target_relations=inferred_relations,
         )
 
     def _detect_operator_hint(self, query: str) -> str | None:
@@ -141,16 +120,9 @@ class QueryDecomposer:
             return "existence"
         return None
 
-    def _infer_target_relation(self, query: str) -> str | None:
-        stripped = query.strip(" ?")
-        for prefix in self._QUESTION_PREFIXES:
-            if stripped.startswith(prefix):
-                if " nationality" in f" {stripped} ":
-                    return "nationality"
-                if " director" in f" {stripped} ":
-                    return "directed_by"
-                if " author" in f" {stripped} ":
-                    return "written_by"
-                if " where" == f" {prefix}" and "located" in stripped:
-                    return "located_in"
-        return None
+    def _infer_target_relations(self, query: str) -> list[str]:
+        found: list[str] = []
+        for marker, relation in self._RELATION_PATTERNS:
+            if marker in query and relation not in found:
+                found.append(relation)
+        return found
