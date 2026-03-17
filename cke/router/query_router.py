@@ -83,6 +83,7 @@ class QueryRouter:
         )
 
         decomposition = self.query_decomposer.decompose(query, entities)
+        operator_hint = decomposition.operator_hint or self._detect_operator_hint(query)
         confidence_score = self._estimate_confidence(
             intent, entities, decomposition.steps
         )
@@ -105,7 +106,48 @@ class QueryRouter:
             max_results=max_results,
             confidence_score=confidence_score,
             reasoning_route=reasoning_route,
+            operator_hint=operator_hint,
         )
+
+    def _detect_operator_hint(self, query: str) -> str | None:
+        lowered = f" {query.lower()} "
+        if " how many" in lowered:
+            return "count"
+        if any(token in lowered for token in [" same ", " equal ", " identical "]):
+            return "equality"
+        if any(
+            token in lowered
+            for token in [
+                " older ",
+                " younger ",
+                " before ",
+                " after ",
+                " earlier ",
+                " later ",
+                " latest ",
+                " first ",
+            ]
+        ):
+            return "temporal_compare"
+        if any(
+            token in lowered
+            for token in [
+                " greater ",
+                " less ",
+                " more than ",
+                " fewer ",
+                " higher ",
+                " lower ",
+            ]
+        ):
+            return "numeric_compare"
+        if any(
+            token in lowered for token in [" member of ", " part of ", " belong to "]
+        ):
+            return "containment"
+        if lowered.strip().startswith(("did ", "is ", "has ", "was ")):
+            return "existence"
+        return None
 
     def _estimate_confidence(
         self, intent: str, entities: list[str], steps: list[object]
