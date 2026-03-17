@@ -147,6 +147,8 @@ class ReasoningVerifier:
     ) -> bool:
         slot_values: dict[tuple[str, str], set[str]] = {}
         for st in context:
+            if st.context.get("inferred"):
+                continue
             slot = (st.subject, st.relation)
             slot_values.setdefault(slot, set()).add(st.object)
 
