@@ -16,3 +16,4 @@ class QueryPlan:
     max_results: int = 12
     confidence_score: float = 0.0
     reasoning_route: str = "advanced_reasoner"
+    operator_hint: str | None = None

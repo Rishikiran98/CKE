@@ -12,6 +12,8 @@ from cke.pipeline.types import (
     ReasoningContext,
     ResolvedEntity,
 )
+from cke.reasoning.operator_executor import OperatorExecutor
+from cke.reasoning.operator_selector import OperatorSelector
 from cke.reasoning.verifier import ReasoningVerifier
 
 if TYPE_CHECKING:
@@ -32,6 +34,8 @@ class QueryOrchestrator:
         assembler=None,
         reasoner=None,
         verifier=None,
+        operator_selector: OperatorSelector | None = None,
+        operator_executor: OperatorExecutor | None = None,
     ):
         self.graph_engine = graph_engine
         self.router = router
@@ -44,6 +48,8 @@ class QueryOrchestrator:
         else:
             self.reasoner = reasoner
         self.verifier = verifier or ReasoningVerifier()
+        self.operator_selector = operator_selector or OperatorSelector()
+        self.operator_executor = operator_executor or OperatorExecutor()
         self.last_context: ReasoningContext | None = None
 
     def answer(self, query: str) -> QueryResult:
@@ -149,7 +155,24 @@ class QueryOrchestrator:
                 failure_mode="not_grounded",
             )
 
-        reasoner_outcome = self._run_reasoner(query, statements)
+        selected_operator = self.operator_selector.select(
+            query=query,
+            query_plan=query_plan,
+            resolved_entities=resolved_entities,
+            statements=statements,
+        )
+        reasoner_outcome = None
+        if selected_operator:
+            operator_outcome = self.operator_executor.execute(
+                operator_hint=selected_operator,
+                query=query,
+                evidence_facts=statements,
+                resolved_entities=resolved_entities,
+            )
+            reasoner_outcome = self._operator_to_reasoner_outcome(operator_outcome)
+
+        if reasoner_outcome is None:
+            reasoner_outcome = self._run_reasoner(query, statements)
         logger.info("Reasoner executed: %s", reasoner_outcome is not None)
         if reasoner_outcome is None:
             return self._abstain(
@@ -214,6 +237,39 @@ class QueryOrchestrator:
             failure_mode=None,
         )
 
+    def _operator_to_reasoner_outcome(self, outcome):
+        if outcome is None:
+            return None
+        value = outcome.result_value
+        if isinstance(value, bool):
+            answer = "yes" if value else "no"
+        elif value is None:
+            return None
+        else:
+            answer = str(value)
+
+        required_facts = []
+        if outcome.operator_name not in {"count"}:
+            required_facts = [
+                (st.subject, st.relation) for st in outcome.supporting_facts
+            ]
+
+        return ReasonerOutcome(
+            answer=answer,
+            confidence=max(0.0, min(1.0, float(outcome.confidence))),
+            reasoning_path=list(outcome.supporting_facts),
+            required_facts=required_facts,
+            operator_checks=[
+                {
+                    "operator": outcome.operator_name,
+                    "inputs": outcome.normalized_inputs,
+                    "result": outcome.result_value,
+                    "summary": outcome.summary,
+                }
+            ],
+            summary=outcome.summary or "operator_completed",
+        )
+
     def _run_reasoner(self, query: str, statements):
         try:
             if hasattr(self.reasoner, "reason"):
@@ -258,7 +314,9 @@ class QueryOrchestrator:
             return "INSUFFICIENT_EVIDENCE", "low_confidence"
         if "not_grounded" in issues:
             return "INSUFFICIENT_EVIDENCE", "not_grounded"
-        if "evidence_incomplete" in issues:
+        if "operator_result_invalid" in issues:
+            return "INSUFFICIENT_EVIDENCE", "verification_failed"
+        if "evidence_incomplete" in issues or "operator_inputs_missing" in issues:
             return "INSUFFICIENT_EVIDENCE", "no_evidence"
         return "INSUFFICIENT_EVIDENCE", "verification_failed"
 

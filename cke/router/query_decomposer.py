@@ -20,6 +20,7 @@ class DecomposedQuery:
 
     original_query: str
     steps: list[QueryStep] = field(default_factory=list)
+    operator_hint: str | None = None
 
 
 class QueryDecomposer:
@@ -93,7 +94,52 @@ class QueryDecomposer:
                     )
                 )
 
-        return DecomposedQuery(original_query=normalized, steps=steps)
+        return DecomposedQuery(
+            original_query=normalized,
+            steps=steps,
+            operator_hint=self._detect_operator_hint(lower_query),
+        )
+
+    def _detect_operator_hint(self, query: str) -> str | None:
+        q = f" {query} "
+        if " how many" in q:
+            return "count"
+        if any(marker in q for marker in [" same ", " equal ", " identical "]):
+            return "equality"
+        if any(
+            marker in q
+            for marker in [
+                " before ",
+                " after ",
+                " older ",
+                " younger ",
+                " later ",
+                " earlier ",
+            ]
+        ):
+            return "temporal_compare"
+        if any(
+            marker in q
+            for marker in [
+                " greater ",
+                " less ",
+                " more than ",
+                " fewer ",
+                " higher ",
+                " lower ",
+            ]
+        ):
+            return "numeric_compare"
+        if any(marker in q for marker in [" member of ", " part of ", " belong to "]):
+            return "containment"
+        if (
+            query.startswith("did ")
+            or query.startswith("is ")
+            or query.startswith("has ")
+            or query.startswith("was ")
+        ):
+            return "existence"
+        return None
 
     def _infer_target_relation(self, query: str) -> str | None:
         stripped = query.strip(" ?")
