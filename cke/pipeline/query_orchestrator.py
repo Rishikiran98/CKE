@@ -98,14 +98,32 @@ class QueryOrchestrator:
             )
 
         context.trace_metadata.setdefault("target_relations", target_relations)
-        context.trace_metadata.setdefault("resolved_entities", [
-            {"surface_form": e.surface_form, "canonical_name": e.canonical_name, "entity_id": e.entity_id, "link_confidence": e.link_confidence}
-            for e in resolved_entities
-        ])
+        context.trace_metadata.setdefault(
+            "resolved_entities",
+            [
+                {
+                    "surface_form": e.surface_form,
+                    "canonical_name": e.canonical_name,
+                    "entity_id": e.entity_id,
+                    "link_confidence": e.link_confidence,
+                }
+                for e in resolved_entities
+            ],
+        )
 
-        logger.info("Mentions detected: %s", [e.surface_form for e in resolved_entities])
-        logger.info("Canonical resolution results: %s", [(e.surface_form, e.canonical_name, e.link_confidence) for e in resolved_entities])
-        logger.info("Alias matches used: %s", [e.aliases_matched for e in resolved_entities])
+        logger.info(
+            "Mentions detected: %s", [e.surface_form for e in resolved_entities]
+        )
+        logger.info(
+            "Canonical resolution results: %s",
+            [
+                (e.surface_form, e.canonical_name, e.link_confidence)
+                for e in resolved_entities
+            ],
+        )
+        logger.info(
+            "Alias matches used: %s", [e.aliases_matched for e in resolved_entities]
+        )
         logger.info("Target relations inferred: %s", target_relations)
         logger.info("Resolved entities: %s", len(resolved_entities))
         logger.info("Retrieved chunks: %s", len(context.retrieved_chunks))
@@ -159,8 +177,10 @@ class QueryOrchestrator:
                     and (
                         term == AliasRegistry.normalize(statement.subject)
                         or term == AliasRegistry.normalize(statement.object)
-                        or term == AliasRegistry.normalize(statement.canonical_subject_id or "")
-                        or term == AliasRegistry.normalize(statement.canonical_object_id or "")
+                        or term
+                        == AliasRegistry.normalize(statement.canonical_subject_id or "")
+                        or term
+                        == AliasRegistry.normalize(statement.canonical_object_id or "")
                     )
                     for term in entity_terms
                 )

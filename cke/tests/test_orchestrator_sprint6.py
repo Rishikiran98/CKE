@@ -123,18 +123,27 @@ def test_sprint6_alias_resolution_us_citizenship():
     ]
     facts = {
         "d1::c0": [
-            Statement("Albert Einstein", "nationality", "United States", trust_score=0.9)
+            Statement(
+                "Albert Einstein", "nationality", "United States", trust_score=0.9
+            )
         ]
     }
     orchestrator = _build_orchestrator(
         docs,
         facts,
-        resolver_aliases={"US": "United States", "U.S.": "United States", "USA": "United States"},
+        resolver_aliases={
+            "US": "United States",
+            "U.S.": "United States",
+            "USA": "United States",
+        },
     )
 
     result = orchestrator.answer("What is Albert Einstein's citizenship in the U.S.?")
 
-    assert any(e.canonical_name == "United States" for e in orchestrator.last_context.resolved_entities)
+    assert any(
+        e.canonical_name == "United States"
+        for e in orchestrator.last_context.resolved_entities
+    )
     assert any(f.statement.relation == "nationality" for f in result.evidence_facts)
     assert result.answer in {"United States", "INSUFFICIENT_EVIDENCE"}
 
@@ -149,7 +158,9 @@ def test_sprint6_canonical_alias_director_lookup():
         },
     ]
     facts = {
-        "d2::c0": [Statement("Christopher Nolan", "directed", "Inception", trust_score=0.9)]
+        "d2::c0": [
+            Statement("Christopher Nolan", "directed", "Inception", trust_score=0.9)
+        ]
     }
     orchestrator = _build_orchestrator(
         docs,
@@ -159,15 +170,33 @@ def test_sprint6_canonical_alias_director_lookup():
 
     result = orchestrator.answer("Did Chris Nolan direct Inception?")
 
-    assert any(e.canonical_name == "Christopher Nolan" for e in orchestrator.last_context.resolved_entities)
+    assert any(
+        e.canonical_name == "Christopher Nolan"
+        for e in orchestrator.last_context.resolved_entities
+    )
     assert result.answer in {"yes", "INSUFFICIENT_EVIDENCE"}
 
 
 def test_sprint6_relation_targeted_retrieval_prioritizes_nationality():
     docs = [
-        {"doc_id": "d3::c0", "text": "Albert Einstein nationality German", "score": 0.7, "source": "d3"},
-        {"doc_id": "d3::c1", "text": "Albert Einstein profession Physicist", "score": 0.9, "source": "d3"},
-        {"doc_id": "d3::c2", "text": "Albert Einstein born_in Ulm", "score": 0.8, "source": "d3"},
+        {
+            "doc_id": "d3::c0",
+            "text": "Albert Einstein nationality German",
+            "score": 0.7,
+            "source": "d3",
+        },
+        {
+            "doc_id": "d3::c1",
+            "text": "Albert Einstein profession Physicist",
+            "score": 0.9,
+            "source": "d3",
+        },
+        {
+            "doc_id": "d3::c2",
+            "text": "Albert Einstein born_in Ulm",
+            "score": 0.8,
+            "source": "d3",
+        },
     ]
     facts = {
         "d3::c0": [Statement("Albert Einstein", "nationality", "German")],
@@ -185,10 +214,30 @@ def test_sprint6_relation_targeted_retrieval_prioritizes_nationality():
 
 def test_sprint6_dual_entity_comparison_retains_both_sides():
     docs = [
-        {"doc_id": "d4::c0", "text": "Scott Derrickson nationality American", "score": 0.9, "source": "d4"},
-        {"doc_id": "d4::c1", "text": "Scott Derrickson profession Director", "score": 0.88, "source": "d4"},
-        {"doc_id": "d4::c2", "text": "Ed Wood nationality American", "score": 0.87, "source": "d4"},
-        {"doc_id": "d4::c3", "text": "Ed Wood profession Director", "score": 0.86, "source": "d4"},
+        {
+            "doc_id": "d4::c0",
+            "text": "Scott Derrickson nationality American",
+            "score": 0.9,
+            "source": "d4",
+        },
+        {
+            "doc_id": "d4::c1",
+            "text": "Scott Derrickson profession Director",
+            "score": 0.88,
+            "source": "d4",
+        },
+        {
+            "doc_id": "d4::c2",
+            "text": "Ed Wood nationality American",
+            "score": 0.87,
+            "source": "d4",
+        },
+        {
+            "doc_id": "d4::c3",
+            "text": "Ed Wood profession Director",
+            "score": 0.86,
+            "source": "d4",
+        },
     ]
     facts = {
         "d4::c0": [Statement("Scott Derrickson", "nationality", "American")],
@@ -198,7 +247,9 @@ def test_sprint6_dual_entity_comparison_retains_both_sides():
     }
     orchestrator = _build_orchestrator(docs, facts)
 
-    result = orchestrator.answer("Were Scott Derrickson and Ed Wood of the same nationality?")
+    result = orchestrator.answer(
+        "Were Scott Derrickson and Ed Wood of the same nationality?"
+    )
 
     subjects = {f.statement.subject for f in result.evidence_facts}
     assert "Scott Derrickson" in subjects and "Ed Wood" in subjects

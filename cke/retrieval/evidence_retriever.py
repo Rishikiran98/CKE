@@ -48,7 +48,10 @@ class EvidenceRetriever:
             if v
         }
 
-        logger.info("Mentions detected for retrieval: %s", [e.surface_form for e in resolved_entities])
+        logger.info(
+            "Mentions detected for retrieval: %s",
+            [e.surface_form for e in resolved_entities],
+        )
         logger.info("Target relations inferred: %s", target_relations)
 
         for idx, chunk in enumerate(dense_chunks):
@@ -74,9 +77,17 @@ class EvidenceRetriever:
                 entity_bonus = 0.0
                 if subj_norm in entity_norms or obj_norm in entity_norms:
                     entity_bonus += 0.25
-                if statement.canonical_subject_id and AliasRegistry.normalize(statement.canonical_subject_id) in entity_norms:
+                if (
+                    statement.canonical_subject_id
+                    and AliasRegistry.normalize(statement.canonical_subject_id)
+                    in entity_norms
+                ):
                     entity_bonus += 0.20
-                if statement.canonical_object_id and AliasRegistry.normalize(statement.canonical_object_id) in entity_norms:
+                if (
+                    statement.canonical_object_id
+                    and AliasRegistry.normalize(statement.canonical_object_id)
+                    in entity_norms
+                ):
                     entity_bonus += 0.20
 
                 relation_bonus = 0.0
@@ -96,7 +107,11 @@ class EvidenceRetriever:
                     statement=statement,
                     chunk_id=chunk_id,
                     source=statement.source or source,
-                    trust_score=(float(statement.trust_score) if statement.trust_score is not None else 0.5),
+                    trust_score=(
+                        float(statement.trust_score)
+                        if statement.trust_score is not None
+                        else 0.5
+                    ),
                     retrieval_score=combined_score,
                     entity_alignment_score=entity_bonus,
                     supporting_span=statement.supporting_span,

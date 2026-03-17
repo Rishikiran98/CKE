@@ -51,7 +51,10 @@ class EntityResolver:
         normalized = AliasRegistry.normalize(name)
         key = self._canonical_key(name)
         for canonical in self._canonical_entities:
-            if AliasRegistry.normalize(canonical) == normalized or self._canonical_key(canonical) == key:
+            if (
+                AliasRegistry.normalize(canonical) == normalized
+                or self._canonical_key(canonical) == key
+            ):
                 return canonical
         canonical = self._title_case_entity(name)
         self.register_alias(name, canonical)
@@ -124,7 +127,10 @@ class EntityResolver:
                     norm = AliasRegistry.normalize(mention)
                     key = self._canonical_key(mention)
                     for known in self._canonical_entities:
-                        if AliasRegistry.normalize(known) == norm or self._canonical_key(known) == key:
+                        if (
+                            AliasRegistry.normalize(known) == norm
+                            or self._canonical_key(known) == key
+                        ):
                             canonical = known
                             confidence = 0.75
                             aliases_matched = [mention]

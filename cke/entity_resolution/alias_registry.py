@@ -48,4 +48,3 @@ class AliasRegistry:
     def aliases_for(self, canonical: str) -> list[str]:
         values = self.canonical_to_aliases.get(str(canonical).strip(), set())
         return sorted(values)
-

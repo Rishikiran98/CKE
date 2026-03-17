@@ -47,8 +47,6 @@ class QueryDecomposer:
         ("employer", "employer"),
     ]
 
-
-
     def decompose(
         self, query: str, entities: list[str] | None = None
     ) -> DecomposedQuery:
@@ -61,7 +59,9 @@ class QueryDecomposer:
         for entity in entities:
             key = ("entity", entity)
             if key not in seen:
-                steps.append(QueryStep(step_type="entity", value=entity, confidence=0.95))
+                steps.append(
+                    QueryStep(step_type="entity", value=entity, confidence=0.95)
+                )
                 seen.add(key)
 
         lower_query = normalized.lower()
@@ -69,7 +69,9 @@ class QueryDecomposer:
         for relation in inferred_relations:
             key = ("relation", relation)
             if key not in seen:
-                steps.append(QueryStep(step_type="relation", value=relation, confidence=0.86))
+                steps.append(
+                    QueryStep(step_type="relation", value=relation, confidence=0.86)
+                )
                 seen.add(key)
 
         return DecomposedQuery(
