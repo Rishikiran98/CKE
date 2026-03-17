@@ -10,7 +10,7 @@ from cke.reasoning.verification_types import VerificationOutcome
 
 
 class ReasoningVerifier:
-    """Verifies evidence completeness, operator correctness, grounding, and confidence."""
+    """Verifies evidence completeness, logical validity, grounding, and confidence."""
 
     def __init__(self, confidence_threshold: float = 0.7) -> None:
         self.confidence_threshold = confidence_threshold
