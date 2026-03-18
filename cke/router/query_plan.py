@@ -18,3 +18,5 @@ class QueryPlan:
     reasoning_route: str = "advanced_reasoner"
     operator_hint: str | None = None
     target_relations: list[str] = field(default_factory=list)
+    multi_hop_hint: bool = False
+    bridge_entities_expected: bool = False

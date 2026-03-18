@@ -108,6 +108,8 @@ class QueryRouter:
             reasoning_route=reasoning_route,
             operator_hint=operator_hint,
             target_relations=list(decomposition.target_relations),
+            multi_hop_hint=decomposition.multi_hop_hint,
+            bridge_entities_expected=decomposition.bridge_entities_expected,
         )
 
     def _detect_operator_hint(self, query: str) -> str | None:
