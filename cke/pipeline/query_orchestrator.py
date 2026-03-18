@@ -13,10 +13,12 @@ from cke.pipeline.types import (
     ReasonerOutcome,
     ReasoningContext,
 )
+from cke.pipeline.evidence_assembler import EvidenceAssembler
 from cke.reasoning.reasoner_adapter import ReasonerAdapter
 from cke.reasoning.operator_executor import OperatorExecutor
 from cke.reasoning.operator_selector import OperatorSelector
 from cke.reasoning.verifier import ReasoningVerifier
+from cke.retrieval.default_evidence_retriever import DefaultEvidenceRetriever
 from cke.trust.confidence_calibrator import ConfidenceCalibrator
 
 if TYPE_CHECKING:
@@ -43,8 +45,12 @@ class QueryOrchestrator:
     ):
         self.graph_engine = graph_engine
         self.router = router
-        self.retriever = retriever
-        self.assembler = assembler
+        self.retriever = retriever or (
+            DefaultEvidenceRetriever(graph_engine) if graph_engine is not None else None
+        )
+        self.assembler = assembler or (
+            EvidenceAssembler() if self.retriever is not None else None
+        )
         if reasoner is None:
             from cke.reasoning.path_reasoner import PathReasoner
 

@@ -16,6 +16,8 @@ from cke.trust.confidence_model import ConfidenceModel, ReasoningConfidenceSigna
 
 
 class QueryRouter:
+    _QUESTION_WORDS = {"what", "how", "where", "when", "why", "which", "who", "whom"}
+
     def __init__(
         self,
         graph_engine: KnowledgeGraphEngine | None = None,
@@ -51,9 +53,23 @@ class QueryRouter:
             query,
         )
         if name_chunks:
-            return sorted(set(name_chunks))
+            return sorted(
+                {
+                    phrase
+                    for phrase in name_chunks
+                    if phrase.strip()
+                    and phrase.strip().lower() not in self._QUESTION_WORDS
+                }
+            )
 
-        return sorted(set(re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", query)))
+        fallback = []
+        for match in re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", query):
+            if match.lower() in self._QUESTION_WORDS:
+                continue
+            if len(match) == 1 and re.search(rf"\b{re.escape(match)}\b", query) is None:
+                continue
+            fallback.append(match)
+        return sorted(set(fallback))
 
     def classify_domain(self, query: str):
         q = query.lower()
@@ -204,11 +220,11 @@ class QueryRouter:
         ):
             return "answer_immediately", max(route_confidence, 0.85)
 
-        if getattr(decomposition, "multi_hop_hint", False) and entity_count >= 2:
+        if getattr(decomposition, "multi_hop_hint", False):
             return "advanced_reasoner", max(route_confidence, 0.8)
 
         if entity_count == 1 and relation_count == 1:
-            return "graph_traversal", max(route_confidence, 0.78)
+            return "answer_immediately", max(route_confidence, 0.8)
 
         if intent == "comparison" and entity_count >= 2:
             return "advanced_reasoner", max(route_confidence, 0.72)
