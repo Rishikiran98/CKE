@@ -59,6 +59,7 @@ class QueryOrchestrator:
 
     def answer(self, query: str) -> QueryResult:
         query_plan = self.router.route(query)
+        trace_id = str(uuid4())
 
         candidate_entities = self.router.detect_entities(query)
         for entity in candidate_entities:
@@ -138,13 +139,18 @@ class QueryOrchestrator:
         )
 
         self.last_context = context
-        trace_id = str(uuid4())
+        debug_info = self._build_debug_info(
+            context=context,
+            query_plan=query_plan,
+            trace_id=trace_id,
+        )
 
         if not context.evidence_facts:
             return self._abstain(
                 query_plan.reasoning_route,
                 context,
                 trace_id,
+                debug_info=debug_info,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="reasoning_not_executed",
                 failure_mode="no_evidence",
@@ -156,6 +162,7 @@ class QueryOrchestrator:
                 query_plan.reasoning_route,
                 context,
                 trace_id,
+                debug_info=debug_info,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="reasoning_not_executed",
                 failure_mode="no_evidence",
@@ -195,6 +202,7 @@ class QueryOrchestrator:
                 query_plan.reasoning_route,
                 context,
                 trace_id,
+                debug_info=debug_info,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="reasoning_not_executed",
                 failure_mode="not_grounded",
@@ -206,6 +214,7 @@ class QueryOrchestrator:
             resolved_entities=resolved_entities,
             statements=statements,
         )
+        debug_info["selected_operator"] = selected_operator
         reasoner_outcome = None
         if selected_operator:
             operator_outcome = self.operator_executor.execute(
@@ -213,6 +222,9 @@ class QueryOrchestrator:
                 query=query,
                 evidence_facts=statements,
                 resolved_entities=resolved_entities,
+            )
+            debug_info["operator_summary"] = (
+                operator_outcome.summary if operator_outcome is not None else ""
             )
             reasoner_outcome = self._operator_to_reasoner_outcome(operator_outcome)
 
@@ -223,11 +235,18 @@ class QueryOrchestrator:
                 candidate_paths=context.candidate_paths,
             )
         logger.info("Reasoner executed: %s", reasoner_outcome is not None)
+        debug_info["reasoner_summary"] = (
+            reasoner_outcome.summary if reasoner_outcome is not None else ""
+        )
+        debug_info["reasoning_path_length"] = (
+            len(reasoner_outcome.reasoning_path) if reasoner_outcome else 0
+        )
         if reasoner_outcome is None:
             return self._abstain(
                 query_plan.reasoning_route,
                 context,
                 trace_id,
+                debug_info=debug_info,
                 answer="REASONING_FAILED",
                 summary="reasoning_failed",
                 failure_mode="reasoning_failed",
@@ -246,6 +265,9 @@ class QueryOrchestrator:
         logger.info("Verification passed: %s", verification.passed)
         logger.info("Verification issues: %s", verification.issues)
         logger.info("Contradiction detected: %s", verification.contradictory)
+        debug_info["verification_passed"] = verification.passed
+        debug_info["verification_issues"] = list(verification.issues)
+        debug_info["contradiction_detected"] = verification.contradictory
 
         if not verification.passed:
             abstain_answer, failure_mode = self._verification_failure_policy(
@@ -256,6 +278,7 @@ class QueryOrchestrator:
                 query_plan.reasoning_route,
                 context,
                 trace_id,
+                debug_info=debug_info,
                 answer=abstain_answer,
                 summary=verification.summary,
                 failure_mode=failure_mode,
@@ -270,11 +293,16 @@ class QueryOrchestrator:
                 query_plan.reasoning_route,
                 context,
                 trace_id,
+                debug_info=debug_info,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="verification_failed:empty_reasoning_path",
                 failure_mode="verification_failed",
             )
 
+        debug_info["abstained"] = False
+        debug_info["final_answer"] = reasoner_outcome.answer
+        debug_info["final_confidence"] = reasoner_outcome.confidence
+        debug_info["failure_mode"] = None
         return QueryResult(
             answer=reasoner_outcome.answer,
             confidence=reasoner_outcome.confidence,
@@ -284,7 +312,47 @@ class QueryOrchestrator:
             verification_summary=verification.summary,
             trace_id=trace_id,
             failure_mode=None,
+            debug_info=debug_info,
         )
+
+    def _build_debug_info(
+        self,
+        context: ReasoningContext,
+        query_plan,
+        trace_id: str,
+    ) -> dict[str, object]:
+        trace_metadata = dict(context.trace_metadata)
+        return {
+            "trace_id": trace_id,
+            "reasoning_route": getattr(query_plan, "reasoning_route", ""),
+            "target_relations": list(trace_metadata.get("target_relations", [])),
+            "resolved_entities": list(trace_metadata.get("resolved_entities", [])),
+            "retrieved_chunk_count": len(context.retrieved_chunks),
+            "evidence_fact_count": len(context.evidence_facts),
+            "evidence_facts_before_filtering": trace_metadata.get(
+                "evidence_facts_before_filtering", len(context.evidence_facts)
+            ),
+            "evidence_facts_after_filtering": trace_metadata.get(
+                "evidence_facts_after_filtering", len(context.evidence_facts)
+            ),
+            "candidate_path_count": len(context.candidate_paths),
+            "candidate_paths_before_scoring": trace_metadata.get(
+                "candidate_paths_before_scoring", len(context.candidate_paths)
+            ),
+            "subgraph_entity_count": trace_metadata.get("subgraph_entity_count", 0),
+            "subgraph_edge_count": trace_metadata.get("subgraph_edge_count", 0),
+            "selected_operator": None,
+            "operator_summary": "",
+            "reasoner_summary": "",
+            "reasoning_path_length": 0,
+            "verification_passed": None,
+            "verification_issues": [],
+            "contradiction_detected": False,
+            "abstained": None,
+            "final_answer": "",
+            "final_confidence": 0.0,
+            "failure_mode": None,
+        }
 
     def _operator_to_reasoner_outcome(self, outcome):
         if outcome is None:
@@ -352,10 +420,15 @@ class QueryOrchestrator:
         reasoning_route: str,
         context: ReasoningContext,
         trace_id: str,
+        debug_info: dict[str, object],
         answer: str,
         summary: str,
         failure_mode: str,
     ) -> QueryResult:
+        debug_info["abstained"] = True
+        debug_info["final_answer"] = answer
+        debug_info["final_confidence"] = 0.0
+        debug_info["failure_mode"] = failure_mode
         return QueryResult(
             answer=answer,
             confidence=0.0,
@@ -365,4 +438,5 @@ class QueryOrchestrator:
             verification_summary=summary,
             trace_id=trace_id,
             failure_mode=failure_mode,
+            debug_info=debug_info,
         )
