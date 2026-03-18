@@ -13,6 +13,7 @@ from cke.pipeline.types import (
     ReasonerOutcome,
     ReasoningContext,
 )
+from cke.reasoning.reasoner_adapter import ReasonerAdapter
 from cke.reasoning.operator_executor import OperatorExecutor
 from cke.reasoning.operator_selector import OperatorSelector
 from cke.reasoning.verifier import ReasoningVerifier
@@ -52,6 +53,7 @@ class QueryOrchestrator:
         self.verifier = verifier or ReasoningVerifier()
         self.operator_selector = operator_selector or OperatorSelector()
         self.operator_executor = operator_executor or OperatorExecutor()
+        self.reasoner_adapter = ReasonerAdapter(self.reasoner)
         self.last_context: ReasoningContext | None = None
         self.entity_resolver = entity_resolver or EntityResolver()
 
@@ -88,11 +90,7 @@ class QueryOrchestrator:
                 retrieved_chunks=[],
                 evidence_facts=[],
                 candidate_paths=[],
-                subgraph={
-                    "entities": [],
-                    "facts_by_entity": {},
-                    "facts_by_relation": {},
-                },
+                subgraph=None,
                 decomposition=list(getattr(query_plan, "decomposition", [])),
                 trace_metadata={},
             )
@@ -135,6 +133,9 @@ class QueryOrchestrator:
         )
         logger.info("Evidence facts after filtering: %s", len(context.evidence_facts))
         logger.info("Candidate paths: %s", len(context.candidate_paths))
+        logger.info(
+            "Path-aware reasoning attempt possible: %s", bool(context.candidate_paths)
+        )
 
         self.last_context = context
         trace_id = str(uuid4())
@@ -216,7 +217,11 @@ class QueryOrchestrator:
             reasoner_outcome = self._operator_to_reasoner_outcome(operator_outcome)
 
         if reasoner_outcome is None:
-            reasoner_outcome = self._run_reasoner(query, statements)
+            reasoner_outcome = self._run_reasoner(
+                query,
+                statements,
+                candidate_paths=context.candidate_paths,
+            )
         logger.info("Reasoner executed: %s", reasoner_outcome is not None)
         if reasoner_outcome is None:
             return self._abstain(
@@ -314,42 +319,20 @@ class QueryOrchestrator:
             summary=outcome.summary or "operator_completed",
         )
 
-    def _run_reasoner(self, query: str, statements):
+    def _run_reasoner(self, query: str, statements, candidate_paths=None):
         try:
-            if hasattr(self.reasoner, "reason"):
-                outcome = self.reasoner.reason(query, statements)
-                if isinstance(outcome, ReasonerOutcome):
-                    return outcome
-            answer = self.reasoner.answer(query, statements)
+            outcome = self.reasoner_adapter.reason(
+                query,
+                statements,
+                candidate_paths=candidate_paths or [],
+            )
+            if isinstance(outcome, ReasonerOutcome):
+                return outcome
         except Exception:
             logger.exception("Reasoner execution failed")
             return None
 
-        if (
-            not answer
-            or "don't have enough" in answer.lower()
-            or "insufficient" in answer.lower()
-        ):
-            return ReasonerOutcome(
-                answer="INSUFFICIENT_EVIDENCE",
-                confidence=0.0,
-                reasoning_path=[],
-                required_facts=[],
-                operator_checks=[],
-                summary="reasoner_abstained",
-            )
-
-        confidence = 0.8 if statements else 0.0
-        return ReasonerOutcome(
-            answer=answer,
-            confidence=confidence,
-            reasoning_path=[
-                st for st in statements if st.object.lower() == answer.lower()
-            ],
-            required_facts=[],
-            operator_checks=[],
-            summary="reasoner_completed",
-        )
+        return None
 
     def _verification_failure_policy(self, issues: list[str]) -> tuple[str, str]:
         if "contradictory_evidence" in issues:

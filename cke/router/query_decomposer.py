@@ -22,6 +22,8 @@ class DecomposedQuery:
     steps: list[QueryStep] = field(default_factory=list)
     operator_hint: str | None = None
     target_relations: list[str] = field(default_factory=list)
+    multi_hop_hint: bool = False
+    bridge_entities_expected: bool = False
 
 
 class QueryDecomposer:
@@ -79,6 +81,10 @@ class QueryDecomposer:
             steps=steps,
             operator_hint=self._detect_operator_hint(lower_query),
             target_relations=inferred_relations,
+            multi_hop_hint=self._has_multi_hop_hint(lower_query),
+            bridge_entities_expected=self._expects_bridge_entities(
+                lower_query, entities
+            ),
         )
 
     def _detect_operator_hint(self, query: str) -> str | None:
@@ -128,3 +134,30 @@ class QueryDecomposer:
             if marker in query and relation not in found:
                 found.append(relation)
         return found
+
+    def _has_multi_hop_hint(self, query: str) -> bool:
+        markers = [
+            " through ",
+            " via ",
+            " connected to ",
+            " between ",
+            " what links ",
+            " portrayed by ",
+            " directed by the person who ",
+            " who ",
+        ]
+        padded = f" {query} "
+        return any(marker in padded for marker in markers)
+
+    def _expects_bridge_entities(self, query: str, entities: list[str]) -> bool:
+        if len(entities) >= 2 and self._has_multi_hop_hint(query):
+            return True
+        return any(
+            marker in query
+            for marker in [
+                "character portrayed by",
+                "what links",
+                "connected to",
+                "between",
+            ]
+        )

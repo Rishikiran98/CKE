@@ -15,3 +15,15 @@ def test_query_decomposer_hotpot_style_chain():
     assert ("relation", "starred_in") in values
     assert ("relation", "directed_by") in values
     assert ("relation", "nationality") in values
+
+
+def test_query_decomposer_sets_multi_hop_bridge_hints():
+    decomposer = QueryDecomposer()
+
+    result = decomposer.decompose(
+        "Which film is associated with the character portrayed by Person X?",
+        entities=["Person X"],
+    )
+
+    assert result.multi_hop_hint is True
+    assert result.bridge_entities_expected is True

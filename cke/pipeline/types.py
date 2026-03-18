@@ -9,6 +9,7 @@ from cke.models import Statement
 
 if TYPE_CHECKING:
     from cke.router.query_plan import QueryPlan
+    from cke.retrieval.path_types import CandidatePath, LocalSubgraph
 
 
 @dataclass(slots=True)
@@ -48,8 +49,8 @@ class ReasoningContext:
     resolved_entities: list[ResolvedEntity] = field(default_factory=list)
     retrieved_chunks: list[RetrievedChunk] = field(default_factory=list)
     evidence_facts: list[EvidenceFact] = field(default_factory=list)
-    candidate_paths: list[Any] = field(default_factory=list)
-    subgraph: dict[str, Any] | None = None
+    candidate_paths: list["CandidatePath"] = field(default_factory=list)
+    subgraph: "LocalSubgraph | None" = None
     decomposition: list[Any] = field(default_factory=list)
     trace_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -70,7 +71,7 @@ class QueryResult:
     confidence: float
     reasoning_route: str
     evidence_facts: list[EvidenceFact] = field(default_factory=list)
-    candidate_paths: list[Any] = field(default_factory=list)
+    candidate_paths: list["CandidatePath"] = field(default_factory=list)
     verification_summary: str = "not_executed"
     trace_id: str = ""
     failure_mode: str | None = None

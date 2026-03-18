@@ -76,3 +76,14 @@ def test_query_router_populates_decomposition_steps():
     }
     assert "directed_by" in relation_values
     assert "nationality" in relation_values
+
+
+def test_query_router_populates_multi_hop_hints():
+    router = QueryRouter()
+
+    plan = router.route(
+        "Which film is associated with the character portrayed by Person X?"
+    )
+
+    assert plan.multi_hop_hint is True
+    assert plan.bridge_entities_expected is True

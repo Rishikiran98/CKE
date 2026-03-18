@@ -2,24 +2,41 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 
 from cke.entity_resolution.alias_registry import AliasRegistry
-from cke.models import Statement
 from cke.pipeline.types import (
     EvidenceFact,
     ReasoningContext,
     ResolvedEntity,
     RetrievedChunk,
 )
+from cke.retrieval.path_generator import CandidatePathGenerator
+from cke.retrieval.path_scorer import CandidatePathScorer
+from cke.retrieval.subgraph_builder import LocalSubgraphBuilder
 from cke.router.query_plan import QueryPlan
+
+
+logger = logging.getLogger(__name__)
 
 
 class EvidenceAssembler:
     """Deduplicate and bound retrieved evidence facts."""
 
-    def __init__(self, max_facts: int = 20) -> None:
+    def __init__(
+        self,
+        max_facts: int = 20,
+        max_candidate_paths: int = 5,
+        subgraph_builder: LocalSubgraphBuilder | None = None,
+        path_generator: CandidatePathGenerator | None = None,
+        path_scorer: CandidatePathScorer | None = None,
+    ) -> None:
         self.max_facts = max_facts
+        self.max_candidate_paths = max_candidate_paths
+        self.subgraph_builder = subgraph_builder or LocalSubgraphBuilder()
+        self.path_generator = path_generator or CandidatePathGenerator()
+        self.path_scorer = path_scorer or CandidatePathScorer()
 
     def assemble(
         self,
@@ -33,8 +50,21 @@ class EvidenceAssembler:
         filtered_facts = self._filter_facts(
             deduped_facts, resolved_entities, query_plan
         )
-        candidate_paths = self._build_candidate_paths(filtered_facts, query_plan)
-        subgraph = self._build_subgraph(filtered_facts)
+        subgraph = self.subgraph_builder.build(resolved_entities, filtered_facts)
+        raw_candidate_paths = self.path_generator.generate(subgraph, query, query_plan)
+        candidate_paths = self._select_candidate_paths(
+            raw_candidate_paths, query_plan, resolved_entities
+        )
+        debug_subgraph = self._build_subgraph_debug_view(subgraph)
+
+        logger.info("Subgraph entity count: %s", len(subgraph.entities))
+        logger.info("Subgraph edge count: %s", len(subgraph.edges))
+        logger.info("Candidate paths before scoring: %s", len(raw_candidate_paths))
+        logger.info("Candidate paths after scoring: %s", len(candidate_paths))
+        logger.info(
+            "Top path scores: %s",
+            [round(path.path_score, 3) for path in candidate_paths[:3]],
+        )
 
         return ReasoningContext(
             query=query,
@@ -48,11 +78,17 @@ class EvidenceAssembler:
             trace_metadata={
                 "evidence_facts_before_filtering": len(facts),
                 "evidence_facts_after_filtering": len(filtered_facts),
+                "candidate_paths_before_scoring": len(raw_candidate_paths),
                 "candidate_paths": len(candidate_paths),
-                "facts_by_canonical_subject": subgraph.get(
+                "subgraph_entity_count": len(subgraph.entities),
+                "subgraph_edge_count": len(subgraph.edges),
+                "top_path_scores": [
+                    round(path.path_score, 3) for path in candidate_paths[:3]
+                ],
+                "facts_by_canonical_subject": debug_subgraph.get(
                     "facts_by_canonical_subject", {}
                 ),
-                "facts_by_relation": subgraph.get("facts_by_relation", {}),
+                "facts_by_relation": debug_subgraph.get("facts_by_relation", {}),
             },
         )
 
@@ -122,6 +158,9 @@ class EvidenceAssembler:
         scored.sort(key=lambda item: item[0], reverse=True)
         selected = [fact for _, fact in scored[: self.max_facts]]
 
+        if getattr(query_plan, "multi_hop_hint", False):
+            selected = self._preserve_connected_facts(selected, scored)
+
         if len(resolved_entities) >= 2:
             # Preserve top fact for both sides in comparison queries.
             keep = list(selected)
@@ -156,64 +195,64 @@ class EvidenceAssembler:
                 terms.add(AliasRegistry.normalize(value))
         return terms
 
-    def _build_candidate_paths(
+    def _select_candidate_paths(
         self,
-        facts: list[EvidenceFact],
+        candidate_paths,
         query_plan: QueryPlan,
-    ) -> list[list[Statement]]:
-        relation_terms = self._relation_terms(query_plan)
-        paths: list[list[Statement]] = []
+        resolved_entities: list[ResolvedEntity],
+    ):
+        scored_paths = self.path_scorer.score(
+            candidate_paths, query_plan=query_plan, resolved_entities=resolved_entities
+        )
+        return scored_paths[: self.max_candidate_paths]
 
-        for fact in facts:
-            relation = AliasRegistry.normalize(fact.statement.relation)
-            if relation_terms and any(term in relation for term in relation_terms):
-                paths.append([fact.statement])
-
-        for left in facts:
-            for right in facts:
-                if left is right:
-                    continue
-                if AliasRegistry.normalize(
-                    left.statement.object
-                ) == AliasRegistry.normalize(right.statement.subject):
-                    paths.append([left.statement, right.statement])
-
-        deduped_paths: list[list[Statement]] = []
-        seen_paths: set[tuple[tuple[str, str, str], ...]] = set()
-        for path in paths:
-            key = tuple(statement.key() for statement in path)
-            if key in seen_paths:
-                continue
-            seen_paths.add(key)
-            deduped_paths.append(path)
-        return deduped_paths
-
-    def _build_subgraph(
-        self, facts: list[EvidenceFact]
+    def _build_subgraph_debug_view(
+        self,
+        subgraph,
     ) -> dict[str, list[dict[str, str]]]:
         facts_by_entity: dict[str, list[dict[str, str]]] = defaultdict(list)
         facts_by_relation: dict[str, list[dict[str, str]]] = defaultdict(list)
         facts_by_canonical_subject: dict[str, list[dict[str, str]]] = defaultdict(list)
-        entities: set[str] = set()
 
-        for fact in facts:
+        for statement in subgraph.edges:
             payload = {
-                "subject": fact.statement.subject,
-                "relation": fact.statement.relation,
-                "object": fact.statement.object,
+                "subject": statement.subject,
+                "relation": statement.relation,
+                "object": statement.object,
             }
-            entities.update((fact.statement.subject, fact.statement.object))
-            facts_by_entity[fact.statement.subject].append(payload)
-            facts_by_entity[fact.statement.object].append(payload)
-            facts_by_relation[fact.statement.relation].append(payload)
-            canonical_subject = (
-                fact.statement.canonical_subject_id or fact.statement.subject
-            )
+            facts_by_entity[statement.subject].append(payload)
+            facts_by_entity[statement.object].append(payload)
+            facts_by_relation[statement.relation].append(payload)
+            canonical_subject = statement.canonical_subject_id or statement.subject
             facts_by_canonical_subject[canonical_subject].append(payload)
 
         return {
-            "entities": sorted(entities),
+            "entities": list(subgraph.entities),
             "facts_by_entity": dict(facts_by_entity),
             "facts_by_relation": dict(facts_by_relation),
             "facts_by_canonical_subject": dict(facts_by_canonical_subject),
         }
+
+    def _preserve_connected_facts(
+        self,
+        selected: list[EvidenceFact],
+        scored: list[tuple[float, EvidenceFact]],
+    ) -> list[EvidenceFact]:
+        selected_keys = {fact.statement.key() for fact in selected}
+        connector_entities = {
+            AliasRegistry.normalize(fact.statement.subject) for fact in selected
+        } | {AliasRegistry.normalize(fact.statement.object) for fact in selected}
+        keep = list(selected)
+        for _, fact in scored:
+            if fact.statement.key() in selected_keys:
+                continue
+            if AliasRegistry.normalize(
+                fact.statement.subject
+            ) in connector_entities or (
+                AliasRegistry.normalize(fact.statement.object) in connector_entities
+            ):
+                keep.append(fact)
+                selected_keys.add(fact.statement.key())
+            if len(keep) >= self.max_facts:
+                break
+        return keep[: self.max_facts]
