@@ -60,7 +60,8 @@ def generate_text_report(
             "  - "
             f"{bucket}: accuracy={bucket_summary['accuracy']:.2%}, "
             f"avg_confidence={bucket_summary['average_confidence']:.3f}, "
-            f"count={bucket_summary['count']}, abstentions={bucket_summary['abstentions']}"
+            f"count={bucket_summary['count']}, "
+            f"abstentions={bucket_summary['abstentions']}"
             for bucket, bucket_summary in summary.calibration_by_bucket.items()
         )
     else:
