@@ -394,6 +394,18 @@ class QueryOrchestrator:
             ),
             "subgraph_entity_count": trace_metadata.get("subgraph_entity_count", 0),
             "subgraph_edge_count": trace_metadata.get("subgraph_edge_count", 0),
+            "top_retrieved_chunks": list(
+                trace_metadata.get("top_retrieved_chunks", [])
+            ),
+            "top_evidence_facts": list(trace_metadata.get("top_evidence_facts", [])),
+            "top_candidate_paths": list(trace_metadata.get("top_candidate_paths", [])),
+            "retrieval_debug": {
+                "entity_retrieved": False,
+                "relation_retrieved": False,
+                "answer_retrieved": False,
+                "answer_in_top_5_facts": False,
+                "supporting_path_found": False,
+            },
             "selected_operator": None,
             "operator_summary": "",
             "reasoner_summary": "",

@@ -64,6 +64,7 @@ def extract_stage_diagnostics(
         "candidate_path_count",
         trace_metadata.get("candidate_paths", len(result.candidate_paths)),
     )
+    retrieval_debug = debug_info.get("retrieval_debug", {})
 
     diagnostics = {
         "entity_resolution": {
@@ -85,6 +86,26 @@ def extract_stage_diagnostics(
             "retrieved_chunk_count": debug_info.get(
                 "retrieved_chunk_count",
                 len(getattr(context, "retrieved_chunks", [])) if context else 0,
+            ),
+            "entity_retrieved": bool(retrieval_debug.get("entity_retrieved", False)),
+            "relation_retrieved": bool(
+                retrieval_debug.get("relation_retrieved", False)
+            ),
+            "answer_retrieved": bool(retrieval_debug.get("answer_retrieved", False)),
+            "answer_in_top_5_facts": bool(
+                retrieval_debug.get("answer_in_top_5_facts", False)
+            ),
+            "supporting_path_found": bool(
+                retrieval_debug.get("supporting_path_found", False)
+            ),
+            "expected_entity_present": bool(
+                retrieval_debug.get("expected_entity_present", False)
+            ),
+            "expected_relation_present": bool(
+                retrieval_debug.get("expected_relation_present", False)
+            ),
+            "expected_answer_present": bool(
+                retrieval_debug.get("expected_answer_present", False)
             ),
             "ok": debug_info.get(
                 "retrieved_chunk_count",

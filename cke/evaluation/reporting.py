@@ -123,3 +123,17 @@ def export_csv(results: list[CaseEvaluationResult], output_path: str | Path) -> 
             row = {name: getattr(result, name) for name in fieldnames}
             writer.writerow(row)
     return path
+
+
+def compare_summaries(
+    baseline: EvaluationSummary,
+    candidate: EvaluationSummary,
+) -> dict[str, float]:
+    """Summarize before/after retrieval metric deltas."""
+    baseline_metrics = baseline.retrieval_metrics or {}
+    candidate_metrics = candidate.retrieval_metrics or {}
+    metric_names = set(baseline_metrics) | set(candidate_metrics)
+    return {
+        metric: candidate_metrics.get(metric, 0.0) - baseline_metrics.get(metric, 0.0)
+        for metric in sorted(metric_names)
+    }

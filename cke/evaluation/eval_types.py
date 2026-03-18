@@ -41,3 +41,5 @@ class EvaluationSummary:
     )
     failure_breakdown: dict[str, int] = field(default_factory=dict)
     stage_failure_breakdown: dict[str, int] = field(default_factory=dict)
+    retrieval_metrics: dict[str, float] = field(default_factory=dict)
+    retrieval_miss_breakdown: dict[str, int] = field(default_factory=dict)
