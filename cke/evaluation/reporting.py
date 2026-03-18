@@ -16,7 +16,7 @@ def generate_text_report(
     max_failed_cases: int = 10,
 ) -> str:
     lines = [
-        "CKE Sprint 8 Evaluation Report",
+        "CKE Sprint 9 Evaluation Report",
         f"Total cases: {summary.total_cases}",
         (
             "Exact accuracy: "
@@ -28,6 +28,9 @@ def generate_text_report(
         f"({summary.acceptable_matches}/{summary.total_cases})",
         f"Abstentions: {summary.abstentions}",
         f"Failed cases: {summary.failed_cases}",
+        f"Avg confidence (correct): {summary.average_confidence_correct:.3f}",
+        f"Avg confidence (incorrect): {summary.average_confidence_incorrect:.3f}",
+        f"High-confidence error rate: {summary.high_confidence_error_rate:.2%}",
         "",
         "Failure breakdown:",
     ]
@@ -51,21 +54,15 @@ def generate_text_report(
         lines.append("  - none")
 
     lines.append("")
-    lines.append("Retrieval metrics:")
-    if summary.retrieval_metrics:
+    lines.append("Calibration by confidence bucket:")
+    if summary.calibration_by_bucket:
         lines.extend(
-            f"  - {metric}: {value:.2%}"
-            for metric, value in summary.retrieval_metrics.items()
-        )
-    else:
-        lines.append("  - none")
-
-    lines.append("")
-    lines.append("Retrieval miss categories:")
-    if summary.retrieval_miss_breakdown:
-        lines.extend(
-            f"  - {category}: {count}"
-            for category, count in summary.retrieval_miss_breakdown.items()
+            "  - "
+            f"{bucket}: accuracy={bucket_summary['accuracy']:.2%}, "
+            f"avg_confidence={bucket_summary['average_confidence']:.3f}, "
+            f"count={bucket_summary['count']}, "
+            f"abstentions={bucket_summary['abstentions']}"
+            for bucket, bucket_summary in summary.calibration_by_bucket.items()
         )
     else:
         lines.append("  - none")
@@ -115,6 +112,8 @@ def export_csv(results: list[CaseEvaluationResult], output_path: str | Path) -> 
         "failure_mode",
         "verification_summary",
         "reasoning_route",
+        "confidence",
+        "confidence_bucket",
         "trace_id",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:

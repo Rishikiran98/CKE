@@ -143,6 +143,7 @@ def extract_stage_diagnostics(
         },
         "reasoning": {
             "reasoning_route": result.reasoning_route,
+            "route_confidence": debug_info.get("route_confidence", 0.0),
             "reasoner_summary": debug_info.get("reasoner_summary", ""),
             "reasoning_path_length": int(debug_info.get("reasoning_path_length", 0)),
             "ok": bool(debug_info.get("reasoner_summary")) or not is_abstained(result),
@@ -154,6 +155,7 @@ def extract_stage_diagnostics(
             "contradiction_detected": bool(
                 debug_info.get("contradiction_detected", False)
             ),
+            "confidence_signals": dict(result.confidence_signals),
             "ok": result.verification_summary == "reasoning_not_executed"
             or not result.verification_summary.startswith("verification_failed"),
         },

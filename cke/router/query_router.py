@@ -87,7 +87,14 @@ class QueryRouter:
         confidence_score = self._estimate_confidence(
             intent, entities, decomposition.steps
         )
-        reasoning_route = self._reasoning_route(confidence_score)
+        reasoning_route, route_confidence = self._select_route(
+            query=query,
+            intent=intent,
+            entities=entities,
+            operator_hint=operator_hint,
+            decomposition=decomposition,
+            base_confidence=confidence_score,
+        )
 
         return QueryPlan(
             query_text=query,
@@ -105,6 +112,7 @@ class QueryRouter:
             max_depth=max_depth,
             max_results=max_results,
             confidence_score=confidence_score,
+            route_confidence=route_confidence,
             reasoning_route=reasoning_route,
             operator_hint=operator_hint,
             target_relations=list(decomposition.target_relations),
@@ -173,6 +181,42 @@ class QueryRouter:
         if confidence_score > 0.6:
             return "graph_traversal"
         return "advanced_reasoner"
+
+    def _select_route(
+        self,
+        query: str,
+        intent: str,
+        entities: list[str],
+        operator_hint: str | None,
+        decomposition,
+        base_confidence: float,
+    ) -> tuple[str, float]:
+        relation_count = len(getattr(decomposition, "target_relations", []))
+        entity_count = len(entities)
+        route = self._reasoning_route(base_confidence)
+        route_confidence = base_confidence
+        normalized_query = query.lower()
+
+        if (
+            operator_hint
+            and entity_count >= 1
+            and (relation_count >= 1 or "how many" in normalized_query)
+        ):
+            return "answer_immediately", max(route_confidence, 0.85)
+
+        if getattr(decomposition, "multi_hop_hint", False) and entity_count >= 2:
+            return "advanced_reasoner", max(route_confidence, 0.8)
+
+        if entity_count == 1 and relation_count == 1:
+            return "graph_traversal", max(route_confidence, 0.78)
+
+        if intent == "comparison" and entity_count >= 2:
+            return "advanced_reasoner", max(route_confidence, 0.72)
+
+        if relation_count == 0 and entity_count == 0:
+            return route, min(route_confidence, 0.35)
+
+        return route, route_confidence
 
     def _adaptive_depth(
         self,
