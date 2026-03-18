@@ -14,6 +14,8 @@ class CoreferenceResolver:
     """Resolve pronoun references to the latest salient named entity."""
 
     PRONOUNS = {"he", "she", "they", "it", "him", "her", "them", "his", "its", "their"}
+    _PERSON_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b")
+    _NAME_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b")
 
     def __init__(self) -> None:
         self._nlp = self._load_spacy()
@@ -51,17 +53,20 @@ class CoreferenceResolver:
             return None
         antecedent = None
         output_tokens: list[str] = []
+        ent_starts = {ent.start: ent for ent in doc.ents}
+        consumed_ent_tokens: set[int] = set()
         for token in doc:
-            if token.ent_type_ and token.pos_ in {"PROPN", "NOUN"}:
-                antecedent = token.text
-                output_tokens.append(token.text)
+            entity = ent_starts.get(token.i)
+            if entity is not None:
+                antecedent = entity.text
+                output_tokens.append(entity.text + entity[-1].whitespace_)
+                consumed_ent_tokens.update(range(entity.start, entity.end))
+                continue
+            if token.i in consumed_ent_tokens:
                 continue
             lower = token.text.lower()
             if lower in self.PRONOUNS and antecedent:
-                replacement = antecedent
-                if token.whitespace_:
-                    replacement += token.whitespace_
-                output_tokens.append(replacement)
+                output_tokens.append(antecedent + token.whitespace_)
             else:
                 output_tokens.append(token.text_with_ws)
         return "".join(output_tokens).strip()
@@ -92,10 +97,17 @@ class CoreferenceResolver:
             rewritten.append(sentence_rewritten)
         return " ".join(rewritten)
 
-    @staticmethod
-    def _find_latest_named_entity(sentence: str) -> str:
-        person_like = re.findall(r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b", sentence)
+    def _find_latest_named_entity(self, sentence: str) -> str:
+        person_like = self._match_names(self._PERSON_PATTERN, sentence)
         if person_like:
             return person_like[0]
-        matches = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", sentence)
+        matches = self._match_names(self._NAME_PATTERN, sentence)
         return matches[-1] if matches else ""
+
+    @staticmethod
+    def _match_names(pattern: re.Pattern[str], sentence: str) -> list[str]:
+        return [
+            match.group(1).strip()
+            for match in pattern.finditer(sentence)
+            if match.group(1).strip()
+        ]

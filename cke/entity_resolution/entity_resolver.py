@@ -14,6 +14,36 @@ if TYPE_CHECKING:
 class EntityResolver:
     """Resolve query mentions into structured canonical entities."""
 
+    _QUESTION_WORDS = {
+        "what",
+        "how",
+        "where",
+        "when",
+        "why",
+        "which",
+        "who",
+        "whom",
+    }
+    _LEADING_SCAFFOLD = _QUESTION_WORDS | {
+        "did",
+        "do",
+        "does",
+        "is",
+        "are",
+        "was",
+        "were",
+        "has",
+        "have",
+        "had",
+        "can",
+        "could",
+        "will",
+        "would",
+        "should",
+        "may",
+        "might",
+    }
+
     def __init__(self, aliases: dict[str, str] | None = None) -> None:
         self.registry = AliasRegistry()
         self._canonical_entities: set[str] = set()
@@ -66,37 +96,68 @@ class EntityResolver:
         candidate_entities: Iterable[str] | None = None,
     ) -> list[str]:
         q = query or ""
-        lowered = q.lower()
         mentions: list[str] = []
 
         for canonical in sorted(set(candidate_entities or []), key=len, reverse=True):
-            if canonical and canonical.lower() in lowered:
-                mentions.append(canonical)
+            cleaned = self._clean_mention(canonical)
+            if cleaned and self._mention_in_query(cleaned, q):
+                mentions.append(cleaned)
 
         for canonical, aliases in self.registry.canonical_to_aliases.items():
             for alias in aliases:
-                if alias and alias.lower() in lowered:
-                    mentions.append(alias)
-                    if canonical.lower() in lowered:
-                        mentions.append(canonical)
+                cleaned_alias = self._clean_mention(alias)
+                if cleaned_alias and self._mention_in_query(cleaned_alias, q):
+                    mentions.append(cleaned_alias)
+                cleaned_canonical = self._clean_mention(canonical)
+                if cleaned_canonical and self._mention_in_query(cleaned_canonical, q):
+                    mentions.append(cleaned_canonical)
 
         name_chunks = re.findall(
             r"\b(?:[A-Z][a-z0-9'/-]+(?:\s+[A-Z][a-z0-9'/-]+)+)\b",
             q,
         )
-        mentions.extend(name_chunks)
+        mentions.extend(self._clean_mention(chunk) for chunk in name_chunks)
 
         if not mentions:
-            mentions.extend(re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", q))
+            mentions.extend(
+                self._clean_mention(match)
+                for match in re.findall(r"\b[A-Z][a-zA-Z0-9_/-]*\b", q)
+            )
 
         deduped: list[str] = []
         seen: set[str] = set()
         for mention in mentions:
+            if not self._keep_mention(mention, q):
+                continue
             key = AliasRegistry.normalize(mention)
             if key and key not in seen:
                 deduped.append(mention)
                 seen.add(key)
         return deduped
+
+    def _mention_in_query(self, mention: str, query: str) -> bool:
+        if len(mention) == 1:
+            return re.search(rf"\b{re.escape(mention)}\b", query) is not None
+        return (
+            re.search(rf"\b{re.escape(mention)}\b", query, flags=re.IGNORECASE)
+            is not None
+        )
+
+    def _clean_mention(self, mention: str) -> str:
+        tokens = str(mention).strip(" ?!.,").split()
+        while tokens and tokens[0].lower() in self._LEADING_SCAFFOLD:
+            tokens = tokens[1:]
+        return " ".join(tokens).strip(" ?!.,")
+
+    def _keep_mention(self, mention: str, query: str) -> bool:
+        if not mention:
+            return False
+        lowered = mention.lower()
+        if lowered in self._QUESTION_WORDS:
+            return False
+        if len(mention) == 1:
+            return re.search(rf"\b{re.escape(mention)}\b", query) is not None
+        return True
 
     def resolve_mentions(
         self,

@@ -19,6 +19,10 @@ from cke.reasoning.operators import (
 
 class OperatorExecutor:
     @staticmethod
+    def _tokenize(text: str) -> set[str]:
+        return {token for token in re.findall(r"[a-z0-9_+-]+", (text or "").lower()) if token}
+
+    @staticmethod
     def required_input_satisfied(
         operator_hint: str,
         query: str,
@@ -92,20 +96,47 @@ class OperatorExecutor:
         evidence_facts: list[Statement],
         resolved_entities: list[ResolvedEntity],
     ) -> list[Statement]:
-        lowered = query.lower()
-        entity_names = [entity.canonical_name.lower() for entity in resolved_entities]
+        query_tokens = self._tokenize(query)
+        entity_names = [
+            entity.canonical_name.lower()
+            for entity in resolved_entities
+            if entity.canonical_name
+        ]
         relation_hint = self._relation_hint(query)
         matched: list[Statement] = []
+        seen: set[tuple[str, str, str]] = set()
         for fact in evidence_facts:
             subject = fact.subject.lower()
             obj = fact.object.lower()
             rel = fact.relation.lower()
-            entity_ok = not entity_names or any(
-                entity in subject or entity in obj for entity in entity_names
+            fact_entity_text = f"{subject} {obj}"
+            matched_entities = [
+                entity
+                for entity in entity_names
+                if all(
+                    token in self._tokenize(fact_entity_text)
+                    for token in self._tokenize(entity)
+                )
+            ]
+            entity_ok = (
+                not entity_names
+                or (
+                    len(matched_entities) == len(entity_names)
+                    if len(entity_names) > 1
+                    else bool(matched_entities)
+                )
             )
             relation_ok = self._relation_matches(relation_hint, rel)
-            lexical_ok = any(token in f" {lowered} " for token in [subject, obj, rel])
+            lexical_ok = bool(
+                (self._tokenize(subject) & query_tokens)
+                or (self._tokenize(obj) & query_tokens)
+                or (self._tokenize(rel) & query_tokens)
+            )
             if entity_ok and (relation_ok or lexical_ok):
+                key = fact.key()
+                if key in seen:
+                    continue
+                seen.add(key)
                 matched.append(fact)
         return matched
 
