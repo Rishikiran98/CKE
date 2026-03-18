@@ -174,7 +174,10 @@ DEFAULT_GOLDEN_SET: list[GoldenCase] = [
     ),
     GoldenCase(
         case_id="path-004",
-        query="Which film is associated with the character portrayed by Bridge Missing?",
+        query=(
+            "Which film is associated with the character portrayed by Bridge "
+            "Missing?"
+        ),
         expected_answer=None,
         expected_entities=["Bridge Missing"],
         expected_relations=["portrayed", "appears_in"],

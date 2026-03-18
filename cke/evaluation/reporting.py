@@ -18,9 +18,14 @@ def generate_text_report(
     lines = [
         "CKE Sprint 8 Evaluation Report",
         f"Total cases: {summary.total_cases}",
-        f"Exact accuracy: {summary.accuracy:.2%} ({summary.exact_matches}/{summary.total_cases})",
+        (
+            "Exact accuracy: "
+            f"{summary.accuracy:.2%} "
+            f"({summary.exact_matches}/{summary.total_cases})"
+        ),
         "Acceptable accuracy: "
-        f"{summary.acceptable_accuracy:.2%} ({summary.acceptable_matches}/{summary.total_cases})",
+        f"{summary.acceptable_accuracy:.2%} "
+        f"({summary.acceptable_matches}/{summary.total_cases})",
         f"Abstentions: {summary.abstentions}",
         f"Failed cases: {summary.failed_cases}",
         "",
