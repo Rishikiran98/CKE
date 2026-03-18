@@ -75,3 +75,4 @@ class QueryResult:
     verification_summary: str = "not_executed"
     trace_id: str = ""
     failure_mode: str | None = None
+    debug_info: dict[str, Any] = field(default_factory=dict)
