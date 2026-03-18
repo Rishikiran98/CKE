@@ -425,7 +425,8 @@ class QueryOrchestrator:
             for fact in context.evidence_facts
         ]
         entity_confidences = [entity.link_confidence for entity in resolved_entities]
-        return {
+        verification_issues: list[str] = []
+        signals = {
             "evidence_count": len(context.evidence_facts),
             "top_evidence_score": max(evidence_scores) if evidence_scores else 0.0,
             "path_score": (
@@ -437,9 +438,7 @@ class QueryOrchestrator:
                 if entity_confidences
                 else 0.0
             ),
-            "verification_pass": False,
-            "verification_issues": [],
-            "contradiction_flag": False,
+            "verification_issues": verification_issues,
             "route_confidence": float(
                 getattr(
                     query_plan,
@@ -447,8 +446,11 @@ class QueryOrchestrator:
                     getattr(query_plan, "confidence_score", 0.65),
                 )
             ),
-            "operator_failed": False,
         }
+        signals["verification_pass"] = not verification_issues
+        signals["contradiction_flag"] = any(())
+        signals["operator_failed"] = any(())
+        return signals
 
     @staticmethod
     def _path_score_from_outcome(
