@@ -50,6 +50,26 @@ def generate_text_report(
     else:
         lines.append("  - none")
 
+    lines.append("")
+    lines.append("Retrieval metrics:")
+    if summary.retrieval_metrics:
+        lines.extend(
+            f"  - {metric}: {value:.2%}"
+            for metric, value in summary.retrieval_metrics.items()
+        )
+    else:
+        lines.append("  - none")
+
+    lines.append("")
+    lines.append("Retrieval miss categories:")
+    if summary.retrieval_miss_breakdown:
+        lines.extend(
+            f"  - {category}: {count}"
+            for category, count in summary.retrieval_miss_breakdown.items()
+        )
+    else:
+        lines.append("  - none")
+
     failed = [result for result in results if not result.acceptable_match][
         :max_failed_cases
     ]
@@ -104,3 +124,17 @@ def export_csv(results: list[CaseEvaluationResult], output_path: str | Path) -> 
             row = {name: getattr(result, name) for name in fieldnames}
             writer.writerow(row)
     return path
+
+
+def compare_summaries(
+    baseline: EvaluationSummary,
+    candidate: EvaluationSummary,
+) -> dict[str, float]:
+    """Summarize before/after retrieval metric deltas."""
+    baseline_metrics = baseline.retrieval_metrics or {}
+    candidate_metrics = candidate.retrieval_metrics or {}
+    metric_names = set(baseline_metrics) | set(candidate_metrics)
+    return {
+        metric: candidate_metrics.get(metric, 0.0) - baseline_metrics.get(metric, 0.0)
+        for metric in sorted(metric_names)
+    }

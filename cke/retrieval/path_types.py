@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from cke.models import Statement
 
@@ -17,6 +18,7 @@ class CandidatePath:
     relation_match_score: float
     trust_score: float
     summary: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

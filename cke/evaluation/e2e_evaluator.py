@@ -8,6 +8,7 @@ from cke.evaluation.diagnostics import extract_stage_diagnostics, is_abstained
 from cke.evaluation.eval_types import CaseEvaluationResult, EvaluationSummary
 from cke.evaluation.failure_classifier import classify_failure, failure_stage
 from cke.evaluation.golden_cases import GoldenCase
+from cke.evaluation.retrieval_tuning import categorize_retrieval_miss
 
 
 class E2EEvaluator:
@@ -18,6 +19,7 @@ class E2EEvaluator:
         query_result = self.orchestrator.answer(case.query)
         context = getattr(self.orchestrator, "last_context", None)
         stage_diagnostics = extract_stage_diagnostics(query_result, context)
+        self._attach_retrieval_expectations(stage_diagnostics, case, context)
         predicted_answer = str(query_result.answer)
         exact_match = _answer_matches(predicted_answer, case.expected_answer)
         acceptable_match = exact_match or any(
@@ -88,8 +90,127 @@ class E2EEvaluator:
             ),
             failure_breakdown=dict(sorted(failure_counter.items())),
             stage_failure_breakdown=dict(sorted(stage_counter.items())),
+            retrieval_metrics=self._summarize_retrieval_metrics(results, total_cases),
+            retrieval_miss_breakdown=self._summarize_retrieval_misses(results),
         )
         return results, summary
+
+    def _attach_retrieval_expectations(self, stage_diagnostics, case, context) -> None:
+        retrieval_diag = stage_diagnostics.setdefault("retrieval", {})
+        evidence_diag = stage_diagnostics.setdefault("evidence_assembly", {})
+        chunks = list(getattr(context, "retrieved_chunks", []) if context else [])
+        facts = list(getattr(context, "evidence_facts", []) if context else [])
+        paths = list(getattr(context, "candidate_paths", []) if context else [])
+
+        expected_entities = {
+            _normalize_answer(value) for value in case.expected_entities
+        }
+        expected_relations = {
+            _normalize_answer(value) for value in case.expected_relations if value
+        }
+        expected_answer = _normalize_answer(case.expected_answer)
+
+        evidence_text = " ".join(
+            _normalize_answer(
+                " ".join(
+                    [
+                        fact.statement.subject,
+                        fact.statement.relation,
+                        fact.statement.object,
+                        fact.statement.canonical_subject_id or "",
+                        fact.statement.canonical_object_id or "",
+                    ]
+                )
+            )
+            for fact in facts
+        )
+        top_fact_text = " ".join(
+            _normalize_answer(fact.statement.as_text()) for fact in facts[:5]
+        )
+        path_text = " ".join(
+            _normalize_answer(
+                " ".join(statement.as_text() for statement in path.statements)
+            )
+            for path in paths
+        )
+
+        entity_retrieved = (
+            any(entity in evidence_text for entity in expected_entities)
+            if expected_entities
+            else False
+        )
+        relation_retrieved = (
+            any(relation in evidence_text for relation in expected_relations)
+            if expected_relations
+            else False
+        )
+        answer_retrieved = bool(expected_answer and expected_answer in evidence_text)
+        answer_in_top_5 = bool(expected_answer and expected_answer in top_fact_text)
+        supporting_path_found = bool(expected_answer and expected_answer in path_text)
+        if not supporting_path_found and expected_relations:
+            supporting_path_found = any(
+                any(
+                    _normalize_answer(statement.relation) in expected_relations
+                    for statement in path.statements
+                )
+                for path in paths
+            )
+
+        retrieval_diag.update(
+            {
+                "retrieved_chunk_count": len(chunks),
+                "entity_retrieved": entity_retrieved,
+                "relation_retrieved": relation_retrieved,
+                "answer_retrieved": answer_retrieved,
+                "answer_in_top_5_facts": answer_in_top_5,
+                "supporting_path_found": supporting_path_found,
+                "expected_entity_present": entity_retrieved,
+                "expected_relation_present": relation_retrieved,
+                "expected_answer_present": answer_retrieved,
+            }
+        )
+        evidence_diag.setdefault("evidence_fact_count_before_filtering", len(facts))
+        evidence_diag.setdefault("evidence_fact_count_after_filtering", len(facts))
+
+    def _summarize_retrieval_metrics(
+        self,
+        results: list[CaseEvaluationResult],
+        total_cases: int,
+    ) -> dict[str, float]:
+        if total_cases == 0:
+            return {}
+        metrics = {
+            "retrieval_success_rate": 0,
+            "answer_retrieved_rate": 0,
+            "answer_in_top_5_facts_rate": 0,
+            "supporting_path_found_rate": 0,
+        }
+        for result in results:
+            retrieval = result.stage_diagnostics.get("retrieval", {})
+            metrics["retrieval_success_rate"] += int(
+                retrieval.get("entity_retrieved", False)
+                or retrieval.get("relation_retrieved", False)
+            )
+            metrics["answer_retrieved_rate"] += int(
+                retrieval.get("answer_retrieved", False)
+            )
+            metrics["answer_in_top_5_facts_rate"] += int(
+                retrieval.get("answer_in_top_5_facts", False)
+            )
+            metrics["supporting_path_found_rate"] += int(
+                retrieval.get("supporting_path_found", False)
+            )
+        return {key: value / total_cases for key, value in metrics.items()}
+
+    def _summarize_retrieval_misses(
+        self, results: list[CaseEvaluationResult]
+    ) -> dict[str, int]:
+        counter = Counter()
+        for result in results:
+            category = categorize_retrieval_miss(result)
+            if category:
+                counter[category] += 1
+        return dict(sorted(counter.items()))
 
 
 def _normalize_answer(value: str | int | float | None) -> str:

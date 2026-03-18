@@ -40,6 +40,7 @@ class EvidenceFact:
     retrieval_score: float
     entity_alignment_score: float
     supporting_span: tuple[int, int] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
