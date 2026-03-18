@@ -17,7 +17,10 @@ class CaseEvaluationResult:
     failure_mode: str | None
     verification_summary: str
     reasoning_route: str
+    confidence: float
+    confidence_bucket: str
     trace_id: str
+    confidence_signals: dict = field(default_factory=dict)
     stage_diagnostics: dict = field(default_factory=dict)
 
 
@@ -30,5 +33,11 @@ class EvaluationSummary:
     failed_cases: int
     accuracy: float
     acceptable_accuracy: float
+    average_confidence_correct: float = 0.0
+    average_confidence_incorrect: float = 0.0
+    high_confidence_error_rate: float = 0.0
+    calibration_by_bucket: dict[str, dict[str, float | int]] = field(
+        default_factory=dict
+    )
     failure_breakdown: dict[str, int] = field(default_factory=dict)
     stage_failure_breakdown: dict[str, int] = field(default_factory=dict)

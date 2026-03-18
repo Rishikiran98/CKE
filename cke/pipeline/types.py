@@ -72,6 +72,7 @@ class QueryResult:
     reasoning_route: str
     evidence_facts: list[EvidenceFact] = field(default_factory=list)
     candidate_paths: list["CandidatePath"] = field(default_factory=list)
+    confidence_signals: dict[str, Any] = field(default_factory=dict)
     verification_summary: str = "not_executed"
     trace_id: str = ""
     failure_mode: str | None = None

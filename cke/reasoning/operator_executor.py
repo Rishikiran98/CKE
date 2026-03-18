@@ -19,6 +19,23 @@ from cke.reasoning.operators import (
 
 class OperatorExecutor:
     @staticmethod
+    def required_input_satisfied(
+        operator_hint: str,
+        query: str,
+        evidence_facts: list[Statement],
+        resolved_entities: list[ResolvedEntity],
+    ) -> bool:
+        op = (operator_hint or "").strip().lower()
+        if not op:
+            return False
+        if op in {"equality", "temporal_compare", "numeric_compare", "containment"}:
+            return len(resolved_entities) >= 2 and bool(evidence_facts)
+        if op in {"count", "existence"}:
+            return bool(evidence_facts)
+        del query
+        return False
+
+    @staticmethod
     def _relation_matches(relation_hint: str | None, relation: str) -> bool:
         if relation_hint is None:
             return True

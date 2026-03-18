@@ -52,6 +52,9 @@ class E2EEvaluator:
             failure_mode=failure_mode,
             verification_summary=query_result.verification_summary,
             reasoning_route=query_result.reasoning_route,
+            confidence=float(query_result.confidence),
+            confidence_bucket=_confidence_bucket(query_result.confidence),
+            confidence_signals=dict(query_result.confidence_signals),
             trace_id=query_result.trace_id,
             stage_diagnostics=stage_diagnostics,
         )
@@ -75,6 +78,19 @@ class E2EEvaluator:
             for stage in [failure_stage(result.failure_mode)]
             if stage
         )
+        calibration_by_bucket = _summarize_calibration(results)
+        correct_confidences = [
+            result.confidence for result in results if result.correct
+        ]
+        incorrect_confidences = [
+            result.confidence for result in results if not result.correct
+        ]
+        high_confidence_results = [
+            result for result in results if result.confidence >= 0.8
+        ]
+        high_confidence_errors = [
+            result for result in high_confidence_results if not result.correct
+        ]
 
         summary = EvaluationSummary(
             total_cases=total_cases,
@@ -86,6 +102,22 @@ class E2EEvaluator:
             acceptable_accuracy=(
                 (acceptable_matches / total_cases) if total_cases else 0.0
             ),
+            average_confidence_correct=(
+                sum(correct_confidences) / len(correct_confidences)
+                if correct_confidences
+                else 0.0
+            ),
+            average_confidence_incorrect=(
+                sum(incorrect_confidences) / len(incorrect_confidences)
+                if incorrect_confidences
+                else 0.0
+            ),
+            high_confidence_error_rate=(
+                len(high_confidence_errors) / len(high_confidence_results)
+                if high_confidence_results
+                else 0.0
+            ),
+            calibration_by_bucket=calibration_by_bucket,
             failure_breakdown=dict(sorted(failure_counter.items())),
             stage_failure_breakdown=dict(sorted(stage_counter.items())),
         )
@@ -101,3 +133,33 @@ def _normalize_answer(value: str | int | float | None) -> str:
 
 def _answer_matches(predicted: str, expected: str | int | float | None) -> bool:
     return _normalize_answer(predicted) == _normalize_answer(expected)
+
+
+def _confidence_bucket(confidence: float) -> str:
+    clipped = max(0.0, min(1.0, float(confidence)))
+    lower = min(0.8, int(clipped * 5) / 5)
+    upper = min(1.0, lower + 0.2)
+    return f"{lower:.1f}-{upper:.1f}"
+
+
+def _summarize_calibration(
+    results: list[CaseEvaluationResult],
+) -> dict[str, dict[str, float | int]]:
+    buckets: dict[str, list[CaseEvaluationResult]] = {}
+    for result in results:
+        buckets.setdefault(result.confidence_bucket, []).append(result)
+
+    summary: dict[str, dict[str, float | int]] = {}
+    for bucket in sorted(buckets):
+        bucket_results = buckets[bucket]
+        total = len(bucket_results)
+        correct = sum(result.correct for result in bucket_results)
+        abstained = sum(result.abstained for result in bucket_results)
+        avg_confidence = sum(result.confidence for result in bucket_results) / total
+        summary[bucket] = {
+            "count": total,
+            "accuracy": correct / total if total else 0.0,
+            "average_confidence": avg_confidence,
+            "abstentions": abstained,
+        }
+    return summary
