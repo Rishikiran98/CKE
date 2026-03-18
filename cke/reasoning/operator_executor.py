@@ -20,7 +20,11 @@ from cke.reasoning.operators import (
 class OperatorExecutor:
     @staticmethod
     def _tokenize(text: str) -> set[str]:
-        return {token for token in re.findall(r"[a-z0-9_+-]+", (text or "").lower()) if token}
+        return {
+            token
+            for token in re.findall(r"[a-z0-9_+-]+", (text or "").lower())
+            if token
+        }
 
     @staticmethod
     def required_input_satisfied(
@@ -118,13 +122,10 @@ class OperatorExecutor:
                     for token in self._tokenize(entity)
                 )
             ]
-            entity_ok = (
-                not entity_names
-                or (
-                    len(matched_entities) == len(entity_names)
-                    if len(entity_names) > 1
-                    else bool(matched_entities)
-                )
+            entity_ok = not entity_names or (
+                len(matched_entities) == len(entity_names)
+                if len(entity_names) > 1
+                else bool(matched_entities)
             )
             relation_ok = self._relation_matches(relation_hint, rel)
             lexical_ok = bool(

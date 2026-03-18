@@ -22,12 +22,18 @@ class DefaultEvidenceRetriever:
     ) -> tuple[list[RetrievedChunk], list[EvidenceFact]]:
         resolved_entities = resolved_entities or []
         relation_terms = {
-            AliasRegistry.normalize(relation) for relation in (target_relations or []) if relation
+            AliasRegistry.normalize(relation)
+            for relation in (target_relations or [])
+            if relation
         }
-        candidate_statements = self._candidate_statements(resolved_entities, relation_terms)
+        candidate_statements = self._candidate_statements(
+            resolved_entities, relation_terms
+        )
         scored: list[tuple[float, Statement]] = []
         for statement in candidate_statements:
-            score = self._score_statement(statement, resolved_entities, relation_terms, query)
+            score = self._score_statement(
+                statement, resolved_entities, relation_terms, query
+            )
             scored.append((score, statement))
 
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -55,7 +61,9 @@ class DefaultEvidenceRetriever:
                     source=source,
                     trust_score=self._trust_score(statement),
                     retrieval_score=score,
-                    entity_alignment_score=self._entity_alignment(statement, resolved_entities),
+                    entity_alignment_score=self._entity_alignment(
+                        statement, resolved_entities
+                    ),
                     metadata={"retriever": "graph_default"},
                 )
             )
@@ -112,9 +120,19 @@ class DefaultEvidenceRetriever:
         query_norm = AliasRegistry.normalize(query)
         relation_norm = AliasRegistry.normalize(statement.relation)
         entity_alignment = self._entity_alignment(statement, resolved_entities)
-        relation_bonus = 0.25 if relation_terms and relation_norm in relation_terms else 0.0
-        lexical_bonus = 0.1 if AliasRegistry.normalize(statement.as_text()) in query_norm else 0.0
-        return 0.35 + entity_alignment + relation_bonus + lexical_bonus + self._trust_score(statement)
+        relation_bonus = (
+            0.25 if relation_terms and relation_norm in relation_terms else 0.0
+        )
+        lexical_bonus = (
+            0.1 if AliasRegistry.normalize(statement.as_text()) in query_norm else 0.0
+        )
+        return (
+            0.35
+            + entity_alignment
+            + relation_bonus
+            + lexical_bonus
+            + self._trust_score(statement)
+        )
 
     def _entity_alignment(
         self,

@@ -57,7 +57,8 @@ class QueryRouter:
                 {
                     phrase
                     for phrase in name_chunks
-                    if phrase.strip() and phrase.strip().lower() not in self._QUESTION_WORDS
+                    if phrase.strip()
+                    and phrase.strip().lower() not in self._QUESTION_WORDS
                 }
             )
 

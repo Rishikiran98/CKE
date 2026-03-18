@@ -84,11 +84,16 @@ class EntityLinker:
             return False
         if len(cleaned) == 1:
             return re.search(rf"\b{re.escape(cleaned)}\b", query) is not None
-        return re.search(rf"\b{re.escape(cleaned)}\b", query, flags=re.IGNORECASE) is not None
+        return (
+            re.search(rf"\b{re.escape(cleaned)}\b", query, flags=re.IGNORECASE)
+            is not None
+        )
 
     def _clean_phrase(self, phrase: str) -> str:
         tokens = phrase.strip().split()
-        while tokens and tokens[0].lower() in (self._QUESTION_WORDS | self._AUXILIARIES):
+        while tokens and tokens[0].lower() in (
+            self._QUESTION_WORDS | self._AUXILIARIES
+        ):
             tokens = tokens[1:]
         return " ".join(tokens).strip(" ?!.,")
 
