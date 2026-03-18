@@ -17,6 +17,7 @@ from cke.reasoning.reasoner_adapter import ReasonerAdapter
 from cke.reasoning.operator_executor import OperatorExecutor
 from cke.reasoning.operator_selector import OperatorSelector
 from cke.reasoning.verifier import ReasoningVerifier
+from cke.trust.confidence_calibrator import ConfidenceCalibrator
 
 if TYPE_CHECKING:
     from cke.router.query_router import QueryRouter
@@ -56,6 +57,7 @@ class QueryOrchestrator:
         self.reasoner_adapter = ReasonerAdapter(self.reasoner)
         self.last_context: ReasoningContext | None = None
         self.entity_resolver = entity_resolver or EntityResolver()
+        self.confidence_calibrator = ConfidenceCalibrator()
 
     def answer(self, query: str) -> QueryResult:
         query_plan = self.router.route(query)
@@ -144,6 +146,12 @@ class QueryOrchestrator:
             query_plan=query_plan,
             trace_id=trace_id,
         )
+        confidence_signals = self._initial_confidence_signals(
+            context=context,
+            query_plan=query_plan,
+            resolved_entities=resolved_entities,
+        )
+        debug_info["confidence_signals"] = confidence_signals
 
         if not context.evidence_facts:
             return self._abstain(
@@ -151,6 +159,7 @@ class QueryOrchestrator:
                 context,
                 trace_id,
                 debug_info=debug_info,
+                confidence_signals=confidence_signals,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="reasoning_not_executed",
                 failure_mode="no_evidence",
@@ -163,6 +172,7 @@ class QueryOrchestrator:
                 context,
                 trace_id,
                 debug_info=debug_info,
+                confidence_signals=confidence_signals,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="reasoning_not_executed",
                 failure_mode="no_evidence",
@@ -203,6 +213,7 @@ class QueryOrchestrator:
                 context,
                 trace_id,
                 debug_info=debug_info,
+                confidence_signals=confidence_signals,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="reasoning_not_executed",
                 failure_mode="not_grounded",
@@ -222,6 +233,19 @@ class QueryOrchestrator:
                 query=query,
                 evidence_facts=statements,
                 resolved_entities=resolved_entities,
+            )
+            confidence_signals["operator_confidence"] = (
+                float(operator_outcome.confidence)
+                if operator_outcome is not None
+                else 0.0
+            )
+            confidence_signals["operator_failed"] = operator_outcome is None and (
+                self.operator_executor.required_input_satisfied(
+                    selected_operator,
+                    query,
+                    statements,
+                    resolved_entities,
+                )
             )
             debug_info["operator_summary"] = (
                 operator_outcome.summary if operator_outcome is not None else ""
@@ -247,10 +271,16 @@ class QueryOrchestrator:
                 context,
                 trace_id,
                 debug_info=debug_info,
+                confidence_signals=confidence_signals,
                 answer="REASONING_FAILED",
                 summary="reasoning_failed",
                 failure_mode="reasoning_failed",
             )
+
+        confidence_signals["path_score"] = self._path_score_from_outcome(
+            reasoner_outcome,
+            context,
+        )
 
         verification = self.verifier.verify(
             query=query,
@@ -268,6 +298,11 @@ class QueryOrchestrator:
         debug_info["verification_passed"] = verification.passed
         debug_info["verification_issues"] = list(verification.issues)
         debug_info["contradiction_detected"] = verification.contradictory
+        confidence_signals["verification_pass"] = verification.passed
+        confidence_signals["verification_issues"] = list(verification.issues)
+        confidence_signals["contradiction_flag"] = verification.contradictory
+        calibrated_confidence = self.confidence_calibrator.calibrate(confidence_signals)
+        debug_info["calibrated_confidence"] = calibrated_confidence
 
         if not verification.passed:
             abstain_answer, failure_mode = self._verification_failure_policy(
@@ -279,6 +314,7 @@ class QueryOrchestrator:
                 context,
                 trace_id,
                 debug_info=debug_info,
+                confidence_signals=confidence_signals,
                 answer=abstain_answer,
                 summary=verification.summary,
                 failure_mode=failure_mode,
@@ -294,21 +330,37 @@ class QueryOrchestrator:
                 context,
                 trace_id,
                 debug_info=debug_info,
+                confidence_signals=confidence_signals,
                 answer="INSUFFICIENT_EVIDENCE",
                 summary="verification_failed:empty_reasoning_path",
                 failure_mode="verification_failed",
             )
 
+        if self.confidence_calibrator.should_abstain(
+            calibrated_confidence, confidence_signals
+        ):
+            return self._abstain(
+                query_plan.reasoning_route,
+                context,
+                trace_id,
+                debug_info=debug_info,
+                confidence_signals=confidence_signals,
+                answer="INSUFFICIENT_EVIDENCE",
+                summary="verification_failed:calibrated_confidence_below_threshold",
+                failure_mode="low_confidence",
+            )
+
         debug_info["abstained"] = False
         debug_info["final_answer"] = reasoner_outcome.answer
-        debug_info["final_confidence"] = reasoner_outcome.confidence
+        debug_info["final_confidence"] = calibrated_confidence
         debug_info["failure_mode"] = None
         return QueryResult(
             answer=reasoner_outcome.answer,
-            confidence=reasoner_outcome.confidence,
+            confidence=calibrated_confidence,
             reasoning_route=query_plan.reasoning_route,
             evidence_facts=context.evidence_facts,
             candidate_paths=context.candidate_paths,
+            confidence_signals=confidence_signals,
             verification_summary=verification.summary,
             trace_id=trace_id,
             failure_mode=None,
@@ -325,6 +377,7 @@ class QueryOrchestrator:
         return {
             "trace_id": trace_id,
             "reasoning_route": getattr(query_plan, "reasoning_route", ""),
+            "route_confidence": getattr(query_plan, "route_confidence", 0.0),
             "target_relations": list(trace_metadata.get("target_relations", [])),
             "resolved_entities": list(trace_metadata.get("resolved_entities", [])),
             "retrieved_chunk_count": len(context.retrieved_chunks),
@@ -352,7 +405,67 @@ class QueryOrchestrator:
             "final_answer": "",
             "final_confidence": 0.0,
             "failure_mode": None,
+            "confidence_signals": {},
         }
+
+    def _initial_confidence_signals(
+        self,
+        context: ReasoningContext,
+        query_plan,
+        resolved_entities,
+    ) -> dict[str, object]:
+        evidence_scores = [
+            max(
+                float(getattr(fact, "trust_score", 0.0) or 0.0),
+                float(getattr(fact, "retrieval_score", 0.0) or 0.0),
+                float(
+                    getattr(getattr(fact, "statement", None), "confidence", 0.0) or 0.0
+                ),
+            )
+            for fact in context.evidence_facts
+        ]
+        entity_confidences = [entity.link_confidence for entity in resolved_entities]
+        verification_issues: list[str] = []
+        signals = {
+            "evidence_count": len(context.evidence_facts),
+            "top_evidence_score": max(evidence_scores) if evidence_scores else 0.0,
+            "path_score": (
+                max((path.path_score for path in context.candidate_paths), default=0.0)
+            ),
+            "operator_confidence": 0.0,
+            "entity_resolution_confidence": (
+                sum(entity_confidences) / len(entity_confidences)
+                if entity_confidences
+                else 0.0
+            ),
+            "verification_issues": verification_issues,
+            "route_confidence": float(
+                getattr(
+                    query_plan,
+                    "route_confidence",
+                    getattr(query_plan, "confidence_score", 0.65),
+                )
+            ),
+        }
+        signals["verification_pass"] = not verification_issues
+        signals["contradiction_flag"] = any(())
+        signals["operator_failed"] = any(())
+        return signals
+
+    @staticmethod
+    def _path_score_from_outcome(
+        outcome: ReasonerOutcome,
+        context: ReasoningContext,
+    ) -> float:
+        if outcome.reasoning_path:
+            path_keys = {statement.key() for statement in outcome.reasoning_path}
+            for candidate_path in context.candidate_paths:
+                candidate_keys = {
+                    statement.key() for statement in candidate_path.statements
+                }
+                if candidate_keys and candidate_keys.issuperset(path_keys):
+                    return float(candidate_path.path_score)
+        return max((path.path_score for path in context.candidate_paths), default=0.0)
 
     def _operator_to_reasoner_outcome(self, outcome):
         if outcome is None:
@@ -421,6 +534,7 @@ class QueryOrchestrator:
         context: ReasoningContext,
         trace_id: str,
         debug_info: dict[str, object],
+        confidence_signals: dict[str, object],
         answer: str,
         summary: str,
         failure_mode: str,
@@ -429,12 +543,14 @@ class QueryOrchestrator:
         debug_info["final_answer"] = answer
         debug_info["final_confidence"] = 0.0
         debug_info["failure_mode"] = failure_mode
+        debug_info["confidence_signals"] = confidence_signals
         return QueryResult(
             answer=answer,
             confidence=0.0,
             reasoning_route=reasoning_route,
             evidence_facts=context.evidence_facts,
             candidate_paths=context.candidate_paths,
+            confidence_signals=confidence_signals,
             verification_summary=summary,
             trace_id=trace_id,
             failure_mode=failure_mode,
