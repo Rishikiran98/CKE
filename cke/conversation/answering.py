@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from cke.conversation.config import AnsweringConfig, RetrievalConfig
 from cke.conversation.patterns import extract_date_phrase
 from cke.conversation.types import ConversationAnswer, RetrievalBundle
@@ -32,7 +30,10 @@ class GroundedAnswerComposer:
         evidence_facts = bundle.retrieved_facts or bundle.graph_neighbors
         if not bundle.retrieved_turns:
             return ConversationAnswer(
-                answer="I don't have enough grounded conversation history to answer that yet.",
+                answer=(
+                    "I don't have enough grounded conversation history "
+                    "to answer that yet."
+                ),
                 confidence=self.config.no_history_confidence,
                 grounded=False,
                 metadata={
