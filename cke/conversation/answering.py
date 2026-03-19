@@ -257,7 +257,11 @@ class GroundedAnswerComposer:
 
     def _retrieval_is_weak(self, bundle: RetrievalBundle) -> bool:
         best_score = max((item.score for item in bundle.retrieved_turns), default=0.0)
-        return best_score < self.retrieval_config.weak_match_threshold
+        evidence_count = len(bundle.retrieved_facts) + len(bundle.graph_neighbors)
+        return (
+            best_score < self.retrieval_config.weak_match_threshold
+            and evidence_count == 0
+        )
 
     def _confidence_band(self, confidence: float) -> str:
         if confidence >= 0.75:
