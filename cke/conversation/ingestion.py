@@ -97,7 +97,7 @@ class ConversationIngestionPipeline:
                     for reason in cand.rejection_reasons:
                         self.monitor.record_validation_rejection(reason)
             self.monitor.record_latency("validation_latency_ms", validation_start)
-            
+
         consolidation_start = time.perf_counter()
         decisions = self.consolidator.consolidate(
             valid_candidates,
@@ -107,11 +107,10 @@ class ConversationIngestionPipeline:
         if self.monitor:
             for decision in decisions:
                 self.monitor.record_consolidation_outcome(
-                    decision.decision.value,
-                    decision.candidate.kind.value
+                    decision.decision.value, decision.candidate.kind.value
                 )
             self.monitor.record_latency("consolidation_latency_ms", consolidation_start)
-            
+
         accepted_memories = []
         for decision in decisions:
             if decision.canonical_memory is not None and decision.decision.value in {
@@ -145,10 +144,10 @@ class ConversationIngestionPipeline:
             event_id=event_id,
         )
         self.memory_store.store_turn_view(turn)
-        
+
         if self.monitor:
             self.monitor.record_latency("ingestion_latency_ms", ingestion_start)
-            
+
         return TurnIngestionResult(
             event=event,
             turn=turn,

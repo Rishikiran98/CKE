@@ -7,14 +7,18 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+
 def _safe_metric(func):
     """Decorator to guarantee metrics emission never throws an exception."""
+
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as e:
             logger.debug(f"Monitor exception swallowed: {e}")
+
     return wrapper
+
 
 @dataclass
 class SystemMonitor:
@@ -26,7 +30,7 @@ class SystemMonitor:
     bridge_nodes_found: int = 0
     neighborhood_nodes_expanded: int = 0
     _start: float = field(default=0.0, init=False, repr=False)
-    
+
     # New Latency Metrics
     ingestion_latency_ms: float = 0.0
     extraction_latency_ms: float = 0.0
@@ -34,7 +38,7 @@ class SystemMonitor:
     consolidation_latency_ms: float = 0.0
     answering_latency_ms: float = 0.0
     retrieval_latency_ms: float = 0.0
-    
+
     # Error Taxonomies & Quality Metrics
     extractor_exceptions: int = 0
     duplicate_candidates: int = 0
@@ -42,12 +46,20 @@ class SystemMonitor:
     canonical_supersedes: int = 0
     unresolved_references: int = 0
     stale_rejects: int = 0
-    
+
     # Distributions & Counts
-    validation_rejections_by_reason: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    candidate_count_by_kind: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    canonical_write_count_by_kind: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    abstention_count_by_reason: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    validation_rejections_by_reason: dict[str, int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
+    candidate_count_by_kind: dict[str, int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
+    canonical_write_count_by_kind: dict[str, int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
+    abstention_count_by_reason: dict[str, int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
     confidence_buckets: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
     def start_query(self) -> None:
@@ -83,7 +95,7 @@ class SystemMonitor:
     def record_latency(self, metric_name: str, start_time: float) -> None:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         setattr(self, metric_name, elapsed_ms)
-        
+
     @_safe_metric
     def record_extractor_exception(self) -> None:
         self.extractor_exceptions += 1
@@ -91,11 +103,11 @@ class SystemMonitor:
     @_safe_metric
     def record_candidate(self, kind: str) -> None:
         self.candidate_count_by_kind[kind] += 1
-        
+
     @_safe_metric
     def record_validation_rejection(self, reason: str) -> None:
         self.validation_rejections_by_reason[reason] += 1
-        
+
     @_safe_metric
     def record_consolidation_outcome(self, decision: str, kind: str) -> None:
         if decision == "merge":
@@ -108,14 +120,23 @@ class SystemMonitor:
             self.canonical_write_count_by_kind[kind] += 1
 
     @_safe_metric
-    def record_answering(self, grounded: bool, confidence: float, abstained: bool, reason: str = "", unresolved_refs: bool = False) -> None:
+    def record_answering(
+        self,
+        grounded: bool,
+        confidence: float,
+        abstained: bool,
+        reason: str = "",
+        unresolved_refs: bool = False,
+    ) -> None:
         if unresolved_refs:
             self.unresolved_references += 1
-        
+
         if abstained:
             self.abstention_count_by_reason[reason] += 1
-            
-        bucket = "high" if confidence >= 0.7 else ("medium" if confidence >= 0.4 else "low")
+
+        bucket = (
+            "high" if confidence >= 0.7 else ("medium" if confidence >= 0.4 else "low")
+        )
         self.confidence_buckets[bucket] += 1
 
     def snapshot(self) -> dict[str, float | int]:

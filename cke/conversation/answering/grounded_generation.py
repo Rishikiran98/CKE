@@ -38,7 +38,7 @@ class GroundedAnswerComposer:
 
     def compose(self, query: str, bundle: RetrievalBundle) -> ConversationAnswer:
         answering_start = time.perf_counter()
-        
+
         evidence = bundle.evidence or self.evidence_selector.select(query, bundle)
         abstain, reason = self.abstention_decider.should_abstain(evidence)
         if abstain:
@@ -51,7 +51,7 @@ class GroundedAnswerComposer:
                     confidence=confidence,
                     abstained=True,
                     reason=reason,
-                    unresolved_refs=bool(bundle.metadata.get("unresolved_references"))
+                    unresolved_refs=bool(bundle.metadata.get("unresolved_references")),
                 )
                 self.monitor.record_latency("answering_latency_ms", answering_start)
             return ConversationAnswer(
@@ -76,10 +76,10 @@ class GroundedAnswerComposer:
                 grounded=True,
                 confidence=confidence,
                 abstained=False,
-                unresolved_refs=bool(bundle.metadata.get("unresolved_references"))
+                unresolved_refs=bool(bundle.metadata.get("unresolved_references")),
             )
             self.monitor.record_latency("answering_latency_ms", answering_start)
-            
+
         return ConversationAnswer(
             answer=answer_text,
             confidence=confidence,
