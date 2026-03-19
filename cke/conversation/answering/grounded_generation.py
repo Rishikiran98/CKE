@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+
+from cke.observability.system_monitor import SystemMonitor
 from cke.conversation.config import AnsweringConfig, RetrievalConfig
 from cke.conversation.types import ConversationAnswer, EvidenceSet, RetrievalBundle
 from .abstention import AbstentionDecider
@@ -19,10 +22,12 @@ class GroundedAnswerComposer:
         confidence_estimator: ConfidenceEstimator | None = None,
         config: AnsweringConfig | None = None,
         retrieval_config: RetrievalConfig | None = None,
+        monitor: SystemMonitor | None = None,
     ) -> None:
         self.config = config or AnsweringConfig()
         self.retrieval_config = retrieval_config or RetrievalConfig()
         self.evidence_selector = evidence_selector or EvidenceSelector()
+        self.monitor = monitor
         self.abstention_decider = abstention_decider or AbstentionDecider(
             self.config,
             self.retrieval_config,
@@ -32,12 +37,23 @@ class GroundedAnswerComposer:
         )
 
     def compose(self, query: str, bundle: RetrievalBundle) -> ConversationAnswer:
+        answering_start = time.perf_counter()
+        
         evidence = bundle.evidence or self.evidence_selector.select(query, bundle)
         abstain, reason = self.abstention_decider.should_abstain(evidence)
         if abstain:
             confidence, band = self.confidence_estimator.estimate(
                 evidence, grounded=False
             )
+            if self.monitor:
+                self.monitor.record_answering(
+                    grounded=False,
+                    confidence=confidence,
+                    abstained=True,
+                    reason=reason,
+                    unresolved_refs=bool(bundle.metadata.get("unresolved_references"))
+                )
+                self.monitor.record_latency("answering_latency_ms", answering_start)
             return ConversationAnswer(
                 answer=self._abstention_text(reason),
                 confidence=confidence,
@@ -55,6 +71,15 @@ class GroundedAnswerComposer:
 
         answer_text = self._generate_grounded_answer(query, evidence)
         confidence, band = self.confidence_estimator.estimate(evidence, grounded=True)
+        if self.monitor:
+            self.monitor.record_answering(
+                grounded=True,
+                confidence=confidence,
+                abstained=False,
+                unresolved_refs=bool(bundle.metadata.get("unresolved_references"))
+            )
+            self.monitor.record_latency("answering_latency_ms", answering_start)
+            
         return ConversationAnswer(
             answer=answer_text,
             confidence=confidence,

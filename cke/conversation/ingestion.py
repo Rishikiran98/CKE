@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
+
+from cke.observability.system_monitor import SystemMonitor
 
 from cke.conversation.config import ConversationConfig
 from cke.conversation.consolidation import MemoryConsolidator
@@ -31,8 +34,10 @@ class ConversationIngestionPipeline:
         validator: CandidateMemoryValidator | None = None,
         consolidator: MemoryConsolidator | None = None,
         config: ConversationConfig | None = None,
+        monitor: SystemMonitor | None = None,
     ) -> None:
         self.memory_store = memory_store
+        self.monitor = monitor
         self.config = config or memory_store.config
         self.extractors = extractors or [
             TemporalMemoryExtractor(),
@@ -52,6 +57,7 @@ class ConversationIngestionPipeline:
         timestamp: str | None = None,
         metadata: dict | None = None,
     ) -> TurnIngestionResult:
+        ingestion_start = time.perf_counter()
         ts = timestamp or datetime.now(timezone.utc).isoformat()
         turn_order = len(self.memory_store.get_events(conversation_id)) + 1
         event_id = f"{conversation_id}-event-{turn_order}-{uuid4().hex[:8]}"
@@ -68,15 +74,44 @@ class ConversationIngestionPipeline:
         )
         self.memory_store.store_event(event)
 
+        extraction_start = time.perf_counter()
         raw_candidates = []
         for extractor in self.extractors:
-            raw_candidates.extend(extractor.extract(event))
+            try:
+                extracted = extractor.extract(event)
+                raw_candidates.extend(extracted)
+                if self.monitor:
+                    for cand in extracted:
+                        self.monitor.record_candidate(cand.kind.value)
+            except Exception:
+                if self.monitor:
+                    self.monitor.record_extractor_exception()
+        if self.monitor:
+            self.monitor.record_latency("extraction_latency_ms", extraction_start)
+
+        validation_start = time.perf_counter()
         valid_candidates, rejected_candidates = self.validator.validate(raw_candidates)
+        if self.monitor:
+            for cand in rejected_candidates:
+                if hasattr(cand, "rejection_reasons"):
+                    for reason in cand.rejection_reasons:
+                        self.monitor.record_validation_rejection(reason)
+            self.monitor.record_latency("validation_latency_ms", validation_start)
+            
+        consolidation_start = time.perf_counter()
         decisions = self.consolidator.consolidate(
             valid_candidates,
             self.memory_store.get_canonical_memories(conversation_id),
             timestamp=ts,
         )
+        if self.monitor:
+            for decision in decisions:
+                self.monitor.record_consolidation_outcome(
+                    decision.decision.value,
+                    decision.candidate.kind.value
+                )
+            self.monitor.record_latency("consolidation_latency_ms", consolidation_start)
+            
         accepted_memories = []
         for decision in decisions:
             if decision.canonical_memory is not None and decision.decision.value in {
@@ -110,6 +145,10 @@ class ConversationIngestionPipeline:
             event_id=event_id,
         )
         self.memory_store.store_turn_view(turn)
+        
+        if self.monitor:
+            self.monitor.record_latency("ingestion_latency_ms", ingestion_start)
+            
         return TurnIngestionResult(
             event=event,
             turn=turn,
