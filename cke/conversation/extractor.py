@@ -5,6 +5,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from cke.conversation.config import ExtractionConfig
+from cke.conversation.patterns import (
+    ROLE_PATTERN,
+    extract_date_phrase,
+    normalize_fact_parts,
+    normalize_text_token,
+)
 from cke.models import Statement
 
 
@@ -21,11 +28,8 @@ class ConversationalTurnExtractor:
     structure for retrieval, preference tracking, updates, and graph support.
     """
 
-    _MONTHS = (
-        "january|february|march|april|may|june|july|august|"
-        "september|october|november|december"
-    )
-    _WEEKDAYS = "monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    def __init__(self, config: ExtractionConfig | None = None) -> None:
+        self.config = config or ExtractionConfig()
 
     def extract(self, text: str, *, role: str = "user") -> TurnExtraction:
         entities = self._extract_entities(text)
@@ -40,21 +44,16 @@ class ConversationalTurnExtractor:
         ]
         for pattern in patterns:
             for match in re.findall(pattern, text):
-                cleaned = match.strip(" .,!?:;\"'")
-                if cleaned.lower() in {"i", "we", "they", "it", "he", "she"}:
+                cleaned = normalize_text_token(match)
+                if cleaned.lower() in self.config.pronouns_to_ignore:
                     continue
                 if cleaned and cleaned not in found:
                     found.append(cleaned)
 
-        nounish_patterns = [
-            r"\b(backend roles?|frontend roles?|platform roles?|infra roles?)\b",
-            r"\b(Apple interview|Google interview|Meta interview|Stripe interview)\b",
-            r"\b(recruiter|hiring manager|onsite|phone screen|take-home)\b",
-        ]
         lowered = text.lower()
-        for pattern in nounish_patterns:
+        for pattern in self.config.nounish_entity_patterns:
             for match in re.findall(pattern, lowered, flags=re.IGNORECASE):
-                cleaned = str(match).strip()
+                cleaned = normalize_text_token(str(match))
                 if cleaned and cleaned not in found:
                     found.append(cleaned)
         return found
@@ -62,7 +61,7 @@ class ConversationalTurnExtractor:
     def _extract_facts(
         self, *, text: str, role: str, entities: list[str]
     ) -> list[Statement]:
-        if role != "user":
+        if role not in self.config.extracted_roles:
             return []
 
         facts: list[Statement] = []
@@ -75,13 +74,18 @@ class ConversationalTurnExtractor:
         def add(subject: str, relation: str, object_: str, **context) -> None:
             if not subject or not object_:
                 return
+            normalized_subject, normalized_relation, normalized_object = (
+                normalize_fact_parts(subject, relation, object_)
+            )
+            if not normalized_subject or not normalized_object:
+                return
             facts.append(
                 Statement(
-                    subject=subject,
-                    relation=relation,
-                    object=object_,
+                    subject=normalized_subject,
+                    relation=normalized_relation,
+                    object=normalized_object,
                     context=context,
-                    confidence=0.88,
+                    confidence=self.config.statement_confidence,
                 )
             )
 
@@ -90,69 +94,54 @@ class ConversationalTurnExtractor:
         if (
             company
             and date_value
-            and any(token in lowered for token in ["interview", "onsite", "screen"])
+            and any(token in lowered for token in self.config.interview_tokens)
         ):
             add(company, "scheduled_for", date_value, topic="timeline")
         if (
             company
             and role_name
-            and any(token in lowered for token in ["role", "position", "job", "apply"])
+            and any(token in lowered for token in ("role", "position", "job", "apply"))
         ):
             add(company, "has_role", role_name, topic="job_search")
             add("user", "interested_in_role", role_name, topic="job_search")
         if company and any(
-            token in lowered for token in ["apply", "applying", "application"]
+            token in lowered for token in self.config.application_tokens
         ):
             add("user", "applied_to", company, topic="job_search")
         has_pending_reply = company and any(
-            token in lowered
-            for token in [
-                "hasn't replied",
-                "hasnt replied",
-                "didn't reply",
-                "didnt reply",
-                "waiting on",
-                "still waiting",
-            ]
+            token in lowered for token in self.config.pending_reply_tokens
         )
         if has_pending_reply:
             add(company, "reply_status", "pending", topic="communication")
         if (
             company
             and not has_pending_reply
-            and any(token in lowered for token in ["replied", "got back", "responded"])
+            and any(token in lowered for token in self.config.replied_tokens)
         ):
             add(company, "reply_status", "replied", topic="communication")
         if person and company and "recruiter" in lowered:
             add(person, "recruiter_for", company, topic="communication")
             add(company, "has_recruiter", person, topic="communication")
-        if any(
-            token in lowered
-            for token in ["prefer", "preferred", "i'm leaning", "i am leaning"]
-        ):
+        if any(token in lowered for token in self.config.preference_tokens):
             preference = self._extract_preference(text)
             if preference:
                 add("user", "prefers", preference, topic="preference")
-        if company and any(
-            token in lowered for token in ["remote", "hybrid", "onsite"]
-        ):
+        if company and any(token in lowered for token in self.config.work_modes):
             work_mode = self._extract_work_mode(lowered)
             if work_mode:
                 add(company, "work_mode", work_mode, topic="job_search")
         if company and any(
-            token in lowered for token in ["salary", "comp", "pays", "pay"]
+            token in lowered for token in self.config.compensation_tokens
         ):
             compensation = self._extract_compensation(text)
             if compensation:
                 add(company, "compensation", compensation, topic="job_search")
-        if company and any(
-            token in lowered for token in ["backend", "frontend", "platform", "infra"]
-        ):
+        if company and any(token in lowered for token in self.config.role_flavors):
             role_flavor = self._extract_role_flavor(lowered)
             if role_flavor:
                 add(company, "role_focus", role_flavor, topic="job_search")
         if company and any(
-            token in lowered for token in ["faster", "slower", "moved", "rescheduled"]
+            token in lowered for token in self.config.process_update_tokens
         ):
             status = self._extract_status_phrase(text)
             if status:
@@ -166,7 +155,7 @@ class ConversationalTurnExtractor:
     def _extract_company(self, text: str) -> str | None:
         patterns = [
             (
-                r"\b(?:at|with|from|for)\s+"
+                r"\b(?:" + "|".join(self.config.company_leading_prepositions) + r")\s+"
                 r"([A-Z][A-Za-z0-9&.-]+(?:\s+[A-Z][A-Za-z0-9&.-]+)*)"
             ),
             (
@@ -177,47 +166,31 @@ class ConversationalTurnExtractor:
         for pattern in patterns:
             match = re.search(pattern, text)
             if match:
-                candidate = match.group(1).strip(" .,!?:;")
-                if candidate.lower() not in {"I", "My"}:
+                candidate = normalize_text_token(match.group(1))
+                if candidate.lower() not in {"i", "my"}:
                     return candidate
         return None
 
     def _extract_person(self, text: str) -> str | None:
         match = re.search(r"\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b", text)
         if match:
-            return match.group(1)
+            return normalize_text_token(match.group(1))
         return None
 
     def _extract_role(self, text: str) -> str | None:
-        match = re.search(
-            (
-                r"\b((?:backend|frontend|platform|infra|full stack|full-stack|ml|data)"
-                r"\s+(?:engineer|developer)(?:\s+role|\s+position)?|"
-                r"(?:backend|frontend|platform|infra|full stack|full-stack|ml|data)"
-                r"\s+roles?)\b"
-            ),
-            text,
-            flags=re.IGNORECASE,
-        )
+        match = re.search(ROLE_PATTERN, text, flags=re.IGNORECASE)
         if match:
-            return match.group(1)
+            return normalize_text_token(match.group(1))
         return None
 
     def _extract_role_flavor(self, lowered: str) -> str | None:
-        for token in [
-            "backend",
-            "frontend",
-            "platform",
-            "infra",
-            "full stack",
-            "full-stack",
-        ]:
+        for token in self.config.role_flavors:
             if token in lowered:
                 return token.replace("full stack", "full-stack")
         return None
 
     def _extract_work_mode(self, lowered: str) -> str | None:
-        for token in ["remote", "hybrid", "onsite"]:
+        for token in self.config.work_modes:
             if token in lowered:
                 return token
         return None
@@ -229,29 +202,19 @@ class ConversationalTurnExtractor:
             flags=re.IGNORECASE,
         )
         if match:
-            return match.group(1).strip(" .,!?:;")
-        for token in [
+            return normalize_text_token(match.group(1))
+        for token in (
             "backend roles",
             "frontend roles",
             "platform roles",
             "remote work",
-        ]:
+        ):
             if token in text.lower():
                 return token
         return None
 
     def _extract_date_phrase(self, text: str) -> str | None:
-        patterns = [
-            rf"\b(?:{self._WEEKDAYS})\b",
-            rf"\b(?:{self._MONTHS})\s+\d{{1,2}}(?:st|nd|rd|th)?\b",
-            r"\b\d{4}-\d{2}-\d{2}\b",
-            r"\bnext\s+(?:week|month|monday|tuesday|wednesday|thursday|friday)\b",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, flags=re.IGNORECASE)
-            if match:
-                return match.group(0)
-        return None
+        return extract_date_phrase(text)
 
     def _extract_compensation(self, text: str) -> str | None:
         match = re.search(r"\$\d[\d,]*(?:k|K)?", text)
@@ -273,7 +236,7 @@ class ConversationalTurnExtractor:
         seen: set[tuple[str, str, str]] = set()
         out: list[Statement] = []
         for fact in facts:
-            key = (fact.subject, fact.relation, fact.object)
+            key = normalize_fact_parts(fact.subject, fact.relation, fact.object)
             if key in seen:
                 continue
             seen.add(key)

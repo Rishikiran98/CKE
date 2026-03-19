@@ -8,7 +8,9 @@ import re
 
 import numpy as np
 
+from cke.conversation.config import RetrievalConfig
 from cke.conversation.memory import ConversationalMemoryStore
+from cke.conversation.patterns import normalized_fact_key
 from cke.conversation.reference_resolution import ConversationalReferenceResolver
 from cke.conversation.types import RetrievalBundle, RetrievedMemory
 from cke.models import Statement
@@ -23,12 +25,15 @@ class ConversationalRetriever:
         memory_store: ConversationalMemoryStore,
         embedding_model: EmbeddingModel | None = None,
         reference_resolver: ConversationalReferenceResolver | None = None,
+        config: RetrievalConfig | None = None,
     ) -> None:
         self.memory_store = memory_store
         self.embedding_model = embedding_model or EmbeddingModel()
+        self.config = config or RetrievalConfig()
         self.reference_resolver = reference_resolver or ConversationalReferenceResolver(
             memory_store
         )
+        self._turn_vector_cache: dict[str, tuple[str, np.ndarray]] = {}
 
     def retrieve(
         self,
@@ -68,15 +73,17 @@ class ConversationalRetriever:
         top_k: int,
     ) -> list[RetrievedMemory]:
         query_vec = self.embedding_model.embed_text(query)
-        turn_vectors = self.embedding_model.embed_texts([turn.text for turn in turns])
+        turn_vectors = self._embed_turns(turns)
         results: list[RetrievedMemory] = []
+        query_lower = query.lower()
+        total_turns = max(1, len(turns))
         for turn, vector in zip(turns, turn_vectors):
             dense_score = self._cosine(query_vec, vector)
             overlap = self._keyword_overlap(query, turn.text)
-            recency_bonus = turn.turn_order / max(1, len(turns)) * 0.1
+            recency_bonus = turn.turn_order / total_turns * self.config.recency_weight
             entity_bonus = (
-                0.08
-                if any(entity.lower() in query.lower() for entity in turn.entities)
+                self.config.entity_match_weight
+                if any(entity.lower() in query_lower for entity in turn.entities)
                 else 0.0
             )
             score = dense_score + overlap + recency_bonus + entity_bonus
@@ -98,14 +105,36 @@ class ConversationalRetriever:
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:top_k]
 
+    def _embed_turns(self, turns) -> list[np.ndarray]:
+        cached_vectors: list[np.ndarray | None] = [None] * len(turns)
+        uncached_indexes: list[int] = []
+        uncached_texts: list[str] = []
+        for index, turn in enumerate(turns):
+            signature = f"{turn.timestamp}:{turn.text}"
+            cached_entry = self._turn_vector_cache.get(turn.turn_id)
+            if cached_entry and cached_entry[0] == signature:
+                cached_vectors[index] = cached_entry[1]
+                continue
+            uncached_indexes.append(index)
+            uncached_texts.append(turn.text)
+
+        if uncached_texts:
+            fresh_vectors = self.embedding_model.embed_texts(uncached_texts)
+            for index, vector in zip(uncached_indexes, fresh_vectors):
+                turn = turns[index]
+                signature = f"{turn.timestamp}:{turn.text}"
+                self._turn_vector_cache[turn.turn_id] = (signature, vector)
+                cached_vectors[index] = vector
+
+        return [vector for vector in cached_vectors if vector is not None]
+
     def _collect_facts(self, hits: list[RetrievedMemory]) -> list[Statement]:
         ranked: list[tuple[float, Statement]] = []
         for hit in hits:
             for fact in hit.facts:
                 bonus = (
-                    0.05
-                    if fact.context.get("topic")
-                    in {"preference", "timeline", "communication"}
+                    self.config.fact_topic_bonus
+                    if fact.context.get("topic") in self.config.boosted_fact_topics
                     else 0.0
                 )
                 ranked.append((hit.score + bonus, fact))
@@ -118,7 +147,7 @@ class ConversationalRetriever:
         )
         deduped: dict[tuple[str, str, str], Statement] = {}
         for _, fact in ranked:
-            deduped.setdefault((fact.subject, fact.relation, fact.object), fact)
+            deduped.setdefault(normalized_fact_key(fact), fact)
         return list(deduped.values())
 
     def _collect_graph_neighbors(
@@ -157,12 +186,13 @@ class ConversationalRetriever:
         query_terms = {
             token
             for token in re.findall(r"[a-z0-9]+", query.lower())
-            if token not in {"the", "a", "an", "that", "again", "did", "i", "you"}
+            if token not in self.config.stop_words
         }
         if not query_terms:
             return 0.0
         text_terms = set(re.findall(r"[a-z0-9]+", text.lower()))
-        return 0.25 * len(query_terms & text_terms) / len(query_terms)
+        overlap = len(query_terms & text_terms) / len(query_terms)
+        return self.config.keyword_overlap_weight * overlap
 
     def _cosine(self, left: np.ndarray, right: np.ndarray) -> float:
         denom = float(np.linalg.norm(left) * np.linalg.norm(right))

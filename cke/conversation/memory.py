@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from cke.conversation.extractor import ConversationalTurnExtractor
+from cke.conversation.patterns import normalize_fact_parts
 from cke.conversation.types import ConversationTurn
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
@@ -43,6 +44,11 @@ class ConversationalMemoryStore:
 
         facts: list[Statement] = []
         for index, fact in enumerate(extraction.facts):
+            normalized_subject, normalized_relation, normalized_object = (
+                normalize_fact_parts(fact.subject, fact.relation, fact.object)
+            )
+            if not normalized_subject or not normalized_object:
+                continue
             enriched_context = dict(fact.context)
             enriched_context.update(
                 {
@@ -53,9 +59,9 @@ class ConversationalMemoryStore:
                 }
             )
             enriched = Statement(
-                subject=fact.subject,
-                relation=fact.relation,
-                object=fact.object,
+                subject=normalized_subject,
+                relation=normalized_relation,
+                object=normalized_object,
                 context=enriched_context,
                 confidence=fact.confidence,
                 source=conversation_id,
