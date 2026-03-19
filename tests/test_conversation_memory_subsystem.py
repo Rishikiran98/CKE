@@ -157,10 +157,14 @@ def test_retrieval_combines_raw_turns_and_canonical_memories() -> None:
 def test_reference_resolution_uses_recent_entities_and_roles() -> None:
     store = ConversationMemoryStore()
     pipeline = ConversationIngestionPipeline(store)
+    turn_text = (
+        "The recruiter from Stripe still hasn't replied about the "
+        "backend engineer role."
+    )
     pipeline.ingest_turn(
         "conv-3",
         "user",
-        "The recruiter from Stripe still hasn't replied about the backend engineer role.",
+        turn_text,
     )
 
     resolver = ConversationalReferenceResolver(store)

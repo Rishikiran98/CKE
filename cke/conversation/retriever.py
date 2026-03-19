@@ -16,7 +16,7 @@ from cke.retrieval.embedding_model import EmbeddingModel
 
 
 class ConversationalRetriever:
-    """Retrieve evidence across raw events, canonical memories, summaries, and graph facts."""
+    """Retrieve evidence across raw events, memories, summaries, and graph facts."""
 
     def __init__(
         self,

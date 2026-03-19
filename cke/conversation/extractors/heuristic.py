@@ -38,19 +38,29 @@ class HeuristicMemoryExtractor:
             0.58,
         ),
         (
-            r"\b([A-Z][A-Za-z0-9&./-]*(?:\s+[A-Z][A-Za-z0-9&./-]*)*)\s+has\s+([^.;!?]+)",
+            (
+                r"\b([A-Z][A-Za-z0-9&./-]*"
+                r"(?:\s+[A-Z][A-Za-z0-9&./-]*)*)\s+has\s+([^.;!?]+)"
+            ),
             "has",
             MemoryKind.FACT,
             0.56,
         ),
         (
-            r"\b([A-Z][A-Za-z0-9&./-]*(?:\s+[A-Z][A-Za-z0-9&./-]*)*)\s+(?:hasn't|hasnt|didn't|didnt)\s+replied\b",
+            (
+                r"\b([A-Z][A-Za-z0-9&./-]*"
+                r"(?:\s+[A-Z][A-Za-z0-9&./-]*)*)\s+"
+                r"(?:hasn't|hasnt|didn't|didnt)\s+replied\b"
+            ),
             "reply_status",
             MemoryKind.STATUS,
             0.72,
         ),
         (
-            r"\b([A-Z][A-Za-z0-9&./-]*(?:\s+[A-Z][A-Za-z0-9&./-]*)*)\s+(?:already\s+)?replied\b",
+            (
+                r"\b([A-Z][A-Za-z0-9&./-]*"
+                r"(?:\s+[A-Z][A-Za-z0-9&./-]*)*)\s+(?:already\s+)?replied\b"
+            ),
             "reply_status",
             MemoryKind.STATUS,
             0.7,

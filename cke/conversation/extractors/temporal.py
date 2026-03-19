@@ -73,7 +73,12 @@ class TemporalMemoryExtractor:
 
     def _infer_subject(self, sentence: str) -> str:
         match = re.search(
-            r"(?:the\s+)?([A-Z][A-Za-z0-9&./-]*(?:\s+[A-Z][A-Za-z0-9&./-]*)*|[a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*)*)\s+(?:is|was|on|for|scheduled|happens)",
+            (
+                r"(?:the\s+)?("
+                r"[A-Z][A-Za-z0-9&./-]*(?:\s+[A-Z][A-Za-z0-9&./-]*)*"
+                r"|[a-z][a-z0-9_-]*(?:\s+[a-z][a-z0-9_-]*)*"
+                r")\s+(?:is|was|on|for|scheduled|happens)"
+            ),
             sentence,
         )
         if match:

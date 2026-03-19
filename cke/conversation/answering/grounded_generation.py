@@ -108,9 +108,10 @@ class GroundedAnswerComposer:
         if any(token in lowered for token in ("when", "date", "time")):
             for fact in evidence.supporting_facts:
                 if fact.relation in {"occurs_on", "scheduled_for", "date"}:
+                    relation = fact.relation.replace("_", " ")
                     return (
                         "Based on the conversation history, "
-                        f"{fact.subject} {fact.relation.replace('_', ' ')} {fact.object}."
+                        f"{fact.subject} {relation} {fact.object}."
                     )
         if lowered.startswith("who"):
             pending = [
@@ -135,7 +136,8 @@ class GroundedAnswerComposer:
             )
         if evidence.supporting_facts:
             best = evidence.supporting_facts[0]
-            return f"I found evidence that {best.subject} {best.relation.replace('_', ' ')} {best.object}."
+            relation = best.relation.replace("_", " ")
+            return f"I found evidence that {best.subject} {relation} {best.object}."
         if evidence.supporting_turns:
             snippets = [item.text for item in evidence.supporting_turns[:2]]
             if len(snippets) == 1:
