@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from cke.conversation.config import AnsweringConfig, RetrievalConfig
+from cke.conversation.patterns import extract_date_phrase
 from cke.conversation.types import ConversationAnswer, RetrievalBundle
 from cke.models import Statement
 from cke.reasoning.operator_executor import OperatorExecutor
@@ -18,23 +20,28 @@ class GroundedAnswerComposer:
         self,
         operator_selector: OperatorSelector | None = None,
         operator_executor: OperatorExecutor | None = None,
+        config: AnsweringConfig | None = None,
+        retrieval_config: RetrievalConfig | None = None,
     ) -> None:
         self.operator_selector = operator_selector or OperatorSelector()
         self.operator_executor = operator_executor or OperatorExecutor()
+        self.config = config or AnsweringConfig()
+        self.retrieval_config = retrieval_config or RetrievalConfig()
 
     def compose(self, query: str, bundle: RetrievalBundle) -> ConversationAnswer:
         evidence_facts = bundle.retrieved_facts or bundle.graph_neighbors
         if not bundle.retrieved_turns:
             return ConversationAnswer(
-                answer=(
-                    (
-                        "I don't have enough grounded conversation history "
-                        "to answer that yet."
-                    )
-                ),
-                confidence=0.0,
+                answer="I don't have enough grounded conversation history to answer that yet.",
+                confidence=self.config.no_history_confidence,
                 grounded=False,
-                metadata={"abstained": True, "reason": "no_retrieval"},
+                metadata={
+                    "abstained": True,
+                    "reason": "no_retrieval",
+                    "confidence_band": self._confidence_band(
+                        self.config.no_history_confidence
+                    ),
+                },
             )
 
         if self._retrieval_is_weak(bundle) or self._missing_relation_support(
@@ -42,12 +49,10 @@ class GroundedAnswerComposer:
         ):
             return ConversationAnswer(
                 answer=(
-                    (
-                        "I found only weak matches in the conversation history, "
-                        "so I can't answer that confidently."
-                    )
+                    "I found only weak matches in the conversation history, "
+                    "so I can't answer that confidently."
                 ),
-                confidence=0.2,
+                confidence=self.config.weak_answer_confidence,
                 grounded=False,
                 retrieved_turns=bundle.retrieved_turns,
                 retrieved_facts=evidence_facts,
@@ -55,40 +60,38 @@ class GroundedAnswerComposer:
                 metadata={
                     "abstained": True,
                     "reason": "weak_retrieval_or_missing_support",
+                    "confidence_band": self._confidence_band(
+                        self.config.weak_answer_confidence
+                    ),
                 },
             )
 
         operator_answer = self._operator_answer(query, evidence_facts)
         if operator_answer is not None:
+            confidence = self.config.operator_answer_confidence
             return ConversationAnswer(
                 answer=operator_answer,
-                confidence=0.84,
+                confidence=confidence,
                 grounded=True,
                 retrieved_turns=bundle.retrieved_turns,
                 retrieved_facts=evidence_facts,
                 graph_neighbors=bundle.graph_neighbors,
-                metadata={"answer_mode": "operator_augmented"},
+                metadata={
+                    "answer_mode": "operator_augmented",
+                    "confidence_band": self._confidence_band(confidence),
+                },
             )
 
         lowered = query.lower()
-        if any(token in lowered for token in ["when", "what date", "when was"]):
+        if any(token in lowered for token in self.config.when_query_tokens):
             answer = self._when_answer(bundle)
-        elif any(
-            token in lowered
-            for token in [
-                "who hasn't replied",
-                "who hasnt replied",
-                "who has not replied",
-            ]
-        ):
+        elif any(token in lowered for token in self.config.pending_reply_tokens):
             answer = self._pending_reply_answer(bundle)
-        elif (
-            "preferred backend" in lowered
-            or "didn't i say i preferred" in lowered
-            or "didnt i say" in lowered
+        elif any(
+            token in lowered for token in self.config.preference_confirmation_tokens
         ):
             answer = self._preference_confirmation(bundle)
-        elif "should i apply" in lowered:
+        elif any(token in lowered for token in self.config.recommendation_tokens):
             answer = self._recommendation_answer(bundle)
         else:
             answer = self._summary_answer(query, bundle)
@@ -96,7 +99,11 @@ class GroundedAnswerComposer:
         grounded = not answer.startswith("I don't") and not answer.startswith(
             "I found only weak"
         )
-        confidence = 0.8 if grounded else 0.25
+        confidence = (
+            self.config.grounded_answer_confidence
+            if grounded
+            else self.config.fallback_grounded_confidence
+        )
         return ConversationAnswer(
             answer=answer,
             confidence=confidence,
@@ -104,21 +111,18 @@ class GroundedAnswerComposer:
             retrieved_turns=bundle.retrieved_turns,
             retrieved_facts=evidence_facts,
             graph_neighbors=bundle.graph_neighbors,
-            metadata={"answer_mode": "grounded_natural_language"},
+            metadata={
+                "answer_mode": "grounded_natural_language",
+                "confidence_band": self._confidence_band(confidence),
+            },
         )
 
     def _detect_operator_hint(self, query: str) -> str | None:
         lowered = f" {query.lower()} "
-        if " how many" in lowered:
-            return "count"
-        if any(token in lowered for token in [" same ", " equal ", " identical "]):
-            return "equality"
-        if any(
-            token in lowered
-            for token in [" before ", " after ", " later ", " earlier ", " when "]
-        ):
-            return "temporal_compare"
-        if lowered.strip().startswith(("did ", "is ", "has ", "was ")):
+        for operator_name, phrases in self.config.operator_hint_map.items():
+            if any(phrase in lowered for phrase in phrases):
+                return operator_name
+        if lowered.strip().startswith(self.config.existence_prefixes):
             return "existence"
         return None
 
@@ -143,31 +147,18 @@ class GroundedAnswerComposer:
             evidence_facts=statements,
             resolved_entities=[],
         )
-        if outcome is None:
+        if outcome is None or outcome.result_value is None:
             return None
         result = outcome.result_value
-        if result is None:
-            return None
         if isinstance(result, bool):
             return "yes" if result else "no"
         return str(result)
 
     def _when_answer(self, bundle: RetrievalBundle) -> str:
         for turn in bundle.retrieved_turns:
-            date_match = re.search(
-                (
-                    r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|"
-                    r"next\s+week|next\s+month|January\s+\d{1,2}|"
-                    r"February\s+\d{1,2}|March\s+\d{1,2}|April\s+\d{1,2}|"
-                    r"May\s+\d{1,2}|June\s+\d{1,2}|July\s+\d{1,2}|"
-                    r"August\s+\d{1,2}|September\s+\d{1,2}|October\s+\d{1,2}|"
-                    r"November\s+\d{1,2}|December\s+\d{1,2}|\d{4}-\d{2}-\d{2})\b"
-                ),
-                turn.text,
-                flags=re.IGNORECASE,
-            )
-            if date_match:
-                return f"You said it was {date_match.group(0)}."
+            date_value = extract_date_phrase(turn.text)
+            if date_value:
+                return f"You said it was {date_value}."
         return self._summary_answer("when", bundle)
 
     def _pending_reply_answer(self, bundle: RetrievalBundle) -> str:
@@ -256,18 +247,20 @@ class GroundedAnswerComposer:
         lowered = query.lower()
         relation_terms = {fact.relation.lower() for fact in facts}
         if "salary" in lowered or "offer" in lowered or "comp" in lowered:
-            return not any(
-                term in relation_terms
-                for term in {"compensation", "offer_amount", "salary"}
-            )
-        if "repl" in lowered:
-            return not any(
-                term in relation_terms
-                for term in {"reply_status", "recruiter_for", "has_recruiter"}
-            )
+            return not any(term in relation_terms for term in {"compensation", "offer"})
+        if "reply" in lowered or "replied" in lowered:
+            return "reply_status" not in relation_terms
+        if "when" in lowered or "date" in lowered:
+            return not any(term in relation_terms for term in {"scheduled_for", "date"})
         return False
 
     def _retrieval_is_weak(self, bundle: RetrievalBundle) -> bool:
-        best_score = bundle.retrieved_turns[0].score if bundle.retrieved_turns else 0.0
-        evidence_count = len(bundle.retrieved_facts) + len(bundle.graph_neighbors)
-        return best_score < 0.22 and evidence_count == 0
+        best_score = max((item.score for item in bundle.retrieved_turns), default=0.0)
+        return best_score < self.retrieval_config.weak_match_threshold
+
+    def _confidence_band(self, confidence: float) -> str:
+        if confidence >= 0.75:
+            return "high"
+        if confidence >= 0.4:
+            return "medium"
+        return "low"

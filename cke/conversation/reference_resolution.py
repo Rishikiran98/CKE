@@ -4,25 +4,22 @@ from __future__ import annotations
 
 import re
 
+from cke.conversation.config import ReferenceResolutionConfig
 from cke.conversation.memory import ConversationalMemoryStore
+from cke.conversation.patterns import ROLE_PATTERN, extract_date_phrase
 from cke.conversation.types import RetrievedMemory
 
 
 class ConversationalReferenceResolver:
     """Expand shorthand references using recent turns and retrieved evidence."""
 
-    _PRONOUNS = {"it", "they", "them", "that", "those", "he", "she"}
-    _ROLE_PATTERN = (
-        r"\b((?:backend|frontend|platform|infra|"
-        r"full stack|full-stack|ml|data)"
-        r"\s+(?:engineer|developer)(?:\s+role|\s+position)?|"
-        r"(?:backend|frontend|platform|infra|"
-        r"full stack|full-stack|ml|data)"
-        r"\s+roles?)\b"
-    )
-
-    def __init__(self, memory_store: ConversationalMemoryStore) -> None:
+    def __init__(
+        self,
+        memory_store: ConversationalMemoryStore,
+        config: ReferenceResolutionConfig | None = None,
+    ) -> None:
         self.memory_store = memory_store
+        self.config = config or ReferenceResolutionConfig()
 
     def rewrite(
         self,
@@ -45,15 +42,13 @@ class ConversationalReferenceResolver:
         latest_role = self._latest_role(recent_turns, retrieved_turns)
         latest_date = self._latest_date(recent_turns, retrieved_turns)
 
-        replacements = {
-            "that company": latest_company,
-            "the company": latest_company,
-            "that recruiter": latest_person,
-            "the recruiter": latest_person,
-            "that role": latest_role,
-            "the role": latest_role,
+        explicit_values = {
+            "company": latest_company,
+            "person": latest_person,
+            "role": latest_role,
         }
-        for phrase, value in replacements.items():
+        for phrase, kind in self.config.explicit_reference_map.items():
+            value = explicit_values.get(kind)
             if value and phrase in rewritten.lower():
                 rewritten = re.sub(phrase, value, rewritten, flags=re.IGNORECASE)
                 bindings[phrase] = value
@@ -61,23 +56,25 @@ class ConversationalReferenceResolver:
         if (
             latest_date
             and re.search(r"\bthat\b", rewritten, flags=re.IGNORECASE)
-            and any(token in rewritten.lower() for token in ["when", "date", "again"])
+            and any(
+                token in rewritten.lower() for token in self.config.date_context_tokens
+            )
         ):
             rewritten = re.sub(
                 r"\bthat\b", latest_date, rewritten, count=1, flags=re.IGNORECASE
             )
             bindings["that"] = latest_date
-        elif latest_company and re.search(
-            r"\b(it|they|them)\b", rewritten, flags=re.IGNORECASE
-        ):
-            rewritten = re.sub(
-                r"\b(it|they|them)\b",
-                latest_company,
-                rewritten,
-                count=1,
-                flags=re.IGNORECASE,
-            )
-            bindings["pronoun"] = latest_company
+        elif latest_company:
+            pronoun_pattern = r"\b(" + "|".join(self.config.company_pronouns) + r")\b"
+            if re.search(pronoun_pattern, rewritten, flags=re.IGNORECASE):
+                rewritten = re.sub(
+                    pronoun_pattern,
+                    latest_company,
+                    rewritten,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+                bindings["pronoun"] = latest_company
 
         return rewritten, bindings
 
@@ -97,44 +94,17 @@ class ConversationalReferenceResolver:
         return None
 
     def _latest_role(self, recent_turns, retrieved_turns) -> str | None:
-        for turn in list(recent_turns)[::-1]:
-            match = re.search(
-                self._ROLE_PATTERN,
-                turn.text,
-                flags=re.IGNORECASE,
-            )
-            if match:
-                return match.group(1)
-        for hit in retrieved_turns:
-            match = re.search(
-                self._ROLE_PATTERN,
-                hit.text,
-                flags=re.IGNORECASE,
-            )
+        for item in [*list(recent_turns)[::-1], *retrieved_turns]:
+            match = re.search(ROLE_PATTERN, item.text, flags=re.IGNORECASE)
             if match:
                 return match.group(1)
         return None
 
     def _latest_date(self, recent_turns, retrieved_turns) -> str | None:
-        patterns = [
-            r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b",
-            (
-                r"\b(?:January|February|March|April|May|June|July|August|"
-                r"September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?\b"
-            ),
-            r"\b\d{4}-\d{2}-\d{2}\b",
-            r"\bnext\s+(?:week|month|Monday|Tuesday|Wednesday|Thursday|Friday)\b",
-        ]
-        for item in list(recent_turns)[::-1]:
-            for pattern in patterns:
-                match = re.search(pattern, item.text, flags=re.IGNORECASE)
-                if match:
-                    return match.group(0)
-        for item in retrieved_turns:
-            for pattern in patterns:
-                match = re.search(pattern, item.text, flags=re.IGNORECASE)
-                if match:
-                    return match.group(0)
+        for item in [*list(recent_turns)[::-1], *retrieved_turns]:
+            date_value = extract_date_phrase(item.text)
+            if date_value:
+                return date_value
         return None
 
     def _looks_like_company(self, text: str) -> bool:

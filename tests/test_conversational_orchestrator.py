@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
+
+from cke.conversation.memory import ConversationalMemoryStore
+from cke.conversation.retriever import ConversationalRetriever
 from cke.evaluation.conversation_cases import get_conversation_scenarios
 from cke.pipeline.conversational_orchestrator import ConversationalOrchestrator
 
@@ -91,3 +95,57 @@ def test_abstains_only_when_retrieval_is_weak() -> None:
         "can't answer that confidently" in answer.answer.lower()
         or "don't have enough" in answer.answer.lower()
     )
+
+
+def test_ingestion_normalizes_facts_before_graph_insert() -> None:
+    orchestrator = ConversationalOrchestrator()
+    conversation_id = "normalized-facts"
+    orchestrator.ingest_turn(
+        conversation_id,
+        "user",
+        "I prefer   remote work.",
+    )
+
+    facts = orchestrator.memory_store.facts_for_conversation(conversation_id)
+    preference = next(fact for fact in facts if fact.relation == "prefers")
+    assert preference.subject == "user"
+    assert preference.object == "remote work"
+
+
+class CountingEmbeddingModel:
+    def __init__(self) -> None:
+        self.embed_text_calls = 0
+        self.embed_texts_calls = 0
+
+    def embed_text(self, text: str) -> np.ndarray:
+        self.embed_text_calls += 1
+        return np.asarray([float(len(text)), 1.0], dtype=np.float32)
+
+    def embed_texts(self, texts, batch_size: int = 32) -> np.ndarray:  # noqa: ARG002
+        self.embed_texts_calls += 1
+        return np.asarray(
+            [[float(len(text)), 1.0] for text in texts],
+            dtype=np.float32,
+        )
+
+
+def test_retriever_caches_turn_embeddings_between_queries() -> None:
+    memory_store = ConversationalMemoryStore()
+    memory_store.ingest_turn(
+        "cached-retrieval",
+        "user",
+        "I have an Apple interview next Tuesday.",
+    )
+    embedding_model = CountingEmbeddingModel()
+    retriever = ConversationalRetriever(
+        memory_store=memory_store,
+        embedding_model=embedding_model,
+    )
+
+    retriever.retrieve(
+        "What did I say about Apple?", conversation_id="cached-retrieval"
+    )
+    retriever.retrieve("When is it?", conversation_id="cached-retrieval")
+
+    assert embedding_model.embed_texts_calls == 1
+    assert embedding_model.embed_text_calls == 4
