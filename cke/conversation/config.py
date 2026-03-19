@@ -1,4 +1,5 @@
-"""Configuration objects for conversational memory heuristics."""
+
+"""Configuration objects for the conversational memory subsystem."""
 
 from __future__ import annotations
 
@@ -6,122 +7,93 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
-class ExtractionConfig:
-    """Configurable extraction patterns and lightweight domain hints."""
+class RetentionPolicy:
+    max_events_per_conversation: int = 1000
+    max_canonical_memories_per_conversation: int = 500
+    keep_superseded_memories: bool = True
 
-    extracted_roles: tuple[str, ...] = ("user",)
-    statement_confidence: float = 0.88
-    pronouns_to_ignore: frozenset[str] = frozenset(
-        {"i", "we", "they", "it", "he", "she"}
+
+@dataclass(frozen=True, slots=True)
+class ValidationPolicy:
+    min_confidence: float = 0.3
+    min_span_chars: int = 3
+    max_relation_tokens: int = 6
+    allowed_memory_kinds: tuple[str, ...] = (
+        "fact",
+        "preference",
+        "plan",
+        "status",
+        "temporal",
+        "summary",
+        "alias",
+        "observation",
     )
-    nounish_entity_patterns: tuple[str, ...] = (
-        r"\b(backend roles?|frontend roles?|platform roles?|infra roles?)\b",
-        r"\b(Apple interview|Google interview|Meta interview|Stripe interview)\b",
-        r"\b(recruiter|hiring manager|onsite|phone screen|take-home)\b",
+    reject_placeholder_objects: tuple[str, ...] = ("something", "stuff", "thing")
+
+
+@dataclass(frozen=True, slots=True)
+class ConsolidationPolicy:
+    duplicate_similarity_threshold: float = 0.9
+    conflict_relation_families: dict[str, tuple[str, ...]] = field(
+        default_factory=lambda: {
+            "preference": ("prefers",),
+            "status": ("status", "reply_status"),
+            "temporal": ("occurs_on", "scheduled_for", "deadline"),
+        }
     )
-    interview_tokens: tuple[str, ...] = ("interview", "onsite", "screen")
-    application_tokens: tuple[str, ...] = ("apply", "applying", "application")
-    pending_reply_tokens: tuple[str, ...] = (
-        "hasn't replied",
-        "hasnt replied",
-        "didn't reply",
-        "didnt reply",
-        "waiting on",
-        "still waiting",
-    )
-    replied_tokens: tuple[str, ...] = ("replied", "got back", "responded")
-    preference_tokens: tuple[str, ...] = (
-        "prefer",
-        "preferred",
-        "i'm leaning",
-        "i am leaning",
-    )
-    work_modes: tuple[str, ...] = ("remote", "hybrid", "onsite")
-    role_flavors: tuple[str, ...] = (
-        "backend",
-        "frontend",
-        "platform",
-        "infra",
-        "full stack",
-        "full-stack",
-    )
-    compensation_tokens: tuple[str, ...] = ("salary", "comp", "pays", "pay")
-    process_update_tokens: tuple[str, ...] = (
-        "faster",
-        "slower",
-        "moved",
-        "rescheduled",
-    )
-    company_leading_prepositions: tuple[str, ...] = ("at", "with", "from", "for")
+    ephemeral_kinds: tuple[str, ...] = ("observation",)
+    update_relations: tuple[str, ...] = ("status", "reply_status", "occurs_on", "scheduled_for")
+
+
+@dataclass(frozen=True, slots=True)
+class IndexingConfig:
+    enable_graph_projection: bool = True
+    enable_vector_cache: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class RetrievalConfig:
-    """Heuristic retrieval weights for hybrid ranking."""
-
-    recency_weight: float = 0.1
-    entity_match_weight: float = 0.08
-    keyword_overlap_weight: float = 0.25
-    fact_topic_bonus: float = 0.05
-    weak_match_threshold: float = 0.22
+    top_k_events: int = 5
+    top_k_memories: int = 5
+    top_k_graph_facts: int = 5
+    recency_weight: float = 0.08
+    lexical_weight: float = 0.32
+    dense_weight: float = 0.6
+    weak_match_threshold: float = 0.2
     stop_words: frozenset[str] = frozenset(
-        {"the", "a", "an", "that", "again", "did", "i", "you"}
+        {"the", "a", "an", "that", "again", "did", "i", "you", "to", "of"}
     )
-    boosted_fact_topics: frozenset[str] = frozenset(
-        {"preference", "timeline", "communication"}
-    )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionConfig:
+    pronouns: tuple[str, ...] = ("it", "they", "them", "he", "she", "this", "that")
+    temporal_reference_tokens: tuple[str, ...] = ("when", "date", "time", "again", "then")
+    generic_reference_heads: tuple[str, ...] = ("company", "person", "role", "place", "thing")
+
+
+@dataclass(frozen=True, slots=True)
+class SummarizationConfig:
+    enable_summaries: bool = False
+    summary_turn_window: int = 20
 
 
 @dataclass(frozen=True, slots=True)
 class AnsweringConfig:
-    """Intent phrases and confidence bands for answer composition."""
-
-    no_history_confidence: float = 0.0
-    weak_answer_confidence: float = 0.2
-    grounded_answer_confidence: float = 0.8
-    operator_answer_confidence: float = 0.84
-    fallback_grounded_confidence: float = 0.25
-    when_query_tokens: tuple[str, ...] = ("when", "what date", "when was")
-    pending_reply_tokens: tuple[str, ...] = (
-        "who hasn't replied",
-        "who hasnt replied",
-        "who has not replied",
-    )
-    preference_confirmation_tokens: tuple[str, ...] = (
-        "preferred backend",
-        "didn't i say i preferred",
-        "didnt i say",
-    )
-    recommendation_tokens: tuple[str, ...] = ("should i apply",)
-    operator_hint_map: dict[str, tuple[str, ...]] = field(
-        default_factory=lambda: {
-            "count": (" how many",),
-            "equality": (" same ", " equal ", " identical "),
-            "temporal_compare": (
-                " before ",
-                " after ",
-                " later ",
-                " earlier ",
-                " when ",
-            ),
-        }
-    )
-    existence_prefixes: tuple[str, ...] = ("did ", "is ", "has ", "was ")
+    abstain_confidence: float = 0.1
+    weak_confidence: float = 0.25
+    grounded_confidence: float = 0.8
+    conflict_penalty: float = 0.25
 
 
 @dataclass(frozen=True, slots=True)
-class ReferenceResolutionConfig:
-    """Configurable shorthand reference phrases and date trigger words."""
+class ConversationConfig:
+    retention: RetentionPolicy = field(default_factory=RetentionPolicy)
+    validation: ValidationPolicy = field(default_factory=ValidationPolicy)
+    consolidation: ConsolidationPolicy = field(default_factory=ConsolidationPolicy)
+    indexing: IndexingConfig = field(default_factory=IndexingConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    resolution: ResolutionConfig = field(default_factory=ResolutionConfig)
+    summarization: SummarizationConfig = field(default_factory=SummarizationConfig)
+    answering: AnsweringConfig = field(default_factory=AnsweringConfig)
 
-    explicit_reference_map: dict[str, str] = field(
-        default_factory=lambda: {
-            "that company": "company",
-            "the company": "company",
-            "that recruiter": "person",
-            "the recruiter": "person",
-            "that role": "role",
-            "the role": "role",
-        }
-    )
-    company_pronouns: tuple[str, ...] = ("it", "they", "them")
-    date_context_tokens: tuple[str, ...] = ("when", "date", "again")
