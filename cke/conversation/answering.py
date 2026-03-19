@@ -1,4 +1,3 @@
-
 """Compatibility wrapper for evidence-driven answer generation."""
 
 from __future__ import annotations

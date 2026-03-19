@@ -1,4 +1,3 @@
-
 """Conversation ingestion pipeline from raw turn to canonical memory writes."""
 
 from __future__ import annotations
@@ -8,9 +7,16 @@ from uuid import uuid4
 
 from cke.conversation.config import ConversationConfig
 from cke.conversation.consolidation import MemoryConsolidator
-from cke.conversation.extractors import HeuristicMemoryExtractor, TemporalMemoryExtractor
+from cke.conversation.extractors import (
+    HeuristicMemoryExtractor,
+    TemporalMemoryExtractor,
+)
 from cke.conversation.memory_store import ConversationMemoryStore
-from cke.conversation.types import ConversationEvent, ConversationTurn, TurnIngestionResult
+from cke.conversation.types import (
+    ConversationEvent,
+    ConversationTurn,
+    TurnIngestionResult,
+)
 from cke.conversation.validation import CandidateMemoryValidator
 
 
@@ -28,9 +34,14 @@ class ConversationIngestionPipeline:
     ) -> None:
         self.memory_store = memory_store
         self.config = config or memory_store.config
-        self.extractors = extractors or [TemporalMemoryExtractor(), HeuristicMemoryExtractor()]
+        self.extractors = extractors or [
+            TemporalMemoryExtractor(),
+            HeuristicMemoryExtractor(),
+        ]
         self.validator = validator or CandidateMemoryValidator(self.config.validation)
-        self.consolidator = consolidator or MemoryConsolidator(self.config.consolidation)
+        self.consolidator = consolidator or MemoryConsolidator(
+            self.config.consolidation
+        )
 
     def ingest_turn(
         self,
@@ -68,10 +79,24 @@ class ConversationIngestionPipeline:
         )
         accepted_memories = []
         for decision in decisions:
-            if decision.canonical_memory is not None and decision.decision.value in {"accept", "update"}:
+            if decision.canonical_memory is not None and decision.decision.value in {
+                "accept",
+                "update",
+            }:
                 self.memory_store.store_canonical_memory(decision.canonical_memory)
                 accepted_memories.append(decision.canonical_memory)
-        entities = sorted({candidate.object for candidate in raw_candidates if candidate.relation == "mentions"} | {candidate.subject for candidate in accepted_memories if candidate.subject != "user"})
+        entities = sorted(
+            {
+                candidate.object
+                for candidate in raw_candidates
+                if candidate.relation == "mentions"
+            }
+            | {
+                candidate.subject
+                for candidate in accepted_memories
+                if candidate.subject != "user"
+            }
+        )
         turn = ConversationTurn(
             conversation_id=conversation_id,
             turn_id=turn_id,
@@ -90,6 +115,11 @@ class ConversationIngestionPipeline:
             turn=turn,
             raw_candidates=raw_candidates,
             accepted_memories=accepted_memories,
-            rejected_candidates=rejected_candidates + [decision.candidate for decision in decisions if decision.decision.value == "reject"],
+            rejected_candidates=rejected_candidates
+            + [
+                decision.candidate
+                for decision in decisions
+                if decision.decision.value == "reject"
+            ],
             decisions=decisions,
         )

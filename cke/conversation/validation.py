@@ -1,4 +1,3 @@
-
 """Candidate memory validation and normalization."""
 
 from __future__ import annotations
@@ -14,7 +13,9 @@ class CandidateMemoryValidator:
     def __init__(self, policy: ValidationPolicy | None = None) -> None:
         self.policy = policy or ValidationPolicy()
 
-    def validate(self, candidates: list[CandidateMemory]) -> tuple[list[CandidateMemory], list[CandidateMemory]]:
+    def validate(
+        self, candidates: list[CandidateMemory]
+    ) -> tuple[list[CandidateMemory], list[CandidateMemory]]:
         accepted: list[CandidateMemory] = []
         rejected: list[CandidateMemory] = []
         for candidate in candidates:
@@ -51,8 +52,15 @@ class CandidateMemoryValidator:
             reasons.append("placeholder_object")
         if candidate.confidence < self.policy.min_confidence:
             reasons.append("low_signal_confidence")
-        if any((span.end - span.start) < self.policy.min_span_chars for span in candidate.provenance):
+        if any(
+            (span.end - span.start) < self.policy.min_span_chars
+            for span in candidate.provenance
+        ):
             reasons.append("provenance_span_too_short")
-        if candidate.kind is MemoryKind.OBSERVATION and candidate.relation == "mentions" and len(candidate.object) < 2:
+        if (
+            candidate.kind is MemoryKind.OBSERVATION
+            and candidate.relation == "mentions"
+            and len(candidate.object) < 2
+        ):
             reasons.append("weak_entity_mention")
         return reasons

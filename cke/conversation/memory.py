@@ -1,4 +1,3 @@
-
 """Compatibility adapter exposing the historical memory store API."""
 
 from __future__ import annotations

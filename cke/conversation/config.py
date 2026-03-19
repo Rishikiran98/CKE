@@ -1,4 +1,3 @@
-
 """Configuration objects for the conversational memory subsystem."""
 
 from __future__ import annotations
@@ -42,7 +41,12 @@ class ConsolidationPolicy:
         }
     )
     ephemeral_kinds: tuple[str, ...] = ("observation",)
-    update_relations: tuple[str, ...] = ("status", "reply_status", "occurs_on", "scheduled_for")
+    update_relations: tuple[str, ...] = (
+        "status",
+        "reply_status",
+        "occurs_on",
+        "scheduled_for",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +72,20 @@ class RetrievalConfig:
 @dataclass(frozen=True, slots=True)
 class ResolutionConfig:
     pronouns: tuple[str, ...] = ("it", "they", "them", "he", "she", "this", "that")
-    temporal_reference_tokens: tuple[str, ...] = ("when", "date", "time", "again", "then")
-    generic_reference_heads: tuple[str, ...] = ("company", "person", "role", "place", "thing")
+    temporal_reference_tokens: tuple[str, ...] = (
+        "when",
+        "date",
+        "time",
+        "again",
+        "then",
+    )
+    generic_reference_heads: tuple[str, ...] = (
+        "company",
+        "person",
+        "role",
+        "place",
+        "thing",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,4 +112,3 @@ class ConversationConfig:
     resolution: ResolutionConfig = field(default_factory=ResolutionConfig)
     summarization: SummarizationConfig = field(default_factory=SummarizationConfig)
     answering: AnsweringConfig = field(default_factory=AnsweringConfig)
-

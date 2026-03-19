@@ -1,4 +1,3 @@
-
 """Summary retrieval adapter."""
 
 from __future__ import annotations
@@ -13,5 +12,7 @@ class SummaryRetriever:
         self.memory_store = memory_store
 
     def retrieve(self, conversation_id: str, *, limit: int = 3) -> list[str]:
-        summaries = getattr(self.memory_store, "_summaries_by_conversation", {}).get(conversation_id, [])
+        summaries = getattr(self.memory_store, "_summaries_by_conversation", {}).get(
+            conversation_id, []
+        )
         return list(summaries[-limit:])

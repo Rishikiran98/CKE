@@ -1,4 +1,3 @@
-
 """Typed data contracts for conversational memory lifecycle."""
 
 from __future__ import annotations

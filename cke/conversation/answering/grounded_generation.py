@@ -69,27 +69,34 @@ class GroundedAnswerComposer:
     def _generate_grounded_answer(self, query: str, evidence: EvidenceSet) -> str:
         lowered = query.lower()
         if "should i" in lowered:
-            turn_text = " ".join(item.text.lower() for item in evidence.supporting_turns)
+            turn_text = " ".join(
+                item.text.lower() for item in evidence.supporting_turns
+            )
             fact_text = " ".join(
                 f"{fact.subject} {fact.relation} {fact.object}".lower()
                 for fact in evidence.supporting_facts
             )
             if ("prefer" in turn_text or "prefers" in fact_text) and (
-                "remote" in turn_text or "backend" in turn_text or "has_role" in fact_text
+                "remote" in turn_text
+                or "backend" in turn_text
+                or "has_role" in fact_text
             ):
                 return (
                     "Probably yes — the retrieved conversation evidence suggests "
                     "the option matches your backend and remote preferences."
                 )
-        if any(
-            phrase in lowered
-            for phrase in (
-                "what did i tell you",
-                "what did i say",
-                "given everything i told you",
-                "my ",
+        if (
+            any(
+                phrase in lowered
+                for phrase in (
+                    "what did i tell you",
+                    "what did i say",
+                    "given everything i told you",
+                    "my ",
+                )
             )
-        ) and evidence.supporting_turns:
+            and evidence.supporting_turns
+        ):
             snippets = [item.text for item in evidence.supporting_turns[:2]]
             if len(snippets) == 1:
                 return f"From the conversation: {snippets[0]}"
@@ -121,7 +128,11 @@ class GroundedAnswerComposer:
             if names:
                 return ", ".join(dict.fromkeys(names))
         if lowered.startswith(("did ", "is ", "has ", "was ")):
-            return "yes" if evidence.supporting_facts or evidence.supporting_turns else "no"
+            return (
+                "yes"
+                if evidence.supporting_facts or evidence.supporting_turns
+                else "no"
+            )
         if evidence.supporting_facts:
             best = evidence.supporting_facts[0]
             return f"I found evidence that {best.subject} {best.relation.replace('_', ' ')} {best.object}."

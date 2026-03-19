@@ -1,4 +1,3 @@
-
 """Evidence-aware reference resolution for conversational retrieval."""
 
 from __future__ import annotations
@@ -32,7 +31,9 @@ class ConversationalReferenceResolver:
         conversation_id: str,
         retrieved_turns: list[RetrievedMemory] | None = None,
     ) -> tuple[str, dict[str, str]]:
-        rewritten, bindings = self.alias_resolver.resolve(query, conversation_id=conversation_id)
+        rewritten, bindings = self.alias_resolver.resolve(
+            query, conversation_id=conversation_id
+        )
         rewritten, temporal_bindings = self.temporal_resolver.resolve(
             rewritten,
             conversation_id=conversation_id,
@@ -82,12 +83,20 @@ class ConversationalReferenceResolver:
             )
         )
 
-    def _latest_entity(self, conversation_id: str, retrieved_turns: list[RetrievedMemory]) -> str | None:
+    def _latest_entity(
+        self, conversation_id: str, retrieved_turns: list[RetrievedMemory]
+    ) -> str | None:
         ignored = {"The", "A", "An", "This", "That"}
-        for memory in reversed(self.memory_store.get_canonical_memories(conversation_id)):
+        for memory in reversed(
+            self.memory_store.get_canonical_memories(conversation_id)
+        ):
             if memory.subject != "user" and memory.subject not in ignored:
                 return memory.subject
-            if memory.object and memory.object[:1].isupper() and memory.object not in ignored:
+            if (
+                memory.object
+                and memory.object[:1].isupper()
+                and memory.object not in ignored
+            ):
                 return memory.object
         for turn in reversed(self.memory_store.latest_turns(conversation_id, limit=6)):
             for entity in reversed(turn.entities):

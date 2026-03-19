@@ -1,4 +1,3 @@
-
 """Evidence-driven answering components for conversational memory."""
 
 from .abstention import AbstentionDecider

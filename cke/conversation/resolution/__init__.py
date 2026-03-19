@@ -1,4 +1,3 @@
-
 """Reference and alias resolution helpers for conversational queries."""
 
 from .alias_resolution import AliasResolver

@@ -1,4 +1,3 @@
-
 """Consolidation logic for dedupe, updates, and conflict handling."""
 
 from __future__ import annotations
@@ -32,11 +31,20 @@ class MemoryConsolidator:
         timestamp: str,
     ) -> list[MemoryWriteDecision]:
         decisions: list[MemoryWriteDecision] = []
-        existing_by_key = {(memory.subject, memory.relation, memory.object): memory for memory in existing}
-        existing_by_pair = {(memory.subject, memory.relation): memory for memory in existing if memory.status == MemoryStatus.ACCEPTED}
+        existing_by_key = {
+            (memory.subject, memory.relation, memory.object): memory
+            for memory in existing
+        }
+        existing_by_pair = {
+            (memory.subject, memory.relation): memory
+            for memory in existing
+            if memory.status == MemoryStatus.ACCEPTED
+        }
 
         for candidate in candidates:
-            exact = existing_by_key.get((candidate.subject, candidate.relation, candidate.object))
+            exact = existing_by_key.get(
+                (candidate.subject, candidate.relation, candidate.object)
+            )
             if exact is not None:
                 exact.mention_count += 1
                 exact.last_seen_at = timestamp
@@ -72,11 +80,21 @@ class MemoryConsolidator:
                     reason="new_candidate_conflicts_with_existing_canonical",
                     conflicting_fields=("object",),
                 )
-                if candidate.relation in self.policy.update_relations or candidate.kind in {MemoryKind.STATUS, MemoryKind.TEMPORAL, MemoryKind.PREFERENCE}:
+                if (
+                    candidate.relation in self.policy.update_relations
+                    or candidate.kind
+                    in {MemoryKind.STATUS, MemoryKind.TEMPORAL, MemoryKind.PREFERENCE}
+                ):
                     pair.status = MemoryStatus.SUPERSEDED
-                    canonical = self._build_canonical(candidate, timestamp, supersedes=pair.memory_id)
-                    existing_by_key[(canonical.subject, canonical.relation, canonical.object)] = canonical
-                    existing_by_pair[(canonical.subject, canonical.relation)] = canonical
+                    canonical = self._build_canonical(
+                        candidate, timestamp, supersedes=pair.memory_id
+                    )
+                    existing_by_key[
+                        (canonical.subject, canonical.relation, canonical.object)
+                    ] = canonical
+                    existing_by_pair[(canonical.subject, canonical.relation)] = (
+                        canonical
+                    )
                     decisions.append(
                         MemoryWriteDecision(
                             decision=MemoryDecisionType.UPDATE,
@@ -100,7 +118,9 @@ class MemoryConsolidator:
                 continue
 
             canonical = self._build_canonical(candidate, timestamp)
-            existing_by_key[(canonical.subject, canonical.relation, canonical.object)] = canonical
+            existing_by_key[
+                (canonical.subject, canonical.relation, canonical.object)
+            ] = canonical
             existing_by_pair[(canonical.subject, canonical.relation)] = canonical
             decisions.append(
                 MemoryWriteDecision(
@@ -128,7 +148,15 @@ class MemoryConsolidator:
             relation=candidate.relation,
             object=candidate.object,
             confidence=candidate.confidence,
-            confidence_band=ConfidenceBand.HIGH if candidate.confidence >= 0.7 else ConfidenceBand.MEDIUM if candidate.confidence >= 0.45 else ConfidenceBand.LOW,
+            confidence_band=(
+                ConfidenceBand.HIGH
+                if candidate.confidence >= 0.7
+                else (
+                    ConfidenceBand.MEDIUM
+                    if candidate.confidence >= 0.45
+                    else ConfidenceBand.LOW
+                )
+            ),
             provenance=list(candidate.provenance),
             attributes=dict(candidate.attributes),
             first_seen_at=timestamp,

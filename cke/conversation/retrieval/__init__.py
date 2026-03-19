@@ -1,4 +1,3 @@
-
 """Retrieval building blocks for conversational memory."""
 
 from .candidate_generation import CandidateGenerator

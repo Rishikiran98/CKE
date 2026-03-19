@@ -1,4 +1,3 @@
-
 """Candidate generation across raw events and canonical memories."""
 
 from __future__ import annotations
@@ -33,7 +32,13 @@ class CandidateGenerator:
         candidates: list[RetrievedMemory] = []
 
         for event, vector in zip(events, self._embed_events(events)):
-            score = self._score(query, query_vec, event.text, vector, recency_hint=event.turn_order / max(1, len(events)))
+            score = self._score(
+                query,
+                query_vec,
+                event.text,
+                vector,
+                recency_hint=event.turn_order / max(1, len(events)),
+            )
             candidates.append(
                 RetrievedMemory(
                     memory_id=event.event_id,
@@ -49,7 +54,10 @@ class CandidateGenerator:
             )
         for memory in memories:
             text = f"{memory.subject} {memory.relation} {memory.object}"
-            score = (lexical_overlap(query, text, stop_words=self.config.stop_words) * self.config.lexical_weight) + 0.1
+            score = (
+                lexical_overlap(query, text, stop_words=self.config.stop_words)
+                * self.config.lexical_weight
+            ) + 0.1
             candidates.append(
                 RetrievedMemory(
                     memory_id=memory.memory_id,
@@ -61,7 +69,10 @@ class CandidateGenerator:
                     subject=memory.subject,
                     relation=memory.relation,
                     object=memory.object,
-                    metadata={"kind": memory.kind.value, "mention_count": memory.mention_count},
+                    metadata={
+                        "kind": memory.kind.value,
+                        "mention_count": memory.mention_count,
+                    },
                 )
             )
         candidates.sort(key=lambda item: item.score, reverse=True)
@@ -88,10 +99,16 @@ class CandidateGenerator:
                 vectors[index] = vector
         return [vector for vector in vectors if vector is not None]
 
-    def _score(self, query: str, query_vec, text: str, text_vec, *, recency_hint: float) -> float:
+    def _score(
+        self, query: str, query_vec, text: str, text_vec, *, recency_hint: float
+    ) -> float:
         lexical = lexical_overlap(query, text, stop_words=self.config.stop_words)
         dense = self._cosine(query_vec, text_vec)
-        return (dense * self.config.dense_weight) + (lexical * self.config.lexical_weight) + (recency_hint * self.config.recency_weight)
+        return (
+            (dense * self.config.dense_weight)
+            + (lexical * self.config.lexical_weight)
+            + (recency_hint * self.config.recency_weight)
+        )
 
     def _cosine(self, left, right) -> float:
         denom = float((left @ left) ** 0.5 * (right @ right) ** 0.5)

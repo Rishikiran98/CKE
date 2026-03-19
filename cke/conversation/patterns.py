@@ -1,4 +1,3 @@
-
 """Generic normalization and parsing helpers for conversational memory."""
 
 from __future__ import annotations
@@ -30,7 +29,9 @@ def normalize_relation_label(text: str) -> str:
     return "_".join(token for token in re.split(r"[^a-z0-9]+", cleaned) if token)
 
 
-def normalize_fact_parts(subject: str, relation: str, object_: str) -> tuple[str, str, str]:
+def normalize_fact_parts(
+    subject: str, relation: str, object_: str
+) -> tuple[str, str, str]:
     return (
         normalize_text_token(subject),
         normalize_relation_label(relation),
@@ -60,7 +61,9 @@ def tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", text.lower())
 
 
-def lexical_overlap(left: str, right: str, *, stop_words: set[str] | frozenset[str] | None = None) -> float:
+def lexical_overlap(
+    left: str, right: str, *, stop_words: set[str] | frozenset[str] | None = None
+) -> float:
     ignored = set(stop_words or set())
     left_terms = {token for token in tokenize(left) if token not in ignored}
     right_terms = {token for token in tokenize(right) if token not in ignored}

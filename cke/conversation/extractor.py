@@ -1,11 +1,13 @@
-
 """Compatibility wrapper for candidate extraction."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cke.conversation.extractors import HeuristicMemoryExtractor, TemporalMemoryExtractor
+from cke.conversation.extractors import (
+    HeuristicMemoryExtractor,
+    TemporalMemoryExtractor,
+)
 from cke.conversation.types import ConversationEvent
 
 
@@ -34,6 +36,16 @@ class ConversationalTurnExtractor:
         candidates = []
         for extractor in self.extractors:
             candidates.extend(extractor.extract(event))
-        entities = sorted({candidate.object for candidate in candidates if candidate.relation == "mentions"})
-        facts = [candidate.as_statement() for candidate in candidates if candidate.relation != "mentions"]
+        entities = sorted(
+            {
+                candidate.object
+                for candidate in candidates
+                if candidate.relation == "mentions"
+            }
+        )
+        facts = [
+            candidate.as_statement()
+            for candidate in candidates
+            if candidate.relation != "mentions"
+        ]
         return TurnExtraction(entities=entities, facts=facts)

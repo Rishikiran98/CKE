@@ -144,16 +144,26 @@ class HeuristicMemoryExtractor:
                 )
             )
         if "replied" in lowered:
-            from_match = re.search(r"\bfrom\s+([A-Z][A-Za-z0-9&./-]+(?:\s+[A-Z][A-Za-z0-9&./-]+)*)", text)
+            from_match = re.search(
+                r"\bfrom\s+([A-Z][A-Za-z0-9&./-]+(?:\s+[A-Z][A-Za-z0-9&./-]+)*)", text
+            )
             status_subject = (
-                normalize_text_token(from_match.group(1))
-                if from_match
-                else company
+                normalize_text_token(from_match.group(1)) if from_match else company
             )
             if status_subject:
                 status = (
                     "pending"
-                    if any(token in lowered for token in ("hasn't replied", "hasnt replied", "didn't replied", "didnt replied", "still hasn't replied", "still hasnt replied"))
+                    if any(
+                        token in lowered
+                        for token in (
+                            "hasn't replied",
+                            "hasnt replied",
+                            "didn't replied",
+                            "didnt replied",
+                            "still hasn't replied",
+                            "still hasnt replied",
+                        )
+                    )
                     else "replied"
                 )
                 status_start = lowered.find("replied")
@@ -166,8 +176,21 @@ class HeuristicMemoryExtractor:
                         MemoryKind.STATUS,
                         0.72 if status == "pending" else 0.68,
                         max(0, status_start - len(status_subject)),
-                        status_start + len("replied") if status_start >= 0 else len(text),
-                        text[max(0, status_start - len(status_subject)) : status_start + len("replied")] if status_start >= 0 else text,
+                        (
+                            status_start + len("replied")
+                            if status_start >= 0
+                            else len(text)
+                        ),
+                        (
+                            text[
+                                max(
+                                    0, status_start - len(status_subject)
+                                ) : status_start
+                                + len("replied")
+                            ]
+                            if status_start >= 0
+                            else text
+                        ),
                     )
                 )
         if company and role_match:
@@ -250,9 +273,7 @@ class HeuristicMemoryExtractor:
         band = (
             ConfidenceBand.HIGH
             if confidence >= 0.7
-            else ConfidenceBand.MEDIUM
-            if confidence >= 0.45
-            else ConfidenceBand.LOW
+            else ConfidenceBand.MEDIUM if confidence >= 0.45 else ConfidenceBand.LOW
         )
         return CandidateMemory(
             candidate_id=f"cand-{uuid4().hex[:12]}",

@@ -1,4 +1,3 @@
-
 """Evidence selection over retrieval bundles."""
 
 from __future__ import annotations

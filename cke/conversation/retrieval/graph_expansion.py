@@ -1,4 +1,3 @@
-
 """Graph-backed evidence expansion from retrieved memories."""
 
 from __future__ import annotations

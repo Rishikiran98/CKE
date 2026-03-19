@@ -1,4 +1,3 @@
-
 """Pluggable extractor implementations for conversational memory."""
 
 from .base import BaseMemoryExtractor

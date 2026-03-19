@@ -1,4 +1,3 @@
-
 """Extractor interfaces for candidate memory proposal generation."""
 
 from __future__ import annotations

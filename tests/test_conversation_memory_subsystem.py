@@ -3,7 +3,6 @@ from __future__ import annotations
 from cke.conversation.answering.abstention import AbstentionDecider
 from cke.conversation.answering.evidence_selection import EvidenceSelector
 from cke.conversation.answering.grounded_generation import GroundedAnswerComposer
-from cke.conversation.config import ConversationConfig
 from cke.conversation.consolidation import MemoryConsolidator
 from cke.conversation.ingestion import ConversationIngestionPipeline
 from cke.conversation.memory_store import ConversationMemoryStore
@@ -41,7 +40,9 @@ def _candidate(
         relation=relation,
         object=object_,
         confidence=confidence,
-        confidence_band=ConfidenceBand.HIGH if confidence >= 0.7 else ConfidenceBand.MEDIUM,
+        confidence_band=(
+            ConfidenceBand.HIGH if confidence >= 0.7 else ConfidenceBand.MEDIUM
+        ),
         provenance=[
             MemorySourceSpan(
                 turn_id="turn-1",
@@ -113,9 +114,13 @@ def test_consolidation_dedupes_and_supersedes_conflicting_memories() -> None:
         kind=MemoryKind.STATUS,
     )
 
-    first_decision = consolidator.consolidate([first], existing, timestamp="2026-03-19T10:00:00+00:00")
+    first_decision = consolidator.consolidate(
+        [first], existing, timestamp="2026-03-19T10:00:00+00:00"
+    )
     existing = [first_decision[0].canonical_memory]
-    second_decision = consolidator.consolidate([second], existing, timestamp="2026-03-19T11:00:00+00:00")
+    second_decision = consolidator.consolidate(
+        [second], existing, timestamp="2026-03-19T11:00:00+00:00"
+    )
 
     assert first_decision[0].decision.value == "accept"
     assert second_decision[0].decision.value == "update"
@@ -140,7 +145,9 @@ def test_retrieval_combines_raw_turns_and_canonical_memories() -> None:
     )
 
     retriever = ConversationalRetriever(store)
-    bundle = retriever.retrieve("When is the architecture review?", conversation_id="conv-2")
+    bundle = retriever.retrieve(
+        "When is the architecture review?", conversation_id="conv-2"
+    )
 
     assert bundle.retrieved_turns
     assert bundle.retrieved_memories
@@ -189,7 +196,9 @@ def test_abstention_on_weak_or_conflicting_evidence() -> None:
 def test_grounded_generation_abstains_when_conflicts_are_present() -> None:
     composer = GroundedAnswerComposer(evidence_selector=EvidenceSelector())
     bundle = RetrievalBundle(rewritten_query="What is the status?")
-    evidence = EvidenceSet(query="What is the status?", rewritten_query="What is the status?")
+    evidence = EvidenceSet(
+        query="What is the status?", rewritten_query="What is the status?"
+    )
     evidence.conflicts.append(type("Conflict", (), {"reason": "two statuses"})())
     bundle.evidence = evidence
 

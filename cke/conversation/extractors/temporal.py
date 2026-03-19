@@ -1,4 +1,3 @@
-
 """Temporal candidate extraction for dates and time references."""
 
 from __future__ import annotations
@@ -39,18 +38,38 @@ class TemporalMemoryExtractor:
                     relation=relation,
                     object=normalize_text_token(value),
                     confidence=confidence,
-                    confidence_band=ConfidenceBand.HIGH if confidence >= 0.7 else ConfidenceBand.MEDIUM,
-                    provenance=[MemorySourceSpan(turn_id=event.turn_id, start=start, end=end, text=value, extractor=self.name)],
+                    confidence_band=(
+                        ConfidenceBand.HIGH
+                        if confidence >= 0.7
+                        else ConfidenceBand.MEDIUM
+                    ),
+                    provenance=[
+                        MemorySourceSpan(
+                            turn_id=event.turn_id,
+                            start=start,
+                            end=end,
+                            text=value,
+                            extractor=self.name,
+                        )
+                    ],
                     attributes={"sentence": sentence},
                 )
             )
         return candidates
 
     def _sentence_for_span(self, text: str, start: int, end: int) -> str:
-        left = max(text.rfind(".", 0, start), text.rfind("!", 0, start), text.rfind("?", 0, start))
-        right_candidates = [idx for idx in (text.find(".", end), text.find("!", end), text.find("?", end)) if idx != -1]
+        left = max(
+            text.rfind(".", 0, start),
+            text.rfind("!", 0, start),
+            text.rfind("?", 0, start),
+        )
+        right_candidates = [
+            idx
+            for idx in (text.find(".", end), text.find("!", end), text.find("?", end))
+            if idx != -1
+        ]
         right = min(right_candidates) if right_candidates else len(text)
-        return normalize_text_token(text[left + 1:right])
+        return normalize_text_token(text[left + 1 : right])
 
     def _infer_subject(self, sentence: str) -> str:
         match = re.search(
