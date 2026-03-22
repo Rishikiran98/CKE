@@ -40,7 +40,7 @@ class SQLiteStore(StorageAdapter):
     def __del__(self) -> None:  # pragma: no cover - defensive cleanup only
         try:
             self.close()
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     def init_schema(self) -> None:
