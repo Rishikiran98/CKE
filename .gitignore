@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+cke/logs/reasoning_traces/
+data/

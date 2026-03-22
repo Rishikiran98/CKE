@@ -1,0 +1,134 @@
+{
+  "hotpotqa": {
+    "rag_k5": {
+      "em": 0.0,
+      "f1": 0.1087,
+      "median_tokens": 534.0,
+      "median_latency_ms": 1.14,
+      "n": 500
+    },
+    "rag_k10": {
+      "em": 0.0,
+      "f1": 0.1122,
+      "median_tokens": 1091.0,
+      "median_latency_ms": 1.19,
+      "n": 500
+    },
+    "cke_n8": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.11,
+      "n": 500
+    },
+    "cke_n12": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.08,
+      "n": 500
+    },
+    "cke_n20": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.08,
+      "n": 500
+    },
+    "hybrid_n12": {
+      "em": 0.0,
+      "f1": 0.125,
+      "median_tokens": 61.0,
+      "median_latency_ms": 11.38,
+      "n": 500
+    }
+  },
+  "wiki2": {
+    "rag_k5": {
+      "em": 0.0,
+      "f1": 0.1092,
+      "median_tokens": 538.0,
+      "median_latency_ms": 1.17,
+      "n": 500
+    },
+    "rag_k10": {
+      "em": 0.0,
+      "f1": 0.1122,
+      "median_tokens": 1107.0,
+      "median_latency_ms": 1.22,
+      "n": 500
+    },
+    "cke_n8": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.61,
+      "n": 500
+    },
+    "cke_n12": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.56,
+      "n": 500
+    },
+    "cke_n20": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.56,
+      "n": 500
+    },
+    "hybrid_n12": {
+      "em": 0.0,
+      "f1": 0.125,
+      "median_tokens": 61.0,
+      "median_latency_ms": 11.87,
+      "n": 500
+    }
+  },
+  "combined": {
+    "rag_k5": {
+      "em": 0.0,
+      "f1": 0.1089,
+      "median_tokens": 537.0,
+      "median_latency_ms": 1.15,
+      "n": 1000
+    },
+    "rag_k10": {
+      "em": 0.0,
+      "f1": 0.1122,
+      "median_tokens": 1099.0,
+      "median_latency_ms": 1.2,
+      "n": 1000
+    },
+    "cke_n8": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.33,
+      "n": 1000
+    },
+    "cke_n12": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.3,
+      "n": 1000
+    },
+    "cke_n20": {
+      "em": 0.0,
+      "f1": 0.1114,
+      "median_tokens": 59.0,
+      "median_latency_ms": 11.31,
+      "n": 1000
+    },
+    "hybrid_n12": {
+      "em": 0.0,
+      "f1": 0.125,
+      "median_tokens": 61.0,
+      "median_latency_ms": 11.64,
+      "n": 1000
+    }
+  }
+}

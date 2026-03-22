@@ -1,0 +1,13 @@
+{
+  "token_reduction_rag_k10_vs_cke_n12": 18.63,
+  "meets_5x_criterion": true,
+  "em_delta_cke_vs_rag": 0.0,
+  "f1_delta_cke_vs_rag": -0.0008,
+  "meets_accuracy_criterion": true,
+  "rag_k10_median_tokens": 1099.0,
+  "cke_n12_median_tokens": 59.0,
+  "rag_k10_em": 0.0,
+  "cke_n12_em": 0.0,
+  "rag_k10_f1": 0.1122,
+  "cke_n12_f1": 0.1114
+}

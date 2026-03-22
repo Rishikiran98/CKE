@@ -1,0 +1,122 @@
+[
+  {
+    "dataset": "hotpotqa",
+    "question": "What country is Stanford University located in?",
+    "gold_answer": "California",
+    "rag_prediction": "Stanford University is a university located in California",
+    "cke_prediction": "Stanford University is a university located_in California",
+    "rag_tokens": 1090,
+    "cke_tokens": 68,
+    "rag_f1": 0.2222,
+    "cke_f1": 0.25,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "Who founded Wikipedia?",
+    "gold_answer": "Jimmy Wales",
+    "rag_prediction": "Wikipedia was founded in United States",
+    "cke_prediction": "Wikipedia developed several important technologies",
+    "rag_tokens": 1095,
+    "cke_tokens": 58,
+    "rag_f1": 0.0,
+    "cke_f1": 0.0,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "What organization does Python language belong to?",
+    "gold_answer": "Netherlands",
+    "rag_prediction": "Python language developed several important technologies",
+    "cke_prediction": "Python language developed several important technologies",
+    "rag_tokens": 1114,
+    "cke_tokens": 70,
+    "rag_f1": 0.0,
+    "cke_f1": 0.0,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "Which city is home to Netflix?",
+    "gold_answer": "United States",
+    "rag_prediction": "Netflix is a university located in United States",
+    "cke_prediction": "Netflix is a university located_in United States",
+    "rag_tokens": 1074,
+    "cke_tokens": 62,
+    "rag_f1": 0.4,
+    "cke_f1": 0.4444,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "What year was SpaceX established?",
+    "gold_answer": "Elon Musk",
+    "rag_prediction": "SpaceX was founded in United States",
+    "cke_prediction": "",
+    "rag_tokens": 1072,
+    "cke_tokens": 7,
+    "rag_f1": 0.0,
+    "cke_f1": 0.0,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "What country is OpenAI located in?",
+    "gold_answer": "United States",
+    "rag_prediction": "OpenAI is a university located in United States",
+    "cke_prediction": "",
+    "rag_tokens": 1109,
+    "cke_tokens": 8,
+    "rag_f1": 0.4,
+    "cke_f1": 0.0,
+    "failure_mode": "RAG outperforms CKE — dense context contained answer"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "Who founded DeepMind?",
+    "gold_answer": "Demis Hassabis",
+    "rag_prediction": "DeepMind was founded in United Kingdom",
+    "cke_prediction": "",
+    "rag_tokens": 1091,
+    "cke_tokens": 4,
+    "rag_f1": 0.0,
+    "cke_f1": 0.0,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "What organization does MIT belong to?",
+    "gold_answer": "Massachusetts",
+    "rag_prediction": "MIT is an organization founded by William Barton Rogers",
+    "cke_prediction": "",
+    "rag_tokens": 1118,
+    "cke_tokens": 8,
+    "rag_f1": 0.0,
+    "cke_f1": 0.0,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "Which city is home to Oxford University?",
+    "gold_answer": "United Kingdom",
+    "rag_prediction": "Oxford University is a university located in United Kingdom",
+    "cke_prediction": "Oxford University is a university located_in United Kingdom",
+    "rag_tokens": 1082,
+    "cke_tokens": 72,
+    "rag_f1": 0.3636,
+    "cke_f1": 0.4,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  },
+  {
+    "dataset": "hotpotqa",
+    "question": "What year was Amazon established?",
+    "gold_answer": "Jeff Bezos",
+    "rag_prediction": "Amazon was founded in United States",
+    "cke_prediction": "Amazon developed several important technologies",
+    "rag_tokens": 1088,
+    "cke_tokens": 61,
+    "rag_f1": 0.0,
+    "cke_f1": 0.0,
+    "failure_mode": "Both paths fail — answer not in retrieved context"
+  }
+]
