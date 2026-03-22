@@ -43,6 +43,7 @@ def _extract_date_tokens(temporal: Any) -> list[str]:
         tokens.append(temporal.lower())
     return tokens
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -182,9 +183,7 @@ class EvidenceAssembler:
 
         return selected
 
-    def _qualifier_relevance_score(
-        self, fact: EvidenceFact, query: str
-    ) -> float:
+    def _qualifier_relevance_score(self, fact: EvidenceFact, query: str) -> float:
         """Score boost/penalty based on qualifier match with query context."""
         qualifiers = fact.statement.qualifiers
         if not qualifiers:

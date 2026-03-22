@@ -390,7 +390,9 @@ class KnowledgeGraphEngine:
                             object=self._display_entity(dst),
                             context=dict(edge.get("context", {})),
                             confidence=float(edge.get("confidence", 1.0)),
-                            qualifiers=dict(edge.get("context", {}).get("qualifiers", {})),
+                            qualifiers=dict(
+                                edge.get("context", {}).get("qualifiers", {})
+                            ),
                             source=edge.get("source"),
                             timestamp=edge.get("timestamp"),
                         )
@@ -425,7 +427,9 @@ class KnowledgeGraphEngine:
                                 object=self._display_entity(nxt),
                                 context=dict(item.get("context", {})),
                                 confidence=float(item.get("confidence", 1.0)),
-                                qualifiers=dict(item.get("context", {}).get("qualifiers", {})),
+                                qualifiers=dict(
+                                    item.get("context", {}).get("qualifiers", {})
+                                ),
                                 source=item.get("source"),
                                 timestamp=item.get("timestamp"),
                             )

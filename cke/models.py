@@ -77,7 +77,9 @@ class Statement:
             qualifiers=dict(self.qualifiers),
             evidence=evidence_list,
             confidence=self.confidence,
-            trust_score=self.trust_score if self.trust_score is not None else self.confidence,
+            trust_score=(
+                self.trust_score if self.trust_score is not None else self.confidence
+            ),
             source=self.source or "unknown",
         )
 

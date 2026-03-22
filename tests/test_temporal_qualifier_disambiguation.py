@@ -88,9 +88,7 @@ class TestTemporalConflictDisambiguation:
         conflicts = engine.detect_conflicts([german, swiss, american])
         # German overlaps with Swiss (1901-1940), Swiss overlaps with American (1940-1955)
         # German does NOT overlap with American (German ends 1940, American starts 1940)
-        conflict_pairs = {
-            (c[0].object, c[1].object) for c in conflicts
-        }
+        conflict_pairs = {(c[0].object, c[1].object) for c in conflicts}
         assert ("German", "American") not in conflict_pairs
         assert ("American", "German") not in conflict_pairs
 
@@ -108,7 +106,10 @@ class TestStatementAssertionConversion:
             source="encyclopedia",
         )
         assertion = stmt.to_assertion()
-        assert assertion.qualifiers == {"temporal": {"end": "1940"}, "modality": "typical"}
+        assert assertion.qualifiers == {
+            "temporal": {"end": "1940"},
+            "modality": "typical",
+        }
         assert assertion.subject == "Einstein"
         assert assertion.confidence == 0.9
 
