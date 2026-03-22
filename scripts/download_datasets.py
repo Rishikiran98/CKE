@@ -9,7 +9,6 @@ unavailable.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,11 +86,6 @@ def _try_hf_wiki2(out_path: Path, limit: int | None = None) -> bool:
     except ImportError:
         return False
 
-    dataset_names = [
-        ("wikimedia/wikipedia", None),  # fallback placeholder
-        ("2wikimultihop", None),
-        ("THUDM/LongBench", "2wikimqa_e"),
-    ]
     ds = None
     for name, cfg in [("2wikimultihop", None)]:
         try:
@@ -275,9 +269,8 @@ def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
 def download_wiki2(out_path: Path, limit: int = 500) -> None:
     if out_path.exists():
         existing = json.loads(out_path.read_text(encoding="utf-8"))
-        print(
-            f"[download] 2WikiMultiHopQA already exists: {len(existing)} items at {out_path}"
-        )
+        n = len(existing)
+        print(f"[download] 2WikiMultiHopQA already exists: {n} items at {out_path}")
         return
 
     if _try_hf_wiki2(out_path, limit=limit):

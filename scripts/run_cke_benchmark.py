@@ -569,26 +569,35 @@ def produce_ablation_table(
         lines.append("|--------|----|----|---------------|---------------------|")
         for c in rag_cfgs:
             m = metrics.get(c, {})
-            lines.append(
-                f"| {_CONFIG_LABELS[c]} | {m.get('em', 0):.4f} | {m.get('f1', 0):.4f} "
-                f"| {m.get('median_tokens', 0):.0f} | {m.get('median_latency_ms', 0):.1f} |"
-            )
+            em = m.get("em", 0)
+            f1 = m.get("f1", 0)
+            tok = m.get("median_tokens", 0)
+            lat = m.get("median_latency_ms", 0)
+            lbl = _CONFIG_LABELS[c]
+            lines.append(f"| {lbl} | {em:.4f} | {f1:.4f} " f"| {tok:.0f} | {lat:.1f} |")
         lines.append("")
 
         lines.append("### CKE-lite (N ablation)")
         lines.append("")
         lines.append(
-            "| Config | EM | F1 | Median tokens | Median latency (ms) | Avg statements |"
+            "| Config | EM | F1 "
+            "| Median tokens | Median latency (ms) "
+            "| Avg statements |"
         )
         lines.append(
-            "|--------|----|----|---------------|---------------------|----------------|"
+            "|--------|----|----|"
+            "---------------|---------------------"
+            "|----------------|"
         )
         for c in cke_cfgs:
             m = metrics.get(c, {})
+            em = m.get("em", 0)
+            f1 = m.get("f1", 0)
+            tok = m.get("median_tokens", 0)
+            lat = m.get("median_latency_ms", 0)
+            lbl = _CONFIG_LABELS[c]
             lines.append(
-                f"| {_CONFIG_LABELS[c]} | {m.get('em', 0):.4f} | {m.get('f1', 0):.4f} "
-                f"| {m.get('median_tokens', 0):.0f} | {m.get('median_latency_ms', 0):.1f} "
-                f"| n/a |"
+                f"| {lbl} | {em:.4f} | {f1:.4f} " f"| {tok:.0f} | {lat:.1f} " f"| n/a |"
             )
         lines.append("")
 
@@ -901,18 +910,24 @@ def main() -> None:
     print("=" * 60)
     rag = combined_metrics.get("rag_k10", {})
     cke = combined_metrics.get("cke_n12", {})
+    r_em = rag.get("em", 0)
+    r_f1 = rag.get("f1", 0)
+    r_tok = rag.get("median_tokens", 0)
+    c_em = cke.get("em", 0)
+    c_f1 = cke.get("f1", 0)
+    c_tok = cke.get("median_tokens", 0)
     print(
-        f"  RAG k=10  — EM: {rag.get('em', 0):.4f}  F1: {rag.get('f1', 0):.4f}  Median tokens: {rag.get('median_tokens', 0):.0f}"
+        f"  RAG k=10  — EM: {r_em:.4f}  " f"F1: {r_f1:.4f}  Median tokens: {r_tok:.0f}"
     )
     print(
-        f"  CKE N=12  — EM: {cke.get('em', 0):.4f}  F1: {cke.get('f1', 0):.4f}  Median tokens: {cke.get('median_tokens', 0):.0f}"
+        f"  CKE N=12  — EM: {c_em:.4f}  " f"F1: {c_f1:.4f}  Median tokens: {c_tok:.0f}"
     )
-    print(
-        f"  Token reduction: {summary['token_reduction_rag_k10_vs_cke_n12']:.1f}× (≥5× criterion: {summary['meets_5x_criterion']})"
-    )
-    print(
-        f"  EM delta (CKE vs RAG): {summary['em_delta_cke_vs_rag']:+.4f} (within ±0.02: {summary['meets_accuracy_criterion']})"
-    )
+    tok_red = summary["token_reduction_rag_k10_vs_cke_n12"]
+    meets_5x = summary["meets_5x_criterion"]
+    em_delta = summary["em_delta_cke_vs_rag"]
+    meets_acc = summary["meets_accuracy_criterion"]
+    print(f"  Token reduction: {tok_red:.1f}x " f"(>=5x criterion: {meets_5x})")
+    print(f"  EM delta (CKE vs RAG): {em_delta:+.4f} " f"(within +/-0.02: {meets_acc})")
     print("=" * 60)
     print(f"\nAll results written to: {output_dir.resolve()}")
 
