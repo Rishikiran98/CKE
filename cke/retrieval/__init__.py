@@ -10,17 +10,20 @@ from importlib import import_module
 
 __all__ = [
     "ChunkFactStore",
+    "DenseEvidenceRetriever",
     "EmbeddingModel",
     "EvidenceGraph",
     "EvidencePack",
     "EvidenceRetriever",
     "FaissIndex",
     "GraphRetriever",
+    "HybridEvidenceRetriever",
     "HybridRetrievalMerger",
     "PathFeatures",
     "PathRankingModel",
     "RAGBaseline",
     "RAGRetriever",
+    "RetrievalMode",
     "RetrievalRouter",
 ]
 
@@ -44,6 +47,15 @@ _LAZY_IMPORTS = {
     ),
     "PathFeatures": ("cke.retrieval.path_ranking", "PathFeatures"),
     "PathRankingModel": ("cke.retrieval.path_ranking", "PathRankingModel"),
+    "HybridEvidenceRetriever": (
+        "cke.retrieval.hybrid_evidence_retriever",
+        "HybridEvidenceRetriever",
+    ),
+    "DenseEvidenceRetriever": (
+        "cke.retrieval.dense_evidence_retriever",
+        "DenseEvidenceRetriever",
+    ),
+    "RetrievalMode": ("cke.retrieval.retrieval_mode", "RetrievalMode"),
 }
 
 

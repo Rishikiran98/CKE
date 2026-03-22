@@ -16,9 +16,14 @@ class AblationConfig:
     use_trust: bool = True
     use_conflict: bool = True
     use_rag: bool = False
+    retrieval_mode: str = "graph_only"
 
     @property
     def name(self) -> str:
+        if self.retrieval_mode == "hybrid":
+            return "hybrid"
+        if self.retrieval_mode == "dense_only":
+            return "dense_only"
         if self.use_rag and not self.use_graph:
             return "rag_only"
         if self.use_graph and not self.use_trust:
@@ -37,18 +42,25 @@ class AblationRunner:
 
     DEFAULT_VARIANTS = [
         AblationConfig(
-            use_graph=False, use_trust=False, use_conflict=False, use_rag=True
+            use_graph=False, use_trust=False, use_conflict=False, use_rag=True,
+            retrieval_mode="dense_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=False, use_conflict=False, use_rag=False
+            use_graph=True, use_trust=False, use_conflict=False, use_rag=False,
+            retrieval_mode="graph_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=True, use_conflict=False, use_rag=False
+            use_graph=True, use_trust=True, use_conflict=False, use_rag=False,
+            retrieval_mode="graph_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=True, use_conflict=True, use_rag=False
+            use_graph=True, use_trust=True, use_conflict=True, use_rag=False,
+            retrieval_mode="graph_only",
         ),
-        AblationConfig(use_graph=True, use_trust=True, use_conflict=True, use_rag=True),
+        AblationConfig(
+            use_graph=True, use_trust=True, use_conflict=True, use_rag=True,
+            retrieval_mode="hybrid",
+        ),
     ]
 
     def __init__(
