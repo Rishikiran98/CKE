@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import List, Optional
 
 from cke.models import Statement
 from cke.storage.adapter import StorageAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteStore(StorageAdapter):
@@ -40,8 +43,10 @@ class SQLiteStore(StorageAdapter):
     def __del__(self) -> None:  # pragma: no cover - defensive cleanup only
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception:  # noqa: B110
+            logger.debug(
+                "Failed to close SQLite connection during cleanup", exc_info=True
+            )
 
     def init_schema(self) -> None:
         self._conn.executescript(

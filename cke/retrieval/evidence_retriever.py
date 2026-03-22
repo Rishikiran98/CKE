@@ -9,7 +9,6 @@ from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 from cke.retrieval.chunk_fact_store import ChunkFactStore
 from cke.retrieval.ranking_config import RetrievalRankingConfig, load_ranking_config
 
-
 logger = logging.getLogger(__name__)
 
 

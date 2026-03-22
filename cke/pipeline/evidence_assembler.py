@@ -18,7 +18,6 @@ from cke.retrieval.path_scorer import CandidatePathScorer
 from cke.retrieval.subgraph_builder import LocalSubgraphBuilder
 from cke.router.query_plan import QueryPlan
 
-
 logger = logging.getLogger(__name__)
 
 
