@@ -69,7 +69,8 @@ class SQLiteStore(StorageAdapter):
                 confidence REAL NOT NULL DEFAULT 1.0,
                 source TEXT,
                 timestamp TEXT,
-                FOREIGN KEY(subject_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
+                FOREIGN KEY(subject_entity_id)
+                    REFERENCES entities(id) ON DELETE CASCADE,
                 FOREIGN KEY(object_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
                 UNIQUE(subject_entity_id, relation, object_entity_id)
             );
@@ -96,7 +97,8 @@ class SQLiteStore(StorageAdapter):
             """
             INSERT INTO entities (canonical_name, normalized_name)
             VALUES (?, ?)
-            ON CONFLICT(normalized_name) DO UPDATE SET canonical_name = excluded.canonical_name
+            ON CONFLICT(normalized_name) DO UPDATE SET
+                canonical_name = excluded.canonical_name
             """,
             (canonical_name, normalized_name),
         )
