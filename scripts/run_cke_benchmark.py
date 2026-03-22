@@ -32,7 +32,10 @@ from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine  # noqa: E402
 from cke.retrieval.graph_retriever import GraphRetriever  # noqa: E402
+from cke.retrieval.hybrid_retrieval import HybridRetrievalMerger  # noqa: E402
 from cke.retrieval.rag_baseline import RAGRetriever  # noqa: E402
+from cke.retrieval.retrieval_router import RetrievalRouter  # noqa: E402
+from cke.retrieval.retriever import GraphRetriever as SimpleGraphRetriever  # noqa: E402
 from cke.router.query_plan import QueryPlan  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -299,11 +302,18 @@ class CKELitePipeline:
 
 
 class HybridPipeline:
-    def __init__(self) -> None:
-        self._cke = CKELitePipeline()
-        self._rag = RAGPipeline()
+    """Graph-first retrieval with dense fallback via RetrievalRouter."""
+
+    def __init__(self, evidence_threshold: int = 2, dense_top_k: int = 3) -> None:
+        self._extractor = RuleExtractor()
+        self._seed_extractor = SeedEntityExtractor()
         self._qa = SimpleExtractiveQA()
         self._counter = TokenCounter()
+        self._evidence_threshold = evidence_threshold
+        self._dense_top_k = dense_top_k
+        self._merger = HybridRetrievalMerger()
+        self._total_fallbacks = 0
+        self._total_queries = 0
 
     def run_item(
         self,
@@ -313,20 +323,53 @@ class HybridPipeline:
         k_fallback: int = 3,
     ) -> dict[str, Any]:
         t0 = time.perf_counter()
+        self._total_queries += 1
 
-        cke_result = self._cke.run_item(question, docs, n)
-        graph_texts = cke_result["retrieved_statements"]
-        n_statements = cke_result["n_statements"]
+        # 1. Build graph and extract statements
+        engine = KnowledgeGraphEngine()
+        total_statements = 0
+        for doc in docs:
+            text = doc.get("text", "")
+            if not text:
+                continue
+            statements = self._extractor.extract(text)
+            for st in statements:
+                engine.add_statement(
+                    st.subject,
+                    st.relation,
+                    st.object,
+                    confidence=st.confidence,
+                )
+                total_statements += 1
 
-        mode = "graph_only"
-        dense_texts: list[str] = []
+        # 2. Build RetrievalRouter with graph + dense retrievers
+        graph_retriever = SimpleGraphRetriever(engine)
+        dense_retriever = RAGRetriever()
+        if docs:
+            try:
+                dense_retriever.build_index(docs)
+            except Exception:
+                pass
 
-        if n_statements < max(1, n // 2):
-            # Sparse graph → supplement with dense retrieval
-            rag_result = self._rag.run_item(question, docs, k_fallback)
-            dense_texts = rag_result["retrieved_texts"]
-            mode = "hybrid"
+        router = RetrievalRouter(
+            graph_retriever=graph_retriever,
+            dense_retriever=dense_retriever,
+            evidence_threshold=self._evidence_threshold,
+            dense_top_k=k_fallback,
+        )
 
+        # 3. Retrieve via router (graph-first, auto dense fallback)
+        evidence_pack = router.retrieve(question, max_depth=2)
+        graph_texts = [st.as_text() for st in evidence_pack.graph_statements[:n]]
+        dense_texts = evidence_pack.fallback_chunks
+        n_statements = len(evidence_pack.graph_statements)
+
+        fallback_used = len(dense_texts) > 0
+        if fallback_used:
+            self._total_fallbacks += 1
+        mode = "hybrid" if fallback_used else "graph_only"
+
+        # 4. Merge and answer
         all_texts = graph_texts + dense_texts
         context = "\n".join(all_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
@@ -340,6 +383,11 @@ class HybridPipeline:
             "n_statements": n_statements,
             "mode": mode,
             "n": n,
+            "fallback_rate": (
+                self._total_fallbacks / self._total_queries
+                if self._total_queries > 0
+                else 0.0
+            ),
         }
 
 
@@ -788,6 +836,89 @@ def _load_wiki2(path: Path, limit: int) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def run_retrieval_mode_ablation(
+    items: list[dict[str, Any]],
+    dataset_name: str,
+    limit: int,
+    verbose: bool = False,
+) -> dict[str, dict[str, float]]:
+    """Ablate across retrieval modes: graph_only, dense_only, hybrid."""
+    cke_pipeline = CKELitePipeline()
+    rag_pipeline = RAGPipeline()
+    hybrid_pipeline = HybridPipeline(evidence_threshold=2, dense_top_k=3)
+
+    effective = items[:limit]
+    total = len(effective)
+    print(f"\n[ablation] {dataset_name}: retrieval mode ablation on {total} items...")
+
+    mode_results: dict[str, list[dict[str, float]]] = {
+        "graph_only": [],
+        "dense_only": [],
+        "hybrid": [],
+    }
+
+    for idx, item in enumerate(effective):
+        question = item.get("question", "")
+        gold = item.get("answer", "")
+        docs = _docs_from_item(item)
+
+        if verbose or (idx % 50 == 0):
+            print(f"  [ablation {idx+1}/{total}] {question[:60]}...")
+
+        # graph_only
+        r = cke_pipeline.run_item(question, docs, n=12)
+        mode_results["graph_only"].append(
+            {
+                "em": EvaluationMetrics.exact_match(r["answer"], gold),
+                "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+                "tokens": r["prompt_tokens"],
+                "latency_ms": r["latency_ms"],
+            }
+        )
+
+        # dense_only
+        r = rag_pipeline.run_item(question, docs, k=5)
+        mode_results["dense_only"].append(
+            {
+                "em": EvaluationMetrics.exact_match(r["answer"], gold),
+                "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+                "tokens": r["prompt_tokens"],
+                "latency_ms": r["latency_ms"],
+            }
+        )
+
+        # hybrid
+        r = hybrid_pipeline.run_item(question, docs, n=12, k_fallback=3)
+        mode_results["hybrid"].append(
+            {
+                "em": EvaluationMetrics.exact_match(r["answer"], gold),
+                "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+                "tokens": r["prompt_tokens"],
+                "latency_ms": r["latency_ms"],
+                "mode": 1.0 if r["mode"] == "hybrid" else 0.0,
+            }
+        )
+
+    agg: dict[str, dict[str, float]] = {}
+    for mode_name, rows in mode_results.items():
+        n = max(len(rows), 1)
+        agg[mode_name] = {
+            "em": round(sum(r["em"] for r in rows) / n, 4),
+            "f1": round(sum(r["f1"] for r in rows) / n, 4),
+            "median_tokens": round(statistics.median([r["tokens"] for r in rows]), 1),
+            "median_latency_ms": round(
+                statistics.median([r["latency_ms"] for r in rows]), 2
+            ),
+            "n": n,
+        }
+        if mode_name == "hybrid":
+            agg[mode_name]["fallback_rate"] = round(
+                sum(r.get("mode", 0.0) for r in rows) / n, 4
+            )
+
+    return agg
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CKE benchmark: RAG vs CKE-lite")
     parser.add_argument("--limit", type=int, default=500, help="Items per dataset")
@@ -800,6 +931,11 @@ def main() -> None:
         help="Skip dataset download (use existing files)",
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--retrieval-ablation",
+        action="store_true",
+        help="Run retrieval mode ablation (graph_only vs dense_only vs hybrid)",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -929,6 +1065,41 @@ def main() -> None:
     print(f"  Token reduction: {tok_red:.1f}x " f"(>=5x criterion: {meets_5x})")
     print(f"  EM delta (CKE vs RAG): {em_delta:+.4f} " f"(within +/-0.02: {meets_acc})")
     print("=" * 60)
+
+    # --- Retrieval mode ablation ---
+    if args.retrieval_ablation:
+        retrieval_ablation: dict[str, dict[str, dict[str, float]]] = {}
+        for ds_name, items in datasets.items():
+            retrieval_ablation[ds_name] = run_retrieval_mode_ablation(
+                items,
+                ds_name,
+                limit=args.limit,
+                verbose=args.verbose,
+            )
+        (output_dir / "retrieval_ablation.json").write_text(
+            json.dumps(retrieval_ablation, indent=2),
+            encoding="utf-8",
+        )
+        print("[output] retrieval_ablation.json")
+
+        print("\n" + "=" * 60)
+        print("RETRIEVAL MODE ABLATION")
+        print("=" * 60)
+        for ds_name, modes in retrieval_ablation.items():
+            print(f"\n  {ds_name}:")
+            for mode_name, metrics in modes.items():
+                fb = (
+                    f"  fallback_rate={metrics['fallback_rate']:.2%}"
+                    if "fallback_rate" in metrics
+                    else ""
+                )
+                print(
+                    f"    {mode_name:12s} — EM: {metrics['em']:.4f}  "
+                    f"F1: {metrics['f1']:.4f}  "
+                    f"Median tokens: {metrics['median_tokens']:.0f}{fb}"
+                )
+        print("=" * 60)
+
     print(f"\nAll results written to: {output_dir.resolve()}")
 
 

@@ -42,11 +42,19 @@ class QueryOrchestrator:
         operator_selector: OperatorSelector | None = None,
         operator_executor: OperatorExecutor | None = None,
         entity_resolver: EntityResolver | None = None,
+        retrieval_mode: str = "hybrid",
+        dense_retriever=None,
+        evidence_threshold: int = 2,
     ):
         self.graph_engine = graph_engine
         self.router = router
-        self.retriever = retriever or (
-            DefaultEvidenceRetriever(graph_engine) if graph_engine is not None else None
+        self.retrieval_mode = retrieval_mode
+        self.retriever = self._build_retriever(
+            retriever=retriever,
+            retrieval_mode=retrieval_mode,
+            graph_engine=graph_engine,
+            dense_retriever=dense_retriever,
+            evidence_threshold=evidence_threshold,
         )
         self.assembler = assembler or (
             EvidenceAssembler() if self.retriever is not None else None
@@ -373,6 +381,44 @@ class QueryOrchestrator:
             debug_info=debug_info,
         )
 
+    @staticmethod
+    def _build_retriever(
+        retriever,
+        retrieval_mode: str,
+        graph_engine,
+        dense_retriever,
+        evidence_threshold: int,
+    ):
+        if retriever is not None:
+            return retriever
+
+        if (
+            retrieval_mode == "hybrid"
+            and graph_engine is not None
+            and dense_retriever is not None
+        ):
+            from cke.retrieval.hybrid_evidence_retriever import HybridEvidenceRetriever
+            from cke.retrieval.retrieval_router import RetrievalRouter
+            from cke.retrieval.retriever import GraphRetriever
+
+            graph_ret = GraphRetriever(graph_engine)
+            router = RetrievalRouter(
+                graph_ret,
+                dense_retriever,
+                evidence_threshold=evidence_threshold,
+            )
+            return HybridEvidenceRetriever(router)
+
+        if retrieval_mode == "dense_only" and dense_retriever is not None:
+            from cke.retrieval.dense_evidence_retriever import DenseEvidenceRetriever
+
+            return DenseEvidenceRetriever(dense_retriever)
+
+        if graph_engine is not None:
+            return DefaultEvidenceRetriever(graph_engine)
+
+        return None
+
     def _build_debug_info(
         self,
         context: ReasoningContext,
@@ -382,6 +428,7 @@ class QueryOrchestrator:
         trace_metadata = dict(context.trace_metadata)
         return {
             "trace_id": trace_id,
+            "retrieval_mode": self.retrieval_mode,
             "reasoning_route": getattr(query_plan, "reasoning_route", ""),
             "route_confidence": getattr(query_plan, "route_confidence", 0.0),
             "target_relations": list(trace_metadata.get("target_relations", [])),
