@@ -6,7 +6,6 @@ import json
 
 from cke.datasets.registry import load_dataset
 
-
 REQUIRED_KEYS = {
     "id",
     "question",
