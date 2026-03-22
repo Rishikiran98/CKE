@@ -44,11 +44,12 @@ class SQLiteStore(StorageAdapter):
         try:
             self.close()
         except Exception:  # noqa: B110
-            logger.debug("Failed to close SQLite connection during cleanup", exc_info=True)
+            logger.debug(
+                "Failed to close SQLite connection during cleanup", exc_info=True
+            )
 
     def init_schema(self) -> None:
-        self._conn.executescript(
-            """
+        self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS entities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 canonical_name TEXT NOT NULL,
@@ -84,8 +85,7 @@ class SQLiteStore(StorageAdapter):
                 ON statements(object_entity_id);
             CREATE INDEX IF NOT EXISTS idx_statements_relation
                 ON statements(relation);
-            """
-        )
+            """)
         self._conn.commit()
 
     def clear(self) -> None:
@@ -249,8 +249,7 @@ class SQLiteStore(StorageAdapter):
             return []
 
         adjacency: dict[int, list[tuple[int, Statement]]] = {}
-        rows = self._conn.execute(
-            """
+        rows = self._conn.execute("""
             SELECT
                 st.id,
                 st.subject_entity_id,
@@ -266,8 +265,7 @@ class SQLiteStore(StorageAdapter):
             JOIN entities AS subj ON subj.id = st.subject_entity_id
             JOIN entities AS obj ON obj.id = st.object_entity_id
             ORDER BY st.id ASC
-            """
-        ).fetchall()
+            """).fetchall()
         for row in rows:
             adjacency.setdefault(int(row["subject_entity_id"]), []).append(
                 (int(row["object_entity_id"]), self._statement_from_row(row))
@@ -294,8 +292,7 @@ class SQLiteStore(StorageAdapter):
         return paths
 
     def load_all_statements(self) -> List[Statement]:
-        rows = self._conn.execute(
-            """
+        rows = self._conn.execute("""
             SELECT
                 st.id,
                 subj.canonical_name AS subject_name,
@@ -309,16 +306,13 @@ class SQLiteStore(StorageAdapter):
             JOIN entities AS subj ON subj.id = st.subject_entity_id
             JOIN entities AS obj ON obj.id = st.object_entity_id
             ORDER BY st.id ASC
-            """
-        ).fetchall()
+            """).fetchall()
         return [self._statement_from_row(row) for row in rows]
 
     def all_entities(self) -> List[str]:
-        rows = self._conn.execute(
-            """
+        rows = self._conn.execute("""
             SELECT canonical_name
             FROM entities
             ORDER BY canonical_name ASC
-            """
-        ).fetchall()
+            """).fetchall()
         return [str(row["canonical_name"]) for row in rows]
