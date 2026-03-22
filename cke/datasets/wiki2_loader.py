@@ -26,20 +26,47 @@ def flatten_contexts(contexts: list[list[Any]]) -> list[str]:
 
 
 class WikiMultiHopDataset(DatasetLoader):
-    """Loads 2WikiMultiHopQA JSON into a simple QA+context structure."""
+    """Loads 2WikiMultiHopQA JSON into the normalized CKE format."""
+
+    def _context_to_documents(self, context: list[list[Any]]) -> list[dict[str, Any]]:
+        documents: list[dict[str, Any]] = []
+        for idx, ctx in enumerate(context or []):
+            if len(ctx) != 2:
+                continue
+            title, text_or_sentences = ctx
+            title_str = str(title)
+            if isinstance(text_or_sentences, list):
+                body = merge_sentences([str(s) for s in text_or_sentences])
+            else:
+                body = str(text_or_sentences)
+            text = normalize_whitespace(body)
+            documents.append(
+                {
+                    "doc_id": f"{title_str}_{idx}",
+                    "title": title_str,
+                    "text": text,
+                }
+            )
+        return documents
 
     def load(self, path: str) -> "WikiMultiHopDataset":
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
 
         self.items = []
-        for row in rows:
+        for idx, row in enumerate(rows):
+            item_id = str(row.get("_id", f"wiki2_{idx}"))
             self.items.append(
                 {
+                    "id": item_id,
                     "question": str(row.get("question", "")),
                     "answer": str(row.get("answer", "")),
-                    "contexts": flatten_contexts(row.get("context", [])),
+                    "documents": self._context_to_documents(row.get("context", [])),
                     "supporting_facts": row.get("supporting_facts", []),
+                    "metadata": {
+                        "type": row.get("type"),
+                        "evidences": row.get("evidences"),
+                    },
                 }
             )
         return self
