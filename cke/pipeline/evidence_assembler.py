@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
 from collections import defaultdict
+from typing import Any
 
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.pipeline.types import (
@@ -17,6 +21,28 @@ from cke.retrieval.ranking_config import RetrievalRankingConfig, load_ranking_co
 from cke.retrieval.path_scorer import CandidatePathScorer
 from cke.retrieval.subgraph_builder import LocalSubgraphBuilder
 from cke.router.query_plan import QueryPlan
+
+
+def _qualifier_hash(qualifiers: dict[str, Any]) -> str:
+    """Stable hash of qualifiers for dedup keying."""
+    if not qualifiers:
+        return ""
+    return hashlib.sha256(
+        json.dumps(qualifiers, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+
+
+def _extract_date_tokens(temporal: Any) -> list[str]:
+    """Extract date-like tokens from a temporal qualifier value."""
+    tokens: list[str] = []
+    if isinstance(temporal, dict):
+        for v in temporal.values():
+            if v:
+                tokens.append(str(v).lower())
+    elif isinstance(temporal, str):
+        tokens.append(temporal.lower())
+    return tokens
+
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +127,13 @@ class EvidenceAssembler:
         )
 
     def _dedupe_facts(self, facts: list[EvidenceFact]) -> list[EvidenceFact]:
-        deduped: dict[tuple[str, str, str], EvidenceFact] = {}
+        deduped: dict[tuple[str, ...], EvidenceFact] = {}
         for fact in facts:
             key = (
                 AliasRegistry.normalize(fact.statement.subject),
                 AliasRegistry.normalize(fact.statement.relation),
                 AliasRegistry.normalize(fact.statement.object),
+                _qualifier_hash(fact.statement.qualifiers),
             )
             current = deduped.get(key)
             if current is None or fact.retrieval_score > current.retrieval_score:
@@ -132,6 +159,7 @@ class EvidenceAssembler:
                 target_entities=target_entities,
                 query_type=query_type,
                 resolved_entities=resolved_entities,
+                query=query,
             )
             fact.metadata.update(metadata)
             fact.statement.retrieval_score = score
@@ -155,6 +183,25 @@ class EvidenceAssembler:
 
         return selected
 
+    def _qualifier_relevance_score(self, fact: EvidenceFact, query: str) -> float:
+        """Score boost/penalty based on qualifier match with query context."""
+        qualifiers = fact.statement.qualifiers
+        if not qualifiers:
+            return 0.0
+        score = 0.0
+        temporal = qualifiers.get("temporal")
+        if temporal:
+            date_tokens = _extract_date_tokens(temporal)
+            lowered = query.lower()
+            if any(token in lowered for token in date_tokens):
+                score += 0.15
+        modality = qualifiers.get("modality")
+        if modality == "deprecated":
+            score -= 0.1
+        elif modality == "typical":
+            score += 0.05
+        return score
+
     def _fact_score(
         self,
         *,
@@ -163,6 +210,7 @@ class EvidenceAssembler:
         target_entities: set[str],
         query_type: str,
         resolved_entities: list[ResolvedEntity],
+        query: str = "",
     ) -> tuple[float, dict[str, float | str]]:
         relation = AliasRegistry.normalize(fact.statement.relation)
         fact_entities = {
@@ -205,6 +253,7 @@ class EvidenceAssembler:
                 weights.relation_target_bonus if relation_match else 0.0
             ),
             "operator_support": operator_bonus,
+            "qualifier_relevance": self._qualifier_relevance_score(fact, query),
         }
         score = sum(score_components.values())
         return score, {
