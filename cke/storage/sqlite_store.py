@@ -8,10 +8,10 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional
 
-logger = logging.getLogger(__name__)
-
 from cke.models import Statement
 from cke.storage.adapter import StorageAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class SQLiteStore(StorageAdapter):
