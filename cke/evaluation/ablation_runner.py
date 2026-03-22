@@ -42,23 +42,38 @@ class AblationRunner:
 
     DEFAULT_VARIANTS = [
         AblationConfig(
-            use_graph=False, use_trust=False, use_conflict=False, use_rag=True,
+            use_graph=False,
+            use_trust=False,
+            use_conflict=False,
+            use_rag=True,
             retrieval_mode="dense_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=False, use_conflict=False, use_rag=False,
+            use_graph=True,
+            use_trust=False,
+            use_conflict=False,
+            use_rag=False,
             retrieval_mode="graph_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=True, use_conflict=False, use_rag=False,
+            use_graph=True,
+            use_trust=True,
+            use_conflict=False,
+            use_rag=False,
             retrieval_mode="graph_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=True, use_conflict=True, use_rag=False,
+            use_graph=True,
+            use_trust=True,
+            use_conflict=True,
+            use_rag=False,
             retrieval_mode="graph_only",
         ),
         AblationConfig(
-            use_graph=True, use_trust=True, use_conflict=True, use_rag=True,
+            use_graph=True,
+            use_trust=True,
+            use_conflict=True,
+            use_rag=True,
             retrieval_mode="hybrid",
         ),
     ]

@@ -335,7 +335,10 @@ class HybridPipeline:
             statements = self._extractor.extract(text)
             for st in statements:
                 engine.add_statement(
-                    st.subject, st.relation, st.object, confidence=st.confidence,
+                    st.subject,
+                    st.relation,
+                    st.object,
+                    confidence=st.confidence,
                 )
                 total_statements += 1
 
@@ -864,31 +867,37 @@ def run_retrieval_mode_ablation(
 
         # graph_only
         r = cke_pipeline.run_item(question, docs, n=12)
-        mode_results["graph_only"].append({
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-            "tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-        })
+        mode_results["graph_only"].append(
+            {
+                "em": EvaluationMetrics.exact_match(r["answer"], gold),
+                "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+                "tokens": r["prompt_tokens"],
+                "latency_ms": r["latency_ms"],
+            }
+        )
 
         # dense_only
         r = rag_pipeline.run_item(question, docs, k=5)
-        mode_results["dense_only"].append({
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-            "tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-        })
+        mode_results["dense_only"].append(
+            {
+                "em": EvaluationMetrics.exact_match(r["answer"], gold),
+                "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+                "tokens": r["prompt_tokens"],
+                "latency_ms": r["latency_ms"],
+            }
+        )
 
         # hybrid
         r = hybrid_pipeline.run_item(question, docs, n=12, k_fallback=3)
-        mode_results["hybrid"].append({
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-            "tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "mode": 1.0 if r["mode"] == "hybrid" else 0.0,
-        })
+        mode_results["hybrid"].append(
+            {
+                "em": EvaluationMetrics.exact_match(r["answer"], gold),
+                "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+                "tokens": r["prompt_tokens"],
+                "latency_ms": r["latency_ms"],
+                "mode": 1.0 if r["mode"] == "hybrid" else 0.0,
+            }
+        )
 
     agg: dict[str, dict[str, float]] = {}
     for mode_name, rows in mode_results.items():
@@ -1062,10 +1071,14 @@ def main() -> None:
         retrieval_ablation: dict[str, dict[str, dict[str, float]]] = {}
         for ds_name, items in datasets.items():
             retrieval_ablation[ds_name] = run_retrieval_mode_ablation(
-                items, ds_name, limit=args.limit, verbose=args.verbose,
+                items,
+                ds_name,
+                limit=args.limit,
+                verbose=args.verbose,
             )
         (output_dir / "retrieval_ablation.json").write_text(
-            json.dumps(retrieval_ablation, indent=2), encoding="utf-8",
+            json.dumps(retrieval_ablation, indent=2),
+            encoding="utf-8",
         )
         print("[output] retrieval_ablation.json")
 
@@ -1075,7 +1088,11 @@ def main() -> None:
         for ds_name, modes in retrieval_ablation.items():
             print(f"\n  {ds_name}:")
             for mode_name, metrics in modes.items():
-                fb = f"  fallback_rate={metrics['fallback_rate']:.2%}" if "fallback_rate" in metrics else ""
+                fb = (
+                    f"  fallback_rate={metrics['fallback_rate']:.2%}"
+                    if "fallback_rate" in metrics
+                    else ""
+                )
                 print(
                     f"    {mode_name:12s} — EM: {metrics['em']:.4f}  "
                     f"F1: {metrics['f1']:.4f}  "

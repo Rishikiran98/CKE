@@ -47,7 +47,9 @@ class HybridEvidenceRetriever:
 
         # --- graph statements ---
         for idx, stmt in enumerate(evidence_pack.graph_statements):
-            score = self._score_statement(stmt, resolved_entities, relation_terms, query)
+            score = self._score_statement(
+                stmt, resolved_entities, relation_terms, query
+            )
             chunk_id = stmt.chunk_id or f"hybrid_graph::{idx}"
             chunk_text = stmt.as_text()
             source = stmt.source or "graph"

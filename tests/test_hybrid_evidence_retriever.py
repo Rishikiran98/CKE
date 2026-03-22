@@ -84,7 +84,9 @@ class TestDenseFallbackConversion:
 
         chunks, facts = adapter.retrieve("Where was Alice born?")
 
-        dense_facts = [f for f in facts if f.metadata.get("retriever") == "hybrid_dense"]
+        dense_facts = [
+            f for f in facts if f.metadata.get("retriever") == "hybrid_dense"
+        ]
         assert len(dense_facts) == 2
         assert all(f.metadata.get("synthetic") is True for f in dense_facts)
         assert all(f.statement.relation == "dense_fallback" for f in dense_facts)
