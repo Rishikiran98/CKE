@@ -78,10 +78,14 @@ class KnowledgeGraphEngine:
         # If a storage backend was provided, warm the in-memory graph.
         if self._storage is not None:
             for st in self._storage.load_all_statements():
+                subject_norm = self._normalize_entity(st.subject)
+                object_norm = self._normalize_entity(st.object)
+                self._entity_display.setdefault(subject_norm, st.subject)
+                self._entity_display.setdefault(object_norm, st.object)
                 self._add_to_memory(
-                    st.subject,
+                    subject_norm,
                     st.relation,
-                    st.object,
+                    object_norm,
                     context=st.context,
                     confidence=st.confidence,
                     source=st.source,
@@ -226,10 +230,16 @@ class KnowledgeGraphEngine:
             valid_to=valid_to,
         )
         if self._storage is not None:
+            subject_id = self._storage.upsert_entity(subject_display)
+            object_id = self._storage.upsert_entity(object_display)
+            if subject_display != subject:
+                self._storage.add_alias(subject, subject_id)
+            if object_display != object_:
+                self._storage.add_alias(object_, object_id)
             self._storage.upsert_statement(
-                subject,
+                subject_display,
                 relation,
-                object_,
+                object_display,
                 context=context,
                 confidence=confidence,
                 source=source,
