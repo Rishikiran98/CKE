@@ -73,7 +73,9 @@ def _try_hf_hotpotqa(out_path: Path, limit: int | None = None) -> bool:
         if limit and len(rows) >= limit:
             break
 
-    out_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[download] HotpotQA: {len(rows)} items → {out_path}")
     return True
 
@@ -107,8 +109,16 @@ def _try_hf_wiki2(out_path: Path, limit: int | None = None) -> bool:
     rows = []
     for item in ds:
         context = []
-        titles = item.get("context", {}).get("title", []) if isinstance(item.get("context"), dict) else []
-        sentences_list = item.get("context", {}).get("sentences", []) if isinstance(item.get("context"), dict) else []
+        titles = (
+            item.get("context", {}).get("title", [])
+            if isinstance(item.get("context"), dict)
+            else []
+        )
+        sentences_list = (
+            item.get("context", {}).get("sentences", [])
+            if isinstance(item.get("context"), dict)
+            else []
+        )
         if not titles and isinstance(item.get("context"), list):
             context = item["context"]
         else:
@@ -127,7 +137,9 @@ def _try_hf_wiki2(out_path: Path, limit: int | None = None) -> bool:
         if limit and len(rows) >= limit:
             break
 
-    out_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[download] 2WikiMultiHopQA: {len(rows)} items → {out_path}")
     return True
 
@@ -244,7 +256,9 @@ def _make_synthetic(n: int = 500) -> list[dict]:
 def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
     if out_path.exists():
         existing = json.loads(out_path.read_text(encoding="utf-8"))
-        print(f"[download] HotpotQA already exists: {len(existing)} items at {out_path}")
+        print(
+            f"[download] HotpotQA already exists: {len(existing)} items at {out_path}"
+        )
         return
 
     if _try_hf_hotpotqa(out_path, limit=limit):
@@ -252,14 +266,18 @@ def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
 
     print("[download] Falling back to synthetic HotpotQA dataset (200 items).")
     rows = _make_synthetic(500)
-    out_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[download] Synthetic HotpotQA: {len(rows)} items → {out_path}")
 
 
 def download_wiki2(out_path: Path, limit: int = 500) -> None:
     if out_path.exists():
         existing = json.loads(out_path.read_text(encoding="utf-8"))
-        print(f"[download] 2WikiMultiHopQA already exists: {len(existing)} items at {out_path}")
+        print(
+            f"[download] 2WikiMultiHopQA already exists: {len(existing)} items at {out_path}"
+        )
         return
 
     if _try_hf_wiki2(out_path, limit=limit):
@@ -269,11 +287,14 @@ def download_wiki2(out_path: Path, limit: int = 500) -> None:
     rows = _make_synthetic(500)
     # Shuffle slightly so it differs from hotpotqa synthetic
     import random
+
     random.seed(99)
     random.shuffle(rows)
     for i, row in enumerate(rows):
         row["_id"] = f"wiki2_synthetic_{i}"
-    out_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[download] Synthetic 2WikiMultiHopQA: {len(rows)} items → {out_path}")
 
 

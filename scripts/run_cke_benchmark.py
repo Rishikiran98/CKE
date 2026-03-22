@@ -35,7 +35,6 @@ from cke.retrieval.graph_retriever import GraphRetriever  # noqa: E402
 from cke.retrieval.rag_baseline import RAGRetriever  # noqa: E402
 from cke.router.query_plan import QueryPlan  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -177,15 +176,26 @@ class CKELitePipeline:
         self._counter = TokenCounter()
 
     @staticmethod
-    def _expand_seeds(
-        seeds: list[str], engine: KnowledgeGraphEngine
-    ) -> list[str]:
+    def _expand_seeds(seeds: list[str], engine: KnowledgeGraphEngine) -> list[str]:
         """Map question entities to actual graph entities via word-level matching.
 
         Requires all non-stopword seed tokens to appear in the entity, or an exact
         seed-as-prefix match. Falls back to 80% overlap for single-word seeds.
         """
-        _STOP = {"the", "a", "an", "of", "in", "is", "was", "are", "be", "by", "for", "with"}
+        _STOP = {
+            "the",
+            "a",
+            "an",
+            "of",
+            "in",
+            "is",
+            "was",
+            "are",
+            "be",
+            "by",
+            "for",
+            "with",
+        }
         all_entities = engine.all_entities()
         if not all_entities:
             return seeds
@@ -234,7 +244,9 @@ class CKELitePipeline:
             statements = self._extractor.extract(text)
             for st in statements:
                 engine.add_statement(
-                    st.subject, st.relation, st.object,
+                    st.subject,
+                    st.relation,
+                    st.object,
                     confidence=st.confidence,
                 )
                 total_statements += 1
@@ -448,7 +460,9 @@ CONFIGS = ["rag_k5", "rag_k10", "cke_n8", "cke_n12", "cke_n20", "hybrid_n12"]
 
 def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     """Compute mean EM, mean F1, median tokens, median latency per config."""
-    agg: dict[str, dict[str, list[float]]] = {c: {"em": [], "f1": [], "tokens": [], "latency_ms": []} for c in CONFIGS}
+    agg: dict[str, dict[str, list[float]]] = {
+        c: {"em": [], "f1": [], "tokens": [], "latency_ms": []} for c in CONFIGS
+    }
 
     for row in rows:
         for cfg in CONFIGS:
@@ -563,8 +577,12 @@ def produce_ablation_table(
 
         lines.append("### CKE-lite (N ablation)")
         lines.append("")
-        lines.append("| Config | EM | F1 | Median tokens | Median latency (ms) | Avg statements |")
-        lines.append("|--------|----|----|---------------|---------------------|----------------|")
+        lines.append(
+            "| Config | EM | F1 | Median tokens | Median latency (ms) | Avg statements |"
+        )
+        lines.append(
+            "|--------|----|----|---------------|---------------------|----------------|"
+        )
         for c in cke_cfgs:
             m = metrics.get(c, {})
             lines.append(
@@ -605,7 +623,9 @@ def produce_token_distribution_plot(
 
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.hist(rag_tokens, bins=40, alpha=0.6, color="steelblue", label="RAG k=10")
-        ax.hist(cke_tokens, bins=40, alpha=0.6, color="darkorange", label="CKE-lite N=12")
+        ax.hist(
+            cke_tokens, bins=40, alpha=0.6, color="darkorange", label="CKE-lite N=12"
+        )
         ax.set_xlabel("Prompt tokens (word count × 1.3)")
         ax.set_ylabel("Number of items")
         ax.set_title("Token Distribution: RAG k=10 vs CKE-lite N=12")
@@ -615,14 +635,18 @@ def produce_token_distribution_plot(
             color="steelblue",
             linestyle="--",
             linewidth=1.5,
-            label=f"RAG median={statistics.median(rag_tokens):.0f}" if rag_tokens else "",
+            label=(
+                f"RAG median={statistics.median(rag_tokens):.0f}" if rag_tokens else ""
+            ),
         )
         ax.axvline(
             statistics.median(cke_tokens) if cke_tokens else 0,
             color="darkorange",
             linestyle="--",
             linewidth=1.5,
-            label=f"CKE median={statistics.median(cke_tokens):.0f}" if cke_tokens else "",
+            label=(
+                f"CKE median={statistics.median(cke_tokens):.0f}" if cke_tokens else ""
+            ),
         )
         ax.legend()
         plt.tight_layout()
@@ -785,8 +809,12 @@ def main() -> None:
         dl_mod.download_hotpotqa(data_dir / "hotpotqa_dev.json", limit=args.limit)
         dl_mod.download_wiki2(data_dir / "wiki2_dev.json", limit=args.limit)
 
-    hotpot_path = Path(args.hotpot_path) if args.hotpot_path else data_dir / "hotpotqa_dev.json"
-    wiki2_path = Path(args.wiki2_path) if args.wiki2_path else data_dir / "wiki2_dev.json"
+    hotpot_path = (
+        Path(args.hotpot_path) if args.hotpot_path else data_dir / "hotpotqa_dev.json"
+    )
+    wiki2_path = (
+        Path(args.wiki2_path) if args.wiki2_path else data_dir / "wiki2_dev.json"
+    )
 
     # --- Load datasets ---
     datasets: dict[str, list[dict[str, Any]]] = {}
@@ -873,10 +901,18 @@ def main() -> None:
     print("=" * 60)
     rag = combined_metrics.get("rag_k10", {})
     cke = combined_metrics.get("cke_n12", {})
-    print(f"  RAG k=10  — EM: {rag.get('em', 0):.4f}  F1: {rag.get('f1', 0):.4f}  Median tokens: {rag.get('median_tokens', 0):.0f}")
-    print(f"  CKE N=12  — EM: {cke.get('em', 0):.4f}  F1: {cke.get('f1', 0):.4f}  Median tokens: {cke.get('median_tokens', 0):.0f}")
-    print(f"  Token reduction: {summary['token_reduction_rag_k10_vs_cke_n12']:.1f}× (≥5× criterion: {summary['meets_5x_criterion']})")
-    print(f"  EM delta (CKE vs RAG): {summary['em_delta_cke_vs_rag']:+.4f} (within ±0.02: {summary['meets_accuracy_criterion']})")
+    print(
+        f"  RAG k=10  — EM: {rag.get('em', 0):.4f}  F1: {rag.get('f1', 0):.4f}  Median tokens: {rag.get('median_tokens', 0):.0f}"
+    )
+    print(
+        f"  CKE N=12  — EM: {cke.get('em', 0):.4f}  F1: {cke.get('f1', 0):.4f}  Median tokens: {cke.get('median_tokens', 0):.0f}"
+    )
+    print(
+        f"  Token reduction: {summary['token_reduction_rag_k10_vs_cke_n12']:.1f}× (≥5× criterion: {summary['meets_5x_criterion']})"
+    )
+    print(
+        f"  EM delta (CKE vs RAG): {summary['em_delta_cke_vs_rag']:+.4f} (within ±0.02: {summary['meets_accuracy_criterion']})"
+    )
     print("=" * 60)
     print(f"\nAll results written to: {output_dir.resolve()}")
 
