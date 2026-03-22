@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from cke.models import Statement
 from cke.pipeline.types import ResolvedEntity
 from cke.retrieval.hybrid_retrieval import EvidencePack

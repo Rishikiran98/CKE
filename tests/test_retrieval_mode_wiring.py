@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
-from cke.models import Statement
 from cke.pipeline.query_orchestrator import QueryOrchestrator
 from cke.retrieval.default_evidence_retriever import DefaultEvidenceRetriever
 from cke.retrieval.dense_evidence_retriever import DenseEvidenceRetriever

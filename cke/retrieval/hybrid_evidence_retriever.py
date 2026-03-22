@@ -16,9 +16,11 @@ logger = logging.getLogger(__name__)
 class HybridEvidenceRetriever:
     """Bridge between RetrievalRouter (EvidencePack) and the orchestrator interface.
 
-    The orchestrator expects ``retrieve(query, resolved_entities, target_relations, top_k)``
-    returning ``tuple[list[RetrievedChunk], list[EvidenceFact]]``.  RetrievalRouter returns
-    an ``EvidencePack`` with ``graph_statements`` and ``fallback_chunks``.  This adapter
+    The orchestrator expects ``retrieve(query, resolved_entities,
+    target_relations, top_k)`` returning
+    ``tuple[list[RetrievedChunk], list[EvidenceFact]]``.
+    RetrievalRouter returns an ``EvidencePack`` with
+    ``graph_statements`` and ``fallback_chunks``.  This adapter
     converts between the two and applies entity/relation scoring for ranking.
     """
 
