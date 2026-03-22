@@ -94,3 +94,60 @@ def test_locomo_loader(tmp_path):
     assert item["documents"][0]["doc_id"] == "c1_turn_0"
     assert item["documents"][0]["title"] == "conversation"
     assert item["metadata"]["turns"][1]["speaker"] == "assistant"
+
+
+def test_wiki2_loader(tmp_path):
+    data = [
+        {
+            "_id": "w1",
+            "question": "When were both films released?",
+            "answer": "2005",
+            "context": [
+                ["Film A", ["Film A was released ", "in 2005. "]],
+                ["Film B", ["Film B came out in 2005."]],
+            ],
+            "supporting_facts": [["Film A", 1], ["Film B", 0]],
+            "type": "comparison",
+            "evidences": [["Film A", "Film B"]],
+        }
+    ]
+    path = tmp_path / "wiki2.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    dataset = load_dataset("wiki2", str(path))
+    assert len(dataset) == 1
+
+    item = dataset.get_item(0)
+    _assert_normalized_item(item)
+    assert item["id"] == "w1"
+    assert item["question"] == "When were both films released?"
+    assert item["answer"] == "2005"
+    assert len(item["documents"]) == 2
+    assert item["documents"][0]["doc_id"] == "Film A_0"
+    assert item["documents"][0]["title"] == "Film A"
+    assert "Film A was released" in item["documents"][0]["text"]
+    assert item["documents"][1]["doc_id"] == "Film B_1"
+    assert item["supporting_facts"] == [["Film A", 1], ["Film B", 0]]
+    assert item["metadata"]["type"] == "comparison"
+
+
+def test_wiki2_loader_via_alias(tmp_path):
+    data = [
+        {
+            "_id": "w2",
+            "question": "Q?",
+            "answer": "A",
+            "context": [["Title", "Plain text body"]],
+            "supporting_facts": [],
+        }
+    ]
+    path = tmp_path / "wiki2.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    dataset = load_dataset("2wikimultihopqa", str(path))
+    assert len(dataset) == 1
+
+    item = dataset.get_item(0)
+    _assert_normalized_item(item)
+    assert item["id"] == "w2"
+    assert item["documents"][0]["text"] == "Plain text body"
