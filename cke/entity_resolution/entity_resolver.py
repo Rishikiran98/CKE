@@ -34,7 +34,7 @@ except Exception:  # pragma: no cover
     np = None
 
 try:
-    from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+    from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]  # noqa: E501
 except Exception:  # pragma: no cover
     SentenceTransformer = None
 
@@ -220,7 +220,8 @@ class EntityResolver:
         query: str,
         candidate_entities: Iterable[str] | None = None,
     ) -> list[str]:
-        """Detect entity mentions in *query* using candidates + registry + NER heuristics."""
+        """Detect entity mentions in *query* using candidates, registry,
+        and NER heuristics."""
         q = query or ""
         mentions: list[str] = []
 
