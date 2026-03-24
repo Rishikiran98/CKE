@@ -2,7 +2,6 @@ from cke.entity_resolution.entity_resolver import EntityResolver, ResolutionResu
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 
-
 # ------------------------------------------------------------------
 # Existing tests (preserved)
 # ------------------------------------------------------------------

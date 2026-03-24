@@ -316,9 +316,7 @@ class EntityResolver:
                 candidates.add(entity)
 
         # Stage 2: capitalised phrase detection.
-        for phrase in re.findall(
-            r"\b(?:[A-Z][\w-]*)(?:\s+[A-Z][\w-]*)*\b", query
-        ):
+        for phrase in re.findall(r"\b(?:[A-Z][\w-]*)(?:\s+[A-Z][\w-]*)*\b", query):
             phrase = self._clean_phrase(phrase)
             if self._keep_phrase(phrase, query):
                 candidates.add(phrase)
@@ -500,9 +498,7 @@ class EntityResolver:
             self._embedding_model = self._load_embedding_model()
 
         if self._embedding_model is not None and np is not None:
-            vector = self._embedding_model.encode(
-                [text], normalize_embeddings=True
-            )[0]
+            vector = self._embedding_model.encode([text], normalize_embeddings=True)[0]
             out = vector.tolist()
             self._embedding_cache[key] = out
             return out
@@ -521,8 +517,7 @@ class EntityResolver:
             return self.embedding_similarity_fn(left, right)
         lvec, rvec = self._embed(left), self._embed(right)
         denom = (
-            math.sqrt(sum(v * v for v in lvec))
-            * math.sqrt(sum(v * v for v in rvec))
+            math.sqrt(sum(v * v for v in lvec)) * math.sqrt(sum(v * v for v in rvec))
         ) or 1.0
         return sum(a * b for a, b in zip(lvec, rvec)) / denom
 
