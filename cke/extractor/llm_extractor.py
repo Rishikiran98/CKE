@@ -106,7 +106,8 @@ class LLMExtractor(BaseExtractor):
         prompt = (
             "Extract factual assertions as JSON array with keys: "
             "subject, relation, object, confidence, qualifiers, evidence. "
-            "Qualifiers capture context that scopes when/where/how the assertion holds. "
+            "Qualifiers capture context that scopes "
+            "when/where/how the assertion holds. "
             "Only include qualifiers when the text explicitly states them. "
             "Qualifier keys: "
             "temporal: {start?, end?, observed_at?} for date ranges; "

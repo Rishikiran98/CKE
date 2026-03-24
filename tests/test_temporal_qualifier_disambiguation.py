@@ -86,7 +86,7 @@ class TestTemporalConflictDisambiguation:
         )
 
         conflicts = engine.detect_conflicts([german, swiss, american])
-        # German overlaps with Swiss (1901-1940), Swiss overlaps with American (1940-1955)
+        # German overlaps Swiss; Swiss overlaps American
         # German does NOT overlap with American (German ends 1940, American starts 1940)
         conflict_pairs = {(c[0].object, c[1].object) for c in conflicts}
         assert ("German", "American") not in conflict_pairs
