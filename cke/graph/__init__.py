@@ -1,6 +1,6 @@
 """Graph helpers and memory interfaces for CKE."""
 
-from cke.graph.entity_resolver import EntityResolver
+from cke.entity_resolution.entity_resolver import EntityResolver
 
 __all__ = [
     "EntityResolver",

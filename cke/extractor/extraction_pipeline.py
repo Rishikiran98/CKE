@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from cke.extractor.coreference_resolver import CoreferenceResolver
-from cke.extractor.entity_linker import EntityResolver
+from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.extractor.paragraph_extractor import ParagraphExtractor
 from cke.extractor.rule_extractor import RuleExtractor
@@ -27,7 +27,7 @@ class ExtractionPipeline:
         self.coref = CoreferenceResolver()
         self.paragraph_extractor = ParagraphExtractor(window_size=window_size)
         self.extractor = extractor or LLMExtractor(fallback=RuleExtractor())
-        self.entity_resolver = EntityResolver(graph_engine)
+        self.entity_resolver = EntityResolver(graph_engine=graph_engine)
         self.relation_mapper = RelationMapper()
         self.confidence_model = ConfidenceModel()
         self.conflict_engine = conflict_engine or ConflictEngine()

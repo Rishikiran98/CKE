@@ -1,5 +1,6 @@
 """Tests for query routing and planning."""
 
+from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 from cke.router.entity_linker import EntityLinker
@@ -16,9 +17,34 @@ def test_entity_extraction_from_query_uses_graph_clues():
         ]
     )
 
+    resolver = EntityResolver(graph_engine=graph)
+    entities = resolver.extract_entities("Which database supports pubsub?")
+    assert "Redis" in entities
+
+
+def test_entity_extraction_via_deprecated_linker_shim():
+    """The deprecated EntityLinker shim still works."""
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Redis", "supports", "PubSub"),
+            Statement("Postgres", "supports", "SQL"),
+        ]
+    )
+
     linker = EntityLinker(graph)
     entities = linker.extract_entities("Which database supports pubsub?")
     assert "Redis" in entities
+
+
+def test_lowercase_entity_resolves_via_query_router():
+    """Lowercase 'redis' should be found when the graph has 'Redis'."""
+    graph = KnowledgeGraphEngine()
+    graph.add_statement("Redis", "supports", "PubSub")
+
+    router = QueryRouter(graph)
+    plan = router.route("Tell me about redis")
+    assert "Redis" in plan.seed_entities
 
 
 def test_intent_detection_multi_hop():

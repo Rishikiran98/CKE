@@ -8,7 +8,7 @@ from typing import Iterable
 from cke.graph.domain_classifier import DomainClassifier
 from cke.graph.domain_registry import DomainRegistry
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
-from cke.router.entity_linker import EntityLinker
+from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.router.intent_classifier import IntentClassifier
 from cke.router.query_decomposer import QueryDecomposer
 from cke.router.query_plan import QueryPlan
@@ -25,7 +25,7 @@ class QueryRouter:
         domain_registry: DomainRegistry | None = None,
     ):
         self.graph_engine = graph_engine
-        self.entity_linker = EntityLinker(graph_engine)
+        self.entity_resolver = EntityResolver(graph_engine=graph_engine)
         self.intent_classifier = IntentClassifier()
         self.domain_classifier = domain_classifier or DomainClassifier()
         self.domain_registry = domain_registry
@@ -37,7 +37,7 @@ class QueryRouter:
         query: str,
         candidate_entities: Iterable[str] | None = None,
     ):
-        linked = self.entity_linker.extract_entities(query)
+        linked = self.entity_resolver.extract_entities(query)
         if linked:
             return linked
 
