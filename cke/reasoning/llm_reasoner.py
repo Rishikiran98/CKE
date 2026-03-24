@@ -47,6 +47,8 @@ class LLMReasoner:
             api_key=os.getenv("CKE_LLM_API_KEY"),
         )
         self.fallback = fallback or PathReasoner()
+        self.last_evidence_ids: list[str] = []
+        self.last_trace: str = ""
 
     def answer(self, question: str, context: Iterable[Any]) -> str:
         """Answer a question grounded in graph statements."""
@@ -84,7 +86,11 @@ class LLMReasoner:
             "Prefer evidence that directly mentions entities/relations "
             "in the question.\n"
             "Return JSON only with schema: "
-            '{"answer": "...", "used_evidence": ["..."]}.\n\n'
+            '{"answer": "...", '
+            '"evidence_ids": ["E1", "E2"], '
+            '"trace": "brief reasoning chain explaining how evidence '
+            'supports the answer"}.\n'
+            "evidence_ids must reference the [E#] labels from the context.\n\n"
             f"QUESTION: {question}\n"
             "Graph context evidence:\n"
             f"{evidence_text}\n"
@@ -186,6 +192,20 @@ class LLMReasoner:
     def _parse_answer(self, payload: dict[str, Any]) -> str:
         content = payload["choices"][0]["message"]["content"]
         parsed = json.loads(content)
+
+        # Capture evidence_ids and trace from the grounded answer format.
+        evidence_ids = parsed.get("evidence_ids")
+        if isinstance(evidence_ids, list):
+            self.last_evidence_ids = [str(e) for e in evidence_ids]
+        else:
+            # Backward compat: fall back to used_evidence if present.
+            used = parsed.get("used_evidence")
+            self.last_evidence_ids = (
+                [str(e) for e in used] if isinstance(used, list) else []
+            )
+        trace = parsed.get("trace")
+        self.last_trace = str(trace) if trace else ""
+
         answer = parsed.get("answer")
         if isinstance(answer, str) and answer.strip():
             return self._normalize_answer(answer)

@@ -26,13 +26,16 @@ def test_llm_reasoner_parses_openai_style_response_payload():
                 "message": {
                     "content": (
                         '{"answer": "Redis uses RESP protocol.", '
-                        '"used_evidence": ["Redis uses RESP"]}'
+                        '"evidence_ids": ["E1"], '
+                        '"trace": "E1 states Redis uses RESP."}'
                     )
                 }
             }
         ]
     }
     assert reasoner._parse_answer(payload) == "Redis uses RESP protocol"
+    assert reasoner.last_evidence_ids == ["E1"]
+    assert reasoner.last_trace == "E1 states Redis uses RESP."
 
 
 def test_template_reasoner_behavior_unchanged():
@@ -70,6 +73,8 @@ def test_llm_reasoner_prompt_is_question_anchored():
     assert "Task: answer the QUESTION" in prompt
     assert "QUESTION: What protocol does Redis use?" in prompt
     assert "[E1] Redis uses RESP" in prompt
+    assert '"evidence_ids"' in prompt
+    assert '"trace"' in prompt
 
 
 def test_llm_reasoner_limits_and_ranks_context_for_question_relevance():
@@ -92,3 +97,23 @@ def test_llm_reasoner_normalizes_short_span_answers():
     assert reasoner._normalize_answer("The answer is Animorphs.") == "Animorphs"
     assert reasoner._normalize_answer('"Chief of Protocol"') == "Chief of Protocol"
     assert reasoner._normalize_answer("yes") == "yes"
+
+
+def test_llm_reasoner_falls_back_to_used_evidence_for_compat():
+    """Backward compat: used_evidence is accepted when evidence_ids absent."""
+    reasoner = LLMReasoner(config=LLMReasonerConfig(api_key="dummy"))
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '{"answer": "British", '
+                        '"used_evidence": ["Tony Scott nationality British"]}'
+                    )
+                }
+            }
+        ]
+    }
+    assert reasoner._parse_answer(payload) == "British"
+    assert reasoner.last_evidence_ids == ["Tony Scott nationality British"]
+    assert reasoner.last_trace == ""
