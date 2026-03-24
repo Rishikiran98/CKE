@@ -1,5 +1,5 @@
+from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.extractor.coreference_resolver import CoreferenceResolver
-from cke.extractor.entity_linker import EntityResolver
 from cke.extractor.extraction_pipeline import ExtractionPipeline
 from cke.extractor.paragraph_extractor import ParagraphExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -17,10 +17,10 @@ class StubExtractor:
         return []
 
 
-def test_entity_resolver_canonicalizes_variants():
+def test_entity_resolver_canonicalises_variants():
     graph = KnowledgeGraphEngine()
     graph.add_statement("Scott Derrickson", "directed", "Doctor Strange")
-    resolver = EntityResolver(graph)
+    resolver = EntityResolver(graph_engine=graph)
 
     assert resolver.resolve("scott derrickson") == "Scott Derrickson"
     assert resolver.resolve("Scott_Derrickson") == "Scott Derrickson"

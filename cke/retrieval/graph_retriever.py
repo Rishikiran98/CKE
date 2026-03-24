@@ -7,7 +7,7 @@ import re
 from heapq import heappop, heappush, nlargest
 from itertools import count
 
-from cke.graph.entity_resolver import EntityResolver
+from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 from cke.observability.system_monitor import SystemMonitor
