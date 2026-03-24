@@ -22,15 +22,60 @@ except Exception:  # pragma: no cover
     OpenAI = None
 
 
+_VALID_QUALIFIER_KEYS = {"temporal", "condition", "scope", "modality"}
+_TEMPORAL_KEYS = {"start", "end", "observed_at"}
+_CONDITION_KEYS = {"environment", "when", "unless"}
+_SCOPE_KEYS = {"version", "jurisdiction"}
+_MODALITY_VALUES = {"typical", "possible", "rare", "deprecated", "unknown"}
+
+
+def validate_qualifiers(qualifiers: dict[str, Any]) -> bool:
+    """Return True if *qualifiers* conforms to the document schema."""
+    if not qualifiers:
+        return True
+    if not isinstance(qualifiers, dict):
+        return False
+    for key, value in qualifiers.items():
+        if key not in _VALID_QUALIFIER_KEYS:
+            return False
+        if key == "temporal":
+            if not isinstance(value, dict):
+                return False
+            if not set(value.keys()).issubset(_TEMPORAL_KEYS):
+                return False
+        elif key == "condition":
+            if not isinstance(value, dict):
+                return False
+            if not set(value.keys()).issubset(_CONDITION_KEYS):
+                return False
+        elif key == "scope":
+            if not isinstance(value, dict):
+                return False
+            if not set(value.keys()).issubset(_SCOPE_KEYS):
+                return False
+        elif key == "modality":
+            if not isinstance(value, str) or value not in _MODALITY_VALUES:
+                return False
+    return True
+
+
 class AssertionPayload(BaseModel):
     """Structured assertion payload returned by the LLM."""
 
     subject: str
     relation: str
-    object: str
+    object: str | dict[str, Any]
     confidence: float = 1.0
+    extractor_confidence: float = 1.0
     qualifiers: dict[str, Any] = Field(default_factory=dict)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
+
+    @property
+    def object_value(self) -> str:
+        """Return the plain string value of object, handling typed dicts."""
+        if isinstance(self.object, dict):
+            return str(self.object.get("value", ""))
+        return str(self.object)
 
 
 @dataclass(slots=True)
@@ -104,20 +149,28 @@ class LLMExtractor(BaseExtractor):
             raise RuntimeError("LLM client is not configured.")
 
         prompt = (
-            "Extract factual assertions as JSON array with keys: "
-            "subject, relation, object, confidence, qualifiers, evidence. "
-            "Qualifiers capture context that scopes "
-            "when/where/how the assertion holds. "
-            "Only include qualifiers when the text explicitly states them. "
-            "Qualifier keys: "
-            "temporal: {start?, end?, observed_at?} for date ranges; "
-            "condition: {when?, unless?} for conditions; "
-            "scope: {jurisdiction?, version?, deployment?} for scope limits; "
-            "modality: one of typical|possible|rare|deprecated. "
-            "Each evidence item must include chunk_id, span_start, span_end, "
-            "text, extractor_confidence, source_weight. "
-            "Span offsets are character offsets over the provided text. "
-            "Return only JSON."
+            "Extract factual assertions from the text as a JSON array. "
+            "Each assertion object must follow this schema:\n"
+            '{"subject": "string", '
+            '"relation": "string", '
+            '"object": {"type": "entity|literal", "value": "string"}, '
+            '"qualifiers": {'
+            '"temporal": {"start": null, "end": null, "observed_at": null}, '
+            '"condition": {"environment": null, "when": null, "unless": null}, '
+            '"scope": {"version": null, "jurisdiction": null}, '
+            '"modality": "typical|possible|rare|deprecated|unknown"}, '
+            '"extractor_confidence": 0.0, '
+            '"confidence": 0.0, '
+            '"evidence": [{"chunk_id": "string", "span_start": 0, '
+            '"span_end": 0, "text": "string", '
+            '"extractor_confidence": 0.0, "source_weight": 0.0}]}\n'
+            "Rules:\n"
+            "- Only include qualifier keys when the text explicitly states them; "
+            "omit null-valued qualifier sub-keys.\n"
+            "- object.type is 'entity' for named entities, 'literal' for values.\n"
+            "- Span offsets are character offsets over the provided text.\n"
+            "- extractor_confidence (0-1) reflects how certain you are.\n"
+            "- Return only JSON, no explanation."
         )
         completion = self.client.chat.completions.create(
             model=self.config.model,
@@ -156,7 +209,9 @@ class LLMExtractor(BaseExtractor):
                 continue
             subject = self._clean_token(assertion.subject)
             relation = self._clean_relation(assertion.relation)
-            obj = self._clean_token(assertion.object)
+            obj = self._clean_token(assertion.object_value)
+            if not validate_qualifiers(assertion.qualifiers):
+                continue
             evidence = self._validated_evidence(assertion.evidence, source_text)
             if source_text is not None and not evidence:
                 continue
@@ -168,7 +223,12 @@ class LLMExtractor(BaseExtractor):
                         object=obj,
                         confidence=float(assertion.confidence),
                         qualifiers=dict(assertion.qualifiers),
-                        context={"evidence": evidence},
+                        context={
+                            "evidence": evidence,
+                            "extractor_confidence": float(
+                                assertion.extractor_confidence
+                            ),
+                        },
                     )
                 )
         return statements
