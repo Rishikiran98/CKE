@@ -29,6 +29,7 @@ class AssertionPayload(BaseModel):
     relation: str
     object: str
     confidence: float = 1.0
+    qualifiers: dict[str, Any] = Field(default_factory=dict)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -103,8 +104,16 @@ class LLMExtractor(BaseExtractor):
             raise RuntimeError("LLM client is not configured.")
 
         prompt = (
-            "Extract factual assertions as JSON array with keys "
-            "subject, relation, object, confidence, evidence. "
+            "Extract factual assertions as JSON array with keys: "
+            "subject, relation, object, confidence, qualifiers, evidence. "
+            "Qualifiers capture context that scopes "
+            "when/where/how the assertion holds. "
+            "Only include qualifiers when the text explicitly states them. "
+            "Qualifier keys: "
+            "temporal: {start?, end?, observed_at?} for date ranges; "
+            "condition: {when?, unless?} for conditions; "
+            "scope: {jurisdiction?, version?, deployment?} for scope limits; "
+            "modality: one of typical|possible|rare|deprecated. "
             "Each evidence item must include chunk_id, span_start, span_end, "
             "text, extractor_confidence, source_weight. "
             "Span offsets are character offsets over the provided text. "
@@ -158,6 +167,7 @@ class LLMExtractor(BaseExtractor):
                         relation=relation,
                         object=obj,
                         confidence=float(assertion.confidence),
+                        qualifiers=dict(assertion.qualifiers),
                         context={"evidence": evidence},
                     )
                 )

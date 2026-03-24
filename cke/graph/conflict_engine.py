@@ -11,13 +11,36 @@ class ConflictEngine:
     """Detect conflicting assertions and resolve by trust."""
 
     @staticmethod
+    def _temporal_ranges_overlap(a: dict, b: dict) -> bool:
+        """Check if two temporal range dicts have overlapping time spans."""
+        a_start = a.get("start")
+        a_end = a.get("end")
+        b_start = b.get("start")
+        b_end = b.get("end")
+        if a_end and b_start and str(a_end) <= str(b_start):
+            return False
+        if b_end and a_start and str(b_end) <= str(a_start):
+            return False
+        return True
+
+    @staticmethod
+    def _qualifier_values_overlap(key: str, val_a: object, val_b: object) -> bool:
+        """Check if two qualifier values for the same key overlap."""
+        if key == "temporal" and isinstance(val_a, dict) and isinstance(val_b, dict):
+            return ConflictEngine._temporal_ranges_overlap(val_a, val_b)
+        return val_a == val_b
+
+    @staticmethod
     def _qualifiers_overlap(a: dict, b: dict) -> bool:
         if not a or not b:
             return True
         shared = set(a).intersection(b)
         if not shared:
             return True
-        return any(a[key] == b[key] for key in shared)
+        return any(
+            ConflictEngine._qualifier_values_overlap(key, a[key], b[key])
+            for key in shared
+        )
 
     def assertions_conflict(
         self, assertion_a: Assertion, assertion_b: Assertion
