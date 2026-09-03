@@ -30,6 +30,7 @@ from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
 from cke.diagnostics import degradation_summary, environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
+from cke.evaluation.span_qa import SpanExtractiveQA  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine  # noqa: E402
 from cke.retrieval.graph_retriever import GraphRetriever  # noqa: E402
@@ -90,36 +91,6 @@ class SeedEntityExtractor:
         return unique[:4]
 
 
-class SimpleExtractiveQA:
-    """Extractive answer from retrieved context — same algorithm for both paths."""
-
-    _counter = TokenCounter()
-
-    def answer(self, question: str, context: str) -> str:
-        if not context.strip():
-            return ""
-        q_tokens = set(re.findall(r"\w+", question.lower()))
-        sentences = [s.strip() for s in re.split(r"[.!?\n]+", context) if s.strip()]
-        if not sentences:
-            return ""
-
-        best_sent = ""
-        best_score = -1.0
-        for sent in sentences:
-            s_tokens = set(re.findall(r"\w+", sent.lower()))
-            if not s_tokens:
-                continue
-            overlap = len(q_tokens & s_tokens)
-            score = overlap / (len(s_tokens) + 1e-9)
-            if score > best_score:
-                best_score = score
-                best_sent = sent
-
-        # Return first 50 words of best sentence as the predicted answer
-        words = best_sent.split()
-        return " ".join(words[:50])
-
-
 # ---------------------------------------------------------------------------
 # Pipeline helpers
 # ---------------------------------------------------------------------------
@@ -142,7 +113,7 @@ def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
 class RAGPipeline:
     def __init__(self, strict: bool = True) -> None:
         self._strict = strict
-        self._qa = SimpleExtractiveQA()
+        self._qa = SpanExtractiveQA()
         self._counter = TokenCounter()
 
     def run_item(
@@ -196,7 +167,7 @@ class CKELitePipeline:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
-        self._qa = SimpleExtractiveQA()
+        self._qa = SpanExtractiveQA()
         self._counter = TokenCounter()
 
     @staticmethod
@@ -337,7 +308,7 @@ class HybridPipeline:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
-        self._qa = SimpleExtractiveQA()
+        self._qa = SpanExtractiveQA()
         self._counter = TokenCounter()
         self._evidence_threshold = evidence_threshold
         self._dense_top_k = dense_top_k
@@ -625,7 +596,8 @@ def produce_comparison_table(
         lines.append(
             "Prompt token figures are estimates from TokenCounter "
             "(word count x 1.3), not tokenizer output. Answers on every arm "
-            "come from SimpleExtractiveQA, not a language model. Neither "
+            "come from SpanExtractiveQA, a lexical span baseline with no "
+            "learned components, not a language model. Neither "
             "column supports a comparison between retrieval strategies."
         )
         lines.append("")
@@ -834,9 +806,10 @@ def produce_summary(
       multiplied by 1.3 and not a tokenizer. A ratio between two estimates is
       not a measurement, and the ratio is largely fixed by the units each arm
       counts in (documents against triples).
-    * Answers on both arms come from :class:`SimpleExtractiveQA`, not a
-      language model, so the accuracy figures do not describe either
-      retrieval strategy.
+    * Answers on both arms come from :class:`SpanExtractiveQA`, a lexical
+      span baseline, not a language model. It can produce an exact match,
+      which its predecessor could not, but its accuracy is its own and
+      bounds what either retrieval strategy can show.
 
     The per-arm numbers stay, named so that no reader mistakes an estimate for
     a measurement. A verdict belongs with an evaluation harness that can
@@ -848,7 +821,9 @@ def produce_summary(
     return {
         "prompt_token_figures_are_estimates": True,
         "prompt_token_estimator": "word count x 1.3 (TokenCounter), not a tokenizer",
-        "answers_produced_by": "SimpleExtractiveQA (no language model)",
+        "answers_produced_by": (
+            "SpanExtractiveQA — lexical span baseline, no language model"
+        ),
         "rag_k10_median_estimated_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_estimated_tokens": cke.get("median_tokens", 0.0),
         "rag_k10_em": rag.get("em", 0.0),
@@ -1132,7 +1107,8 @@ def main() -> None:
         "(word count x 1.3), not tokenizer output."
     )
     print(
-        "  Answers on every arm come from SimpleExtractiveQA, " "not a language model."
+        "  Answers on every arm come from SpanExtractiveQA, a lexical span "
+        "baseline, not a language model."
     )
     print("  No success criterion is evaluated: these figures cannot support one.")
     print("=" * 60)
