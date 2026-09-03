@@ -62,9 +62,8 @@ documented at its definition rather than written inline.
 
 These are stated here rather than left for a reader to discover.
 
-- The package does not install. `pyproject.toml` has no `[project]` table, so
-  `pip install -e .` does not work and `cke.sdk.client` has no installable
-  package to talk to.
+- `cke.sdk.client` is a client for `cke.api.server`, which has no
+  authentication and does not use the main query pipeline (next bullet).
 - `python demo.py` produces no answer. The demo corpus does not match the
   patterns the rule-based extractor recognises.
 - `cke.api.server` has no authentication and does not use the main query
@@ -94,12 +93,27 @@ cke/tests/      a second, older pytest suite organised by sprint number
 demo.py         demonstration entry point (currently returns no answer)
 ```
 
-## Running the tests
+## Installation
 
-The test suite needs `pytest`, `networkx`, `numpy`, `pydantic`, `PyYAML`, and
-`rapidfuzz`. With those installed, from the repository root:
+From a clone, with Python 3.11 or later:
 
 ```bash
+pip install -e .
+```
+
+That installs the library and its dependencies from `requirements.txt`, and
+four console commands for the in-package entry points: `cke-eval`,
+`cke-experiment`, `cke-reasoning-eval` and `cke-retrieval-eval`. The drivers
+under `scripts/` and `demo.py` are run as files from the repository root.
+Components that read `configs/*.yaml` look for that directory relative to the
+working directory, so run them from the repository root too.
+
+## Running the tests
+
+The tests run against the installed package, so install it first, then:
+
+```bash
+pip install -e . pytest
 python -m pytest -q
 ```
 

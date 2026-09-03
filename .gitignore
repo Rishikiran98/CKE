@@ -7,3 +7,8 @@ flake8_output.txt
 black_diff.txt
 # Benchmark drivers default --output-dir to results/.
 results/
+
+# Packaging artefacts from pip install -e . and builds
+*.egg-info/
+build/
+dist/

@@ -1,3 +1,48 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cke"
+description = "Convergent Knowledge Engine: knowledge-graph extraction, path retrieval and reasoning for question answering"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# The version lives in cke/version.py and the dependency list in
+# requirements.txt; both are read from there so there is one place to change.
+dynamic = ["version", "dependencies"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+]
+
+[project.urls]
+Repository = "https://github.com/Rishikiran98/CKE"
+
+# Only the entry points that live inside the package. The drivers under
+# scripts/ and demo.py are files outside it and stay invocable as files.
+[project.scripts]
+cke-eval = "cke.evaluation.run_eval:main"
+cke-experiment = "cke.experiments.run_experiment:main"
+cke-reasoning-eval = "cke.experiments.reasoning_eval_pipeline:main"
+cke-retrieval-eval = "cke.experiments.retrieval_eval_pipeline:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "cke.version.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["cke*"]
+# The in-package test suite is not part of the library, and cke/logs is a
+# runtime output directory that has no business in a wheel.
+exclude = ["cke.tests*", "cke.logs*"]
+
+[tool.setuptools.package-data]
+# relations.yaml is read from beside its module at runtime.
+"cke.schema" = ["*.yaml"]
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
