@@ -80,6 +80,7 @@ def _cases(tmp: pathlib.Path):
     from cke.evaluation.ablation_runner import AblationRunner
     from cke.evaluation.token_counter import TokenCounter
     from cke.evaluation.llm_qa import LLMAnswerer
+    from cke.experiments.retrieval_eval_pipeline import DenseRetriever
     from cke.extractor.coreference_resolver import CoreferenceResolver
     from cke.extractor.llm_extractor import LLMExtractor
     from cke.graph.graph_store import GraphStore
@@ -103,6 +104,7 @@ def _cases(tmp: pathlib.Path):
         ("EmbeddingModel", lambda s: EmbeddingModel(strict=s), None),
         ("FaissIndex", lambda s: FaissIndex(strict=s), None),
         ("RAGRetriever", lambda s: RAGRetriever(strict=s), None),
+        ("DenseRetriever", lambda s: DenseRetriever(strict=s), None),
         ("LLMExtractor", lambda s: LLMExtractor(strict=s), None),
         ("LLMReasoner", lambda s: LLMReasoner(strict=s), None),
         ("EntityResolver", lambda s: EntityResolver(strict=s), None),

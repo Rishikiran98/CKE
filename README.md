@@ -76,8 +76,10 @@ These are stated here rather than left for a reader to discover.
   under a named encoding, and the benchmark refuses to run without it, but
   confidence values are in places substituted constants rather than scores, and
   no language model answers on either arm.
-- `cke/experiments/retrieval_eval_pipeline.py` cannot be imported at all: it
-  hard-imports `faiss`, `pandas` and `sentence_transformers`.
+- `cke/experiments/retrieval_eval_pipeline.py` measures Recall@k by matching
+  retrieved MS MARCO titles against HotpotQA and LoCoMo relevance hints. That
+  is a title-matching proxy, not a judged relevance set, and it needs the MS
+  MARCO full-document TSV, HotpotQA and LoCoMo files to run.
 - There are two test directories, `tests/` and `cke/tests/`.
 
 ## Repository layout
