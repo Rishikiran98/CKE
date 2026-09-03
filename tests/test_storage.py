@@ -107,3 +107,4 @@ def test_demo_supports_db_path_end_to_end(tmp_path: Path):
     # alone was satisfied by "I don't have enough graph context".
     assert "Answer: Turkey" in result.stdout.splitlines()
     assert "Rule applied located_in_transitivity" in result.stdout
+    assert "No component degraded during this run." in result.stdout

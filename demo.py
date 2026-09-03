@@ -7,7 +7,9 @@ graph retrieval around the entity the question names, and path reasoning
 across two hops with a transitivity rule. Every component is constructed
 with ``strict=True``: if the embedding model cannot be loaded, the demo stops
 and says so rather than answering on a hashed stand-in. The environment
-report printed first says what loaded.
+report printed first says which optional dependencies are present; the
+closing lines say which models actually loaded and whether anything
+degraded, because neither is known until the components have been built.
 
 What it does not show
 ---------------------
@@ -26,7 +28,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from cke.diagnostics import environment_report
+from cke.diagnostics import degradation_summary, environment_report
 from cke.extractor.rule_extractor import RuleExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.reasoning.path_reasoner import PathReasoner
@@ -81,6 +83,13 @@ def main() -> None:
     print("\nReasoning:")
     print(reasoner.format_reasoning_path(context))
     print(f"\nAnswer: {answer}")
+
+    # What ran, as opposed to what was available: the report at the top is
+    # taken before any component exists, so it cannot say this.
+    print("\nModels loaded:")
+    for model in environment_report().loaded_models:
+        print(f"  {model.component}: {model.loaded}")
+    print(degradation_summary())
 
 
 if __name__ == "__main__":

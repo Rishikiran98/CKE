@@ -21,7 +21,10 @@ def test_demo_cli_runs_strict_and_answers(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["demo.py"])
     demo.main()
     out = capsys.readouterr().out
-    assert "Degraded components: none" in out
+    # The closing lines, not the opening report: that one is taken before
+    # any component exists and says "Models loaded: none yet" on every run.
+    assert "EmbeddingModel: sentence-transformers/all-MiniLM-L6-v2" in out
+    assert "No component degraded during this run." in out
     assert "Rule applied located_in_transitivity" in out
     assert "Answer: Turkey" in out.splitlines()
 
