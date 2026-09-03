@@ -172,6 +172,10 @@ class _Candidate:
 class SpanExtractiveQA:
     """Answer a question with a short span drawn from the context."""
 
+    #: How the answers were produced, for printing beside a figure. The LLM
+    #: answerer exposes the same property; the benchmark prints whichever ran.
+    description = "SpanExtractiveQA — lexical span baseline, no language model"
+
     def answer(self, question: str, context: str) -> str:
         if not context.strip() or not question.strip():
             return ""

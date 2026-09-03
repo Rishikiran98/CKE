@@ -30,6 +30,7 @@ from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
 from cke.diagnostics import degradation_summary, environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
+from cke.evaluation.llm_qa import LLMAnswerer  # noqa: E402
 from cke.evaluation.span_qa import SpanExtractiveQA  # noqa: E402
 from cke.evaluation.token_counter import TokenCounter  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
@@ -90,9 +91,11 @@ def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
 
 
 class RAGPipeline:
-    def __init__(self, *, token_counter: TokenCounter, strict: bool = True) -> None:
+    def __init__(
+        self, *, token_counter: TokenCounter, answerer, strict: bool = True
+    ) -> None:
         self._strict = strict
-        self._qa = SpanExtractiveQA()
+        self._qa = answerer
         self._counter = token_counter
 
     def run_item(
@@ -142,11 +145,13 @@ class RAGPipeline:
 
 
 class CKELitePipeline:
-    def __init__(self, *, token_counter: TokenCounter, strict: bool = True) -> None:
+    def __init__(
+        self, *, token_counter: TokenCounter, answerer, strict: bool = True
+    ) -> None:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
-        self._qa = SpanExtractiveQA()
+        self._qa = answerer
         self._counter = token_counter
 
     def run_item(
@@ -232,13 +237,14 @@ class HybridPipeline:
         self,
         *,
         token_counter: TokenCounter,
+        answerer,
         dense_top_k: int = 3,
         strict: bool = True,
     ) -> None:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
-        self._qa = SpanExtractiveQA()
+        self._qa = answerer
         self._counter = token_counter
         self._dense_top_k = dense_top_k
         self._merger = HybridRetrievalMerger()
@@ -336,6 +342,7 @@ def run_dataset(
     dataset_name: str,
     limit: int,
     token_counter: TokenCounter,
+    answerer,
     verbose: bool = False,
     strict: bool = True,
 ) -> list[dict[str, Any]]:
@@ -345,9 +352,15 @@ def run_dataset(
     differ between arms because of how it was counted.
     """
 
-    rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
-    cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
-    hybrid_pipeline = HybridPipeline(token_counter=token_counter, strict=strict)
+    rag_pipeline = RAGPipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
+    cke_pipeline = CKELitePipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
+    hybrid_pipeline = HybridPipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
     results: list[dict[str, Any]] = []
 
     effective = items[:limit]
@@ -495,6 +508,7 @@ def produce_comparison_table(
     per_dataset: dict[str, dict[str, dict[str, float]]],
     combined: dict[str, dict[str, float]],
     token_counter: TokenCounter,
+    answerer,
 ) -> str:
     """Generate a markdown comparison table."""
     lines: list[str] = ["# RAG vs CKE-lite Comparison Table", ""]
@@ -534,9 +548,7 @@ def produce_comparison_table(
         lines.append(
             f"Prompt tokens counted by {token_counter.description}. A count is "
             f"only comparable to another count made with the same encoding. "
-            f"Answers on every arm come from SpanExtractiveQA, a lexical span "
-            f"baseline with no learned components, not a language model, so "
-            f"the accuracy columns do not describe either retrieval strategy."
+            f"Answers on every arm come from {answerer.description}."
         )
         lines.append("")
 
@@ -731,6 +743,7 @@ def produce_failure_analysis(
 def produce_summary(
     combined: dict[str, dict[str, float]],
     token_counter: TokenCounter,
+    answerer,
 ) -> dict[str, Any]:
     """Produce the raw per-arm figures, with no verdict attached.
 
@@ -758,8 +771,15 @@ def produce_summary(
         "prompt_token_figures_are_estimates": token_counter.is_estimate,
         "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
-        "answers_produced_by": (
-            "SpanExtractiveQA — lexical span baseline, no language model"
+        "answers_produced_by": answerer.description,
+        "answer_truncation": (
+            {
+                "calls": answerer.truncation.calls,
+                "truncated": answerer.truncation.truncated,
+                "rate": round(answerer.truncation.rate, 4),
+            }
+            if hasattr(answerer, "truncation")
+            else None
         ),
         "rag_k10_em": rag.get("em", 0.0),
         "cke_n12_em": cke.get("em", 0.0),
@@ -796,14 +816,19 @@ def run_retrieval_mode_ablation(
     dataset_name: str,
     limit: int,
     token_counter: TokenCounter,
+    answerer,
     verbose: bool = False,
     strict: bool = True,
 ) -> dict[str, dict[str, float]]:
     """Ablate across retrieval modes: graph_only, dense_only, hybrid."""
-    cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
-    rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
+    cke_pipeline = CKELitePipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
+    rag_pipeline = RAGPipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
     hybrid_pipeline = HybridPipeline(
-        token_counter=token_counter, dense_top_k=3, strict=strict
+        token_counter=token_counter, answerer=answerer, dense_top_k=3, strict=strict
     )
 
     effective = items[:limit]
@@ -899,6 +924,32 @@ def main() -> None:
     )
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
+        "--answerer",
+        choices=("span", "llm"),
+        default="span",
+        help=(
+            "What reads the retrieved context. 'span' is the lexical baseline; "
+            "'llm' puts a language model in the loop, and under strict a run "
+            "with no reachable model refuses rather than falling back to span."
+        ),
+    )
+    parser.add_argument("--llm-backend", choices=("local", "api"), default="local")
+    parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="Model name for the LLM answerer (default: google/flan-t5-base locally)",
+    )
+    parser.add_argument(
+        "--llm-window",
+        type=int,
+        default=None,
+        help=(
+            "Longest prompt, in tokens, handed to a local model. Default is the "
+            "window the model reports for itself. Truncation is counted and "
+            "reported either way."
+        ),
+    )
+    parser.add_argument(
         "--retrieval-ablation",
         action="store_true",
         help="Run retrieval mode ablation (graph_only vs dense_only vs hybrid)",
@@ -908,6 +959,19 @@ def main() -> None:
     print(environment_report().render(), flush=True)
     strict = not args.allow_degraded
     token_counter = TokenCounter(strict=strict)
+    # One answerer for every arm. It is built here, strict, so a run with no
+    # model stops before its first item instead of quietly answering with
+    # the span baseline while being labelled 'llm'.
+    if args.answerer == "llm":
+        answerer = LLMAnswerer(
+            backend=args.llm_backend,
+            model=args.llm_model,
+            strict=strict,
+            max_input_tokens=args.llm_window,
+        )
+    else:
+        answerer = SpanExtractiveQA()
+    print(f"[answerer] {answerer.description}", flush=True)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -974,6 +1038,7 @@ def main() -> None:
             ds_name,
             limit=args.limit,
             token_counter=token_counter,
+            answerer=answerer,
             verbose=args.verbose,
             strict=strict,
         )
@@ -991,7 +1056,7 @@ def main() -> None:
 
     # --- Comparison table ---
     comparison_md = produce_comparison_table(
-        per_dataset_metrics, combined_metrics, token_counter
+        per_dataset_metrics, combined_metrics, token_counter, answerer
     )
     (output_dir / "comparison_table.md").write_text(comparison_md, encoding="utf-8")
     print("[output] comparison_table.md")
@@ -1024,7 +1089,7 @@ def main() -> None:
     print(f"[output] failure_analysis.json ({len(failure_samples)} samples)")
 
     # --- Summary ---
-    summary = produce_summary(combined_metrics, token_counter)
+    summary = produce_summary(combined_metrics, token_counter, answerer)
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
@@ -1049,10 +1114,7 @@ def main() -> None:
         f"  CKE N=12  — EM: {c_em:.4f}  " f"F1: {c_f1:.4f}  Median tokens: {c_tok:.0f}"
     )
     print(f"  Prompt tokens counted by {token_counter.description}.")
-    print(
-        "  Answers on every arm come from SpanExtractiveQA, a lexical span "
-        "baseline, not a language model."
-    )
+    print(f"  Answers on every arm come from {answerer.description}.")
     print("  No success criterion is evaluated: these figures cannot support one.")
     print("=" * 60)
 
@@ -1065,6 +1127,7 @@ def main() -> None:
                 ds_name,
                 limit=args.limit,
                 token_counter=token_counter,
+                answerer=answerer,
                 verbose=args.verbose,
                 strict=strict,
             )

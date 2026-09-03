@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from cke.evaluation.span_qa import SpanExtractiveQA
 from cke.evaluation.token_counter import TokenCounter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +41,10 @@ def test_a_pipeline_cannot_be_built_without_a_counter(name):
 def test_every_arm_counts_with_the_same_object():
     counter = TokenCounter(strict=True)
     built = [
-        getattr(bench, name)(token_counter=counter, strict=False) for name in PIPELINES
+        getattr(bench, name)(
+            token_counter=counter, answerer=SpanExtractiveQA(), strict=False
+        )
+        for name in PIPELINES
     ]
 
     assert all(pipeline._counter is counter for pipeline in built)
@@ -64,6 +68,7 @@ def test_the_summary_names_the_counter_that_produced_its_figures():
     summary = bench.produce_summary(
         {"rag_k10": {"median_tokens": 100.0}, "cke_n12": {"median_tokens": 10.0}},
         counter,
+        SpanExtractiveQA(),
     )
 
     assert summary["prompt_token_counter"] == counter.description
