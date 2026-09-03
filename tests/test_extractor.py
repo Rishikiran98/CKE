@@ -318,3 +318,96 @@ def test_rule_extractor_rejects_a_subject_that_is_all_predicate():
     )
 
     assert [s.subject for s in statements] == []
+
+
+def test_rule_extractor_reads_every_copula_not_just_the_literal_is_a():
+    """The pattern matched " is a " and nothing else.
+
+    "is an" and "was a" are the same construction, and 18.9% of the sentences
+    the extractor failed on contained a copula it could not read.
+    """
+    extractor = RuleExtractor()
+
+    found = {
+        (s.subject, s.relation, s.object)
+        for s in extractor.extract(
+            "Scott Derrickson is an American director. "
+            "Ed Wood was a filmmaker. "
+            "The Wachowskis are the directors."
+        )
+    }
+
+    assert ("Scott Derrickson", "is_a", "American director") in found
+    assert ("Ed Wood", "is_a", "filmmaker") in found
+    assert ("The Wachowskis", "is_a", "directors") in found
+
+
+def test_rule_extractor_names_a_relation_after_the_verb_it_captured():
+    """A frame covers an open set of verbs; a named pattern covers one.
+
+    Neither "directed" nor "produced" appears anywhere in the extractor.
+    """
+    extractor = RuleExtractor()
+
+    found = {
+        (s.subject, s.relation, s.object)
+        for s in extractor.extract(
+            "Ed Wood was directed by Tim Burton. "
+            "The album was produced by Rick Rubin."
+        )
+    }
+
+    assert ("Ed Wood", "directed_by", "Tim Burton") in found
+    assert ("The album", "produced_by", "Rick Rubin") in found
+
+
+def test_rule_extractor_reads_a_participle_with_a_preposition():
+    extractor = RuleExtractor()
+
+    found = {
+        (s.subject, s.relation, s.object)
+        for s in extractor.extract(
+            "The album was released in 1994. The theatre opened on 15 August."
+        )
+    }
+
+    assert ("The album", "released_in", "1994") in found
+    assert ("The theatre", "opened_on", "15 August") in found
+
+
+def test_the_participle_frame_subsumes_the_deleted_located_in_pattern():
+    """It carried its own pattern; the frame covers it with the copula optional."""
+    extractor = RuleExtractor()
+
+    found = {
+        (s.subject, s.relation, s.object)
+        for s in extractor.extract(
+            "Redis is located in memory. The mosque, located in Istanbul, is old."
+        )
+    }
+
+    assert ("Redis", "located_in", "memory") in found
+    assert ("The mosque", "located_in", "Istanbul") in found
+
+
+def test_rule_extractor_rejects_a_pronoun_subject():
+    """A pronoun names nothing without coreference, and one node called "He"
+    would collect the facts of every document in a corpus."""
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        "He is a director. It was released in 1994. They were founded by Ed."
+    )
+
+    assert statements == []
+
+
+def test_an_object_stops_where_an_appositive_closes():
+    """A comma before a finite verb ends the phrase; a plain comma does not."""
+    extractor = RuleExtractor()
+
+    closes = extractor.extract("The mosque, located in Istanbul, is historic.")
+    keeps = extractor.extract("The office is located in Laleli, Fatih, Istanbul.")
+
+    assert [s.object for s in closes] == ["Istanbul"]
+    assert [s.object for s in keeps] == ["Laleli, Fatih, Istanbul"]
