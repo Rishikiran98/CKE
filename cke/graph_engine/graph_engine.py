@@ -88,12 +88,19 @@ class KnowledgeGraphEngine(DegradationMixin):
             self._adjacency_index: dict[str, list[tuple[str, dict[str, Any]]]] = (
                 defaultdict(list)
             )
+            # Edges indexed by their object, so a traversal can reach an edge
+            # from either endpoint. Without this, BFS could only walk an edge
+            # forward and dead-ended at any node with no outgoing edges.
+            self._reverse_adjacency_index: dict[
+                str, list[tuple[str, dict[str, Any]]]
+            ] = defaultdict(list)
             self._relation_index: dict[str, list[tuple[str, str, dict[str, Any]]]] = (
                 defaultdict(list)
             )
         else:
             self.graph: Dict[str, list[dict[str, Any]]] = defaultdict(list)
             self._nodes: set[str] = set()
+            self._reverse_graph: dict[str, list[dict[str, Any]]] = defaultdict(list)
             self._relation_index: dict[str, list[tuple[str, dict[str, Any]]]] = (
                 defaultdict(list)
             )
@@ -184,11 +191,13 @@ class KnowledgeGraphEngine(DegradationMixin):
             self.graph.add_node(object_)
             self.graph.add_edge(subject, object_, **payload)
             self._adjacency_index[subject].append((object_, payload))
+            self._reverse_adjacency_index[object_].append((subject, payload))
             self._relation_index[relation].append((subject, object_, payload))
         else:
             self._nodes.update([subject, object_])
             item = {"object": object_, **payload}
             self.graph[subject].append(item)
+            self._reverse_graph[object_].append({"subject": subject, **payload})
             self._relation_index[relation].append((subject, item))
 
         shard_id = self._compute_shard(subject, payload)
@@ -347,6 +356,85 @@ class KnowledgeGraphEngine(DegradationMixin):
                 source=st.source,
                 timestamp=st.timestamp,
             )
+
+    def get_incoming(self, entity: str) -> List[Statement]:
+        """Return statements whose OBJECT is *entity*, direction preserved.
+
+        get_neighbors only returns outgoing edges, so a traversal starting at
+        an entity could never reach an edge pointing at it. The statements
+        returned here keep their real subject and object: an edge is reachable
+        from both endpoints, but it is never reported backwards.
+        """
+        normalized = self._normalize_entity(entity)
+
+        if self._backend is not None:
+            query_incoming = getattr(self._backend, "query_incoming", None)
+            if query_incoming is None:
+                self._degrade(
+                    f"the {type(self._backend).__name__} backend cannot look up "
+                    "incoming edges, so traversal from this entity can only "
+                    "follow edges forward and will reach less evidence than "
+                    "the graph contains"
+                )
+                return []
+            return query_incoming(normalized)
+
+        if self._use_nx:
+            incoming = self._reverse_adjacency_index.get(normalized, [])
+            return [
+                self._statement_from_payload(
+                    subject=self._display_entity(source),
+                    object_norm=normalized,
+                    edge_data=edge_data,
+                )
+                for source, edge_data in incoming
+            ]
+
+        return [
+            self._statement_from_payload(
+                subject=self._display_entity(item.get("subject", "")),
+                object_norm=normalized,
+                edge_data=item,
+            )
+            for item in self._reverse_graph.get(normalized, [])
+        ]
+
+    def get_incident(self, entity: str) -> List[Statement]:
+        """Return every statement touching *entity*, in either direction.
+
+        This is what a retrieval traversal wants: an edge between A and B is
+        evidence connecting them however it happens to be oriented.
+        """
+        seen: set[tuple] = set()
+        incident: List[Statement] = []
+        for statement in list(self.get_neighbors(entity)) + list(
+            self.get_incoming(entity)
+        ):
+            key = statement.key()
+            if key in seen:
+                continue
+            seen.add(key)
+            incident.append(statement)
+        return incident
+
+    def _statement_from_payload(
+        self, subject: str, object_norm: str, edge_data: dict[str, Any]
+    ) -> Statement:
+        """Build a Statement for an edge reached from its object side."""
+        return Statement(
+            subject=subject,
+            relation=edge_data.get("relation", _UNKNOWN_RELATION),
+            object=edge_data.get("object_display", self._display_entity(object_norm)),
+            confidence=float(edge_data.get("confidence", _UNKNOWN_CONFIDENCE)),
+            source=edge_data.get("source"),
+            timestamp=edge_data.get("timestamp"),
+            qualifiers=dict(edge_data.get("context", {}).get("qualifiers", {})),
+            context={
+                **dict(edge_data.get("context", {})),
+                "valid_from": edge_data.get("valid_from"),
+                "valid_to": edge_data.get("valid_to"),
+            },
+        )
 
     def get_neighbors(self, entity: str) -> List[Statement]:
         entity = self._normalize_entity(entity)

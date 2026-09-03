@@ -20,6 +20,11 @@ from cke.retrieval.path_ranking import (
 from cke.router.query_plan import QueryPlan
 
 
+#: Below this many selected statements, the diversity filter is not applied:
+#: a small evidence set should not be thinned further for redundancy.
+_DIVERSITY_FLOOR = 8
+
+
 class GraphRetriever:
     """Retrieve sparse evidence paths from the graph for a query plan."""
 
@@ -106,6 +111,31 @@ class GraphRetriever:
             "evidence_graph": evidence_graph.as_dict(),
         }
 
+    @staticmethod
+    def _other_endpoint(edge: Statement, node: str) -> str:
+        """Return the endpoint of *edge* that is not *node*.
+
+        Traversal follows an edge from either end, so the next node is whichever
+        endpoint we did not arrive from. The edge's own direction is untouched.
+        """
+        if edge.subject.strip().lower() == str(node).strip().lower():
+            return edge.object
+        return edge.subject
+
+    def _forward_edges(self, node: str, path: list[Statement]) -> list[Statement]:
+        """Incident edges at *node*, excluding the one just traversed.
+
+        Traversal follows edges in both directions, so at every non-root node
+        the edge we arrived on is also a candidate leading straight back. A
+        narrow beam would spend its whole width re-selecting it and never
+        expand a lower-scoring continuation.
+        """
+        incident = self.graph_engine.get_incident(node)
+        if not path:
+            return incident
+        arrived_on = path[-1].key()
+        return [edge for edge in incident if edge.key() != arrived_on]
+
     def _path_mode(
         self,
         seeds,
@@ -150,10 +180,18 @@ class GraphRetriever:
     ):
         scored = []
         expanded = 0
+        # An edge between two seeds is incident to both, so it arrives twice.
+        # Truncating before deduplication let one edge consume several budget
+        # slots and push out unique lower-ranked ones.
+        seen_edges: set = set()
         for seed in seeds:
-            neighbors = self.graph_engine.get_neighbors(seed)
+            neighbors = self.graph_engine.get_incident(seed)
             expanded += len(neighbors)
             for edge in neighbors:
+                key = edge.key()
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
                 scored.append(
                     (
                         [edge],
@@ -163,21 +201,20 @@ class GraphRetriever:
         if self.monitor:
             self.monitor.record_neighborhood_expansion(expanded)
         scored.sort(key=lambda item: item[1], reverse=True)
-        return scored[: max(1, min(max_results, 12))]
+        return scored[: max(1, max_results)]
 
     def _bridge_mode(self, seeds, max_depth, query_text, seed_entities, decomposition):
         if len(seeds) < 2:
             return []
         left_paths = self._paths_from_seed(seeds[0], max_depth=max_depth)
         right_paths = self._paths_from_seed(seeds[1], max_depth=max_depth)
-        right_by_node = {}
-        for path in right_paths:
-            right_by_node.setdefault(path[-1].object, []).append(path)
+        right_by_node: dict[str, list[list[Statement]]] = {}
+        for path, reached in right_paths:
+            right_by_node.setdefault(reached, []).append(path)
 
         candidates = []
         bridge_nodes_found = set()
-        for left_path in left_paths:
-            bridge_node = left_path[-1].object
+        for left_path, bridge_node in left_paths:
             for right_path in right_by_node.get(bridge_node, []):
                 bridge_nodes_found.add(bridge_node)
                 candidate = left_path + self._invert_path(right_path)
@@ -194,9 +231,19 @@ class GraphRetriever:
         candidates.sort(key=lambda item: item[1], reverse=True)
         return candidates
 
-    def _paths_from_seed(self, seed: str, max_depth: int) -> list[list[Statement]]:
+    def _paths_from_seed(
+        self, seed: str, max_depth: int
+    ) -> list[tuple[list[Statement], str]]:
+        """Walk out from *seed*, returning each path with the node it reached.
+
+        The reached node is returned explicitly because a path may end by
+        following an edge backwards: for ``X -> A`` walked from ``A``, the walk
+        reaches ``X`` while ``path[-1].object`` is still ``A``. Callers that
+        need the endpoint, such as bridge matching, must use this rather than
+        reading it off the last edge.
+        """
         queue = deque([(seed, [], 0)])
-        paths = []
+        paths: list[tuple[list[Statement], str]] = []
         visited = set()
         while queue:
             node, path, depth = queue.popleft()
@@ -206,10 +253,11 @@ class GraphRetriever:
             if marker in visited:
                 continue
             visited.add(marker)
-            for edge in self.graph_engine.get_neighbors(node):
+            for edge in self._forward_edges(node, path):
+                next_node = self._other_endpoint(edge, node)
                 next_path = path + [edge]
-                paths.append(next_path)
-                queue.append((edge.object, next_path, depth + 1))
+                paths.append((next_path, next_node))
+                queue.append((next_node, next_path, depth + 1))
         return paths
 
     def _invert_path(self, path):
@@ -280,11 +328,12 @@ class GraphRetriever:
                 continue
             visited_depth[node] = depth
             node_visits += 1
-            for edge in self.graph_engine.get_neighbors(node):
+            for edge in self._forward_edges(node, path):
                 next_path = path + [edge]
                 paths.append(next_path)
-                if depth + 1 <= max_depth and edge.object != node:
-                    queue.append((edge.object, next_path, depth + 1))
+                next_node = self._other_endpoint(edge, node)
+                if depth + 1 <= max_depth and next_node != node:
+                    queue.append((next_node, next_path, depth + 1))
         return paths
 
     def _beam_search(
@@ -299,11 +348,11 @@ class GraphRetriever:
                 if visited >= max_nodes:
                     break
                 visited += 1
-                for edge in self.graph_engine.get_neighbors(node):
+                for edge in self._forward_edges(node, path):
                     candidate = path + [edge]
                     expanded.append(
                         (
-                            edge.object,
+                            self._other_endpoint(edge, node),
                             candidate,
                             self._score_path(candidate, query_text, seed_entities),
                         )
@@ -340,12 +389,13 @@ class GraphRetriever:
             if depth >= max_depth:
                 continue
             expanded += 1
-            for edge in self.graph_engine.get_neighbors(node):
+            for edge in self._forward_edges(node, path):
                 candidate = path + [edge]
+                next_node = self._other_endpoint(edge, node)
                 g = self._score_path(candidate, query_text, seed_entities)
-                h = self._heuristic(edge.object, query_tokens, seed_tokens)
+                h = self._heuristic(next_node, query_tokens, seed_tokens)
                 f = g + h
-                heappush(frontier, (-f, next(tick), edge.object, candidate, depth + 1))
+                heappush(frontier, (-f, next(tick), next_node, candidate, depth + 1))
         return results
 
     def _heuristic(
@@ -414,8 +464,11 @@ class GraphRetriever:
         return 0.55 * score + 0.45 * rank_score
 
     def _select_evidence(self, scored_paths, max_results):
-        cap = min(max_results, 12)
-        min_results = min(8, cap)
+        # max_results used to be clamped to 12 here and in _neighborhood_mode,
+        # so any retrieval budget above 12 silently produced the same evidence
+        # set. The budget the caller asked for is now the budget applied.
+        cap = max(1, int(max_results))
+        min_results = min(_DIVERSITY_FLOOR, cap)
         best_by_key = {}
         for path, score in scored_paths:
             for edge in path:
