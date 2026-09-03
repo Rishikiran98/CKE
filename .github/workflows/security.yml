@@ -19,7 +19,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run Bandit Security Scan
+      - name: Install the development tools
         run: |
-          pip install bandit
-          bandit -c bandit.yaml -r cke
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run Bandit Security Scan
+        run: bandit -c bandit.yaml -r cke
