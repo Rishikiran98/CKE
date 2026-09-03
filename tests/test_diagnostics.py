@@ -16,6 +16,7 @@ from cke.diagnostics import (
     DegradedComponentError,
     clear_runtime_state,
     declare_degradation,
+    degradation_summary,
     environment_report,
     record_loaded_model,
 )
@@ -118,16 +119,32 @@ def test_report_lists_dependency_status():
 
 
 def test_report_distinguishes_a_broken_install_from_an_absent_one(monkeypatch):
-    """A package that raises on import is not the same as one that is missing."""
+    """A package that raises on import is not the same as one that is missing.
+
+    The probe locates the package first, so a failure after that point is a
+    broken installation, including a transitive ModuleNotFoundError raised by
+    one of the package's own dependencies.
+    """
 
     def _explode(name):
-        raise RuntimeError("torch blew up")
+        raise ModuleNotFoundError("No module named 'torch'")
 
     monkeypatch.setattr(diagnostics.importlib, "import_module", _explode)
-    report = environment_report(dependencies=[("anything", "anything", "test")])
+    # "json" exists, so find_spec succeeds and the import failure is reached.
+    report = environment_report(dependencies=[("json", "json-stdlib", "test")])
 
     assert report.dependencies[0].available is False
-    assert "RuntimeError during import" in report.dependencies[0].error
+    assert "ModuleNotFoundError during import" in report.dependencies[0].error
+
+
+def test_report_calls_an_absent_package_absent(monkeypatch):
+    report = environment_report(
+        dependencies=[("no_such_module_xyz", "nonexistent", "test")]
+    )
+
+    assert report.dependencies[0].available is False
+    assert "No module named" in report.dependencies[0].error
+    assert "during import" not in report.dependencies[0].error
 
 
 def test_report_records_loaded_models():
@@ -193,3 +210,19 @@ def test_distinct_reasons_are_still_all_kept():
             self._degrade("first")
 
     assert Varied().degraded_reason == "first; second"
+
+
+def test_degradation_summary_reports_what_degraded():
+    """The report printed before a run cannot list degradations.
+
+    Nothing is constructed yet at that point, so its degradation section
+    always read "none". This is the other half, printed once work is done.
+    """
+    assert "No component degraded" in degradation_summary()
+
+    Component(reason="the embedder is hashing")
+    summary = degradation_summary()
+
+    assert "DEGRADED COMPONENTS" in summary
+    assert "not valid" in summary
+    assert "the embedder is hashing" in summary

@@ -120,3 +120,15 @@ def test_reset_app_forces_a_rebuild(monkeypatch):
         assert server.app is not first
     finally:
         server.reset_app()
+
+
+def test_star_import_does_not_build_the_app():
+    """ "app" in __all__ made `from cke.api import *` build the application,
+    which defeats the point of the module being importable without fastapi."""
+    assert "app" not in cke.api.__all__
+
+    namespace: dict = {}
+    exec("from cke.api import *", namespace)  # noqa: S102
+
+    assert "create_app" in namespace
+    assert "app" not in namespace

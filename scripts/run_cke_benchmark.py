@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
-from cke.diagnostics import environment_report  # noqa: E402
+from cke.diagnostics import degradation_summary, environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
@@ -192,7 +192,8 @@ class RAGPipeline:
 
 
 class CKELitePipeline:
-    def __init__(self) -> None:
+    def __init__(self, strict: bool = True) -> None:
+        self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
         self._qa = SimpleExtractiveQA()
@@ -258,7 +259,7 @@ class CKELitePipeline:
         t0 = time.perf_counter()
 
         # 1. Extract statements from each document
-        engine = KnowledgeGraphEngine()
+        engine = KnowledgeGraphEngine(strict=self._strict)
         total_statements = 0
         for doc in docs:
             text = doc.get("text", "")
@@ -355,7 +356,7 @@ class HybridPipeline:
         self._total_queries += 1
 
         # 1. Build graph and extract statements
-        engine = KnowledgeGraphEngine()
+        engine = KnowledgeGraphEngine(strict=self._strict)
         total_statements = 0
         for doc in docs:
             text = doc.get("text", "")
@@ -441,7 +442,7 @@ def run_dataset(
     """Run all pipeline configurations for each item and return per-item results."""
 
     rag_pipeline = RAGPipeline(strict=strict)
-    cke_pipeline = CKELitePipeline()
+    cke_pipeline = CKELitePipeline(strict=strict)
     hybrid_pipeline = HybridPipeline(strict=strict)
     results: list[dict[str, Any]] = []
 
@@ -880,7 +881,7 @@ def run_retrieval_mode_ablation(
     strict: bool = True,
 ) -> dict[str, dict[str, float]]:
     """Ablate across retrieval modes: graph_only, dense_only, hybrid."""
-    cke_pipeline = CKELitePipeline()
+    cke_pipeline = CKELitePipeline(strict=strict)
     rag_pipeline = RAGPipeline(strict=strict)
     hybrid_pipeline = HybridPipeline(evidence_threshold=2, dense_top_k=3, strict=strict)
 
@@ -1160,6 +1161,7 @@ def main() -> None:
         print("=" * 60)
 
     print(f"\nAll results written to: {output_dir.resolve()}")
+    print(degradation_summary(), flush=True)
 
 
 if __name__ == "__main__":

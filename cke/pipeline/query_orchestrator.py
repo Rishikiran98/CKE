@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from cke.diagnostics import DegradedComponentError
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.pipeline.types import (
@@ -574,6 +575,10 @@ class QueryOrchestrator:
             )
             if isinstance(outcome, ReasonerOutcome):
                 return outcome
+        except DegradedComponentError:
+            # A strict refusal is not a reasoning failure. Turning it into an
+            # abstention would score a run that was supposed to stop.
+            raise
         except Exception:  # noqa: BLE001 - reasoners are pluggable
             # Deliberately broad: any reasoner implementation may be plugged
             # in here. The failure is logged with its traceback and turned

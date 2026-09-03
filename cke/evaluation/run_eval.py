@@ -8,7 +8,11 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from cke.diagnostics import declare_degradation, environment_report
+from cke.diagnostics import (
+    declare_degradation,
+    degradation_summary,
+    environment_report,
+)
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.evaluation.default_golden_set import get_default_golden_set
 from cke.evaluation.e2e_evaluator import E2EEvaluator
@@ -434,6 +438,8 @@ def main() -> int:
         export_json(results, summary, args.output_json)
     if args.output_csv:
         export_csv(results, args.output_csv)
+
+    print(degradation_summary(), flush=True)
     return 0
 
 

@@ -389,3 +389,94 @@ def test_entity_resolver_strict_refuses_without_rapidfuzz(monkeypatch):
 
     with pytest.raises(DegradedComponentError, match="rapidfuzz"):
         module.EntityResolver(strict=True)
+
+
+def test_llm_reasoner_passes_strict_to_its_fallback(monkeypatch):
+    """A strict reasoner built a non-strict PathReasoner, so a strict run
+    still reached the hashed embedder."""
+    from cke.reasoning import llm_reasoner as module
+    from cke.retrieval import embedding_model as embed_module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", None)
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(embed_module, "_FAILED_MODEL_LOADS", {})
+    monkeypatch.setenv("CKE_LLM_API_KEY", "a-key-so-the-key-path-is-not-the-cause")
+
+    with pytest.raises(DegradedComponentError, match="sentence-transformers"):
+        module.LLMReasoner(strict=True)
+
+
+def test_llm_extractor_declares_an_empty_llm_response(monkeypatch):
+    """The success path substituted regex output when the LLM returned nothing."""
+    from cke.extractor import llm_extractor as module
+
+    extractor = module.LLMExtractor(config=module.LLMConfig(api_key="k"))
+    extractor.client = object()
+    extractor.degraded = False
+    extractor.degraded_reason = ""
+
+    monkeypatch.setattr(extractor, "_call_llm", lambda text: {})
+    monkeypatch.setattr(extractor, "_parse_response", lambda payload, source_text: [])
+
+    extractor.extract("Redis supports PubSub messaging.")
+
+    assert extractor.degraded is True
+    assert "no valid assertions" in extractor.degraded_reason
+
+
+def test_orchestrator_does_not_swallow_a_strict_refusal():
+    """DegradedComponentError subclasses RuntimeError, so a broad except
+    caught it and scored a refused run as an abstention."""
+    import inspect
+
+    from cke.pipeline import query_orchestrator as module
+
+    source = inspect.getsource(module.QueryOrchestrator._run_reasoner)
+    assert "except DegradedComponentError:" in source
+    assert source.index("except DegradedComponentError:") < source.index(
+        "except Exception:"
+    )
+
+
+def test_failed_model_load_is_attempted_once_per_process(monkeypatch):
+    """The benchmark builds an embedder per item; retrying the load each time
+    turned one failure into one download attempt per question."""
+    from cke.retrieval import embedding_model as module
+
+    attempts = []
+
+    def _fail(name):
+        attempts.append(name)
+        raise OSError("network unreachable")
+
+    monkeypatch.setattr(module, "SentenceTransformer", _fail)
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(module, "_FAILED_MODEL_LOADS", {})
+
+    for _ in range(20):
+        module.EmbeddingModel()
+
+    assert len(attempts) == 1
+
+    # The recorded cause is still available to a later strict construction.
+    with pytest.raises(DegradedComponentError, match="network unreachable"):
+        module.EmbeddingModel(strict=True)
+
+
+def test_dimension_is_measured_when_a_healthy_model_reports_none(monkeypatch):
+    """Reporting the hashed fallback width for a healthy model is misleading."""
+    import numpy as np
+
+    from cke.retrieval import embedding_model as module
+
+    class QuietModel:
+        def get_sentence_embedding_dimension(self):
+            return None
+
+        def encode(self, texts, **kwargs):
+            return np.zeros((len(texts), 512), dtype="float32")
+
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {"quiet": QuietModel()})
+    monkeypatch.setattr(module, "_FAILED_MODEL_LOADS", {})
+
+    assert module.EmbeddingModel(model_name="quiet").dimension == 512

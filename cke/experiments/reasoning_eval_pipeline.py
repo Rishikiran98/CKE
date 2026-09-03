@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cke.diagnostics import environment_report
+from cke.diagnostics import degradation_summary, environment_report
 from cke.datasets.registry import DATASET_REGISTRY
 from cke.models import Statement
 from cke.reasoning.path_reasoner import PathReasoner
@@ -189,6 +189,8 @@ def main() -> None:
     print(report)
     if args.out:
         args.out.write_text(report + "\n", encoding="utf-8")
+
+    print(degradation_summary(), flush=True)
 
 
 if __name__ == "__main__":

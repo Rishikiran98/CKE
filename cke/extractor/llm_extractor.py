@@ -170,7 +170,18 @@ class LLMExtractor(BaseExtractor, DegradationMixin):
                         ),
                         stage="llm_extractor",
                     )
-                return statements or self.fallback.extract(text)
+                if statements:
+                    return statements
+                # The call succeeded but produced nothing usable. Substituting
+                # regex output here would report the fallback's extractions as
+                # the model's.
+                self._degrade(
+                    "the LLM returned no valid assertions for a document "
+                    "(the response was empty, or every candidate failed "
+                    f"validation), so {type(self.fallback).__name__} produced "
+                    "this document's statements instead"
+                )
+                return self.fallback.extract(text)
             except Exception as exc:  # noqa: BLE001 - network/runtime variability
                 last_error = exc
                 logger.warning(
