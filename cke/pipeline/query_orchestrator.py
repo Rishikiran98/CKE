@@ -49,7 +49,6 @@ class QueryOrchestrator(DegradationMixin):
         entity_resolver: EntityResolver | None = None,
         retrieval_mode: str = "hybrid",
         dense_retriever=None,
-        evidence_threshold: int = 2,
         strict: bool = False,
     ):
         self._init_degradation(strict)
@@ -61,7 +60,6 @@ class QueryOrchestrator(DegradationMixin):
             retrieval_mode=retrieval_mode,
             graph_engine=graph_engine,
             dense_retriever=dense_retriever,
-            evidence_threshold=evidence_threshold,
             strict=strict,
         )
         self.assembler = assembler or (
@@ -395,7 +393,6 @@ class QueryOrchestrator(DegradationMixin):
         retrieval_mode: str,
         graph_engine,
         dense_retriever,
-        evidence_threshold: int,
         strict: bool = False,
     ):
         if retriever is not None:
@@ -411,11 +408,7 @@ class QueryOrchestrator(DegradationMixin):
             from cke.retrieval.retriever import GraphRetriever
 
             graph_ret = GraphRetriever(graph_engine)
-            router = RetrievalRouter(
-                graph_ret,
-                dense_retriever,
-                evidence_threshold=evidence_threshold,
-            )
+            router = RetrievalRouter(graph_ret, dense_retriever)
             return HybridEvidenceRetriever(router, strict=strict)
 
         if retrieval_mode == "dense_only" and dense_retriever is not None:

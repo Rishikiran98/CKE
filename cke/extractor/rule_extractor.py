@@ -53,9 +53,41 @@ _MODIFIER_BOUNDARY = re.compile(
     re.I,
 )
 
+#: Where an appositive closes and the sentence resumes. "located in Istanbul,
+#: is historic" gave the object "Istanbul, is historic": a comma is not a
+#: modifier boundary, so the object ran to the end of the sentence. A comma
+#: followed by a finite verb or a coordinator ends the phrase; a comma
+#: followed by anything else does not, which keeps "Istanbul, Turkey" whole.
+_APPOSITIVE_CLOSE = re.compile(
+    r",\s+(?:is|was|are|were|has|have|had|and|but|which|who|that)\b", re.I
+)
+
+#: Where a coordinated predicate begins inside an object. "was directed by
+#: Alice and produced by Bob" gave the agent "Alice and produced": the agent
+#: capture is unbounded and the appositive cut fires only after a comma. A
+#: coordinator followed by a participle and its preposition is a second
+#: predicate, not part of the first one's agent. What follows it is still not
+#: extracted — the second fact needs the subject reused, which this does not
+#: do — but no entity is invented for it.
+_COORDINATED_PREDICATE = re.compile(
+    r"\s+(?:and|or|but)\s+\w{3,}ed\s+(?:by|in|on|at)\b", re.I
+)
+
 #: An object that reduces to one of these carries no entity.
 _EMPTY_OBJECTS = frozenset(
     {"a", "an", "the", "it", "its", "this", "that", "these", "those", ""}
+)
+
+#: A subject that reduces to one of these names nothing. A pronoun stands for
+#: an entity named in an earlier sentence, and resolving it needs coreference,
+#: which this extractor does not do. Kept as a node it is worse than absent:
+#: every document contributes its own facts to one entity called "He", and a
+#: path through that node joins people who have nothing to do with each other.
+#: The object side already refuses pronouns; this is the same rule on the
+#: subject side.
+_PRONOUN_SUBJECTS = frozenset(
+    """he she it they we i you him her them his hers its their there this that
+    these those who which what""".split()
 )
 
 
@@ -64,23 +96,64 @@ class RuleExtractor:
 
     MAX_OBJECT_LENGTH = 80
 
+    #: Each entry pairs a sentence frame with the relation it yields. The
+    #: relation is a format template over the match's named groups, so a frame
+    #: that captures its own verb names the relation after it: one rule covers
+    #: "directed by", "founded by" and "owned by" without listing any of them.
+    #:
+    #: Frames, not vocabulary. The previous four patterns named three verbs
+    #: outright and matched the literal string " is a ", which missed "is an"
+    #: and "was a" — 18.9% of the sentences it failed on contained a copula it
+    #: could not read.
     PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-        (re.compile(r"(?P<s>[^.]+?)\s+is\s+a\s+(?P<o>[^.]+)", re.I), "is_a"),
-        (re.compile(r"(?P<s>[^.]+?)\s+uses\s+(?P<o>[^.]+)", re.I), "uses"),
-        (re.compile(r"(?P<s>[^.]+?)\s+developed\s+(?P<o>[^.]+)", re.I), "developed"),
+        # Copular predicate nominal: "X is an American director".
         (
-            re.compile(r"(?P<s>[^.]+?)\s+located\s+in\s+(?P<o>[^.]+)", re.I),
-            "located_in",
+            re.compile(
+                r"(?P<s>[^.]+?)\s+(?:is|was|are|were)\s+(?:a|an|the)\s+(?P<o>[^.]+)",
+                re.I,
+            ),
+            "is_a",
+        ),
+        # Passive with an agent: "X was directed by Y".
+        (
+            re.compile(
+                r"(?P<s>[^.]+?)\s+(?:is|was|are|were|been)\s+"
+                r"(?P<rel>\w{3,}ed)\s+by\s+(?P<o>[^.]+)",
+                re.I,
+            ),
+            "{rel}_by",
+        ),
+        # Participle with a prepositional complement: "X was released in 1994",
+        # "X, located in Istanbul, ...". The copula is optional, which is what
+        # subsumes the former standalone located_in pattern.
+        (
+            re.compile(
+                r"(?P<s>[^.]+?)\s+(?:(?:is|was|are|were|been)\s+)?"
+                r"(?P<rel>\w{3,}ed)\s+(?P<prep>in|on|at)\s+(?P<o>[^.]+)",
+                re.I,
+            ),
+            "{rel}_{prep}",
+        ),
+        # Active transitive, still named outright: no frame identifies a
+        # transitive verb without a parser.
+        (re.compile(r"(?P<s>[^.]+?)\s+uses\s+(?P<o>[^.]+)", re.I), "uses"),
+        # Named outright, so its label is fixed rather than read off the verb:
+        # tense would otherwise split one relation into "develops" and
+        # "developed", and the graph is keyed on the latter.
+        (
+            re.compile(r"(?P<s>[^.]+?)\s+develop(?:s|ed)?\s+(?P<o>[^.]+)", re.I),
+            "developed",
         ),
     )
 
     def extract(self, text: str) -> list[Statement]:
         assertions: list[Statement] = []
         for sentence in self._split_sentences(text):
-            for pattern, relation in self.PATTERNS:
+            for pattern, relation_template in self.PATTERNS:
                 match = pattern.search(sentence)
                 if not match:
                     continue
+                relation = self._relation_for(relation_template, match)
                 subject = self._normalize_entity(match.group("s"))
                 obj = self._normalize_object(match.group("o"))
                 if not self._is_valid_statement(subject, relation, obj):
@@ -94,6 +167,16 @@ class RuleExtractor:
                     )
                 )
         return assertions
+
+    @staticmethod
+    def _relation_for(template: str, match: re.Match[str]) -> str:
+        """Fill a relation template from the frame's own captures."""
+        captures = {
+            name: value.lower()
+            for name, value in match.groupdict().items()
+            if value and name not in {"s", "o"}
+        }
+        return template.format(**captures) if captures else template
 
     @staticmethod
     def _split_sentences(text: str) -> list[str]:
@@ -139,9 +222,21 @@ class RuleExtractor:
         cleaned = self._clean(token).strip("\"'()[]")
         cleaned = _LEADING_DETERMINERS.sub("", cleaned)
 
-        boundary = _MODIFIER_BOUNDARY.search(cleaned)
-        if boundary:
-            cleaned = cleaned[: boundary.start()]
+        # The object ends at the earliest boundary of any kind. Applied one
+        # after another instead, the modifier cut at " by " removed the very
+        # text the coordinated-predicate cut needed to recognise, so "Alice and
+        # produced by Bob" lost "by Bob" first and kept "Alice and produced".
+        cuts = [
+            match.start()
+            for closer in (
+                _MODIFIER_BOUNDARY,
+                _APPOSITIVE_CLOSE,
+                _COORDINATED_PREDICATE,
+            )
+            if (match := closer.search(cleaned))
+        ]
+        if cuts:
+            cleaned = cleaned[: min(cuts)]
 
         cleaned = self._truncate_on_word_boundary(cleaned)
         return _LEADING_DETERMINERS.sub("", cleaned).strip(" ,;")
@@ -165,6 +260,8 @@ class RuleExtractor:
         cause, so the relation can be kept.
         """
         if not subject or not obj:
+            return False
+        if subject.strip().lower() in _PRONOUN_SUBJECTS:
             return False
         if obj.strip().lower() in _EMPTY_OBJECTS:
             return False

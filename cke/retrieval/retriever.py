@@ -28,10 +28,20 @@ class GraphRetriever:
         require_strict_component(type(self).__name__, router, "router", self.strict)
         self.router = router or QueryRouter(strict=strict)
 
+    def seed_entities(self, query: str) -> List[str]:
+        """The graph entities a walk for *query* starts from.
+
+        Public because a caller deciding whether the walk's result was
+        sufficient needs to know what it was asked to find.
+        """
+        return list(
+            self.router.detect_entities(query, self.graph_engine.all_entities())
+        )
+
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
         policy = self.router.routing_policy_for_query(query)
         effective_max_depth = max_depth + int(policy.get("retrieval_depth_delta", 0))
-        seeds = self.router.detect_entities(query, self.graph_engine.all_entities())
+        seeds = self.seed_entities(query)
         seen_statements: set[tuple[str, str, str]] = set()
         candidates: list[tuple[int, Statement]] = []
 

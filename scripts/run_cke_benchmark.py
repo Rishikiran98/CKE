@@ -232,7 +232,6 @@ class HybridPipeline:
         self,
         *,
         token_counter: TokenCounter,
-        evidence_threshold: int = 2,
         dense_top_k: int = 3,
         strict: bool = True,
     ) -> None:
@@ -241,7 +240,6 @@ class HybridPipeline:
         self._seed_extractor = SeedEntityExtractor()
         self._qa = SpanExtractiveQA()
         self._counter = token_counter
-        self._evidence_threshold = evidence_threshold
         self._dense_top_k = dense_top_k
         self._merger = HybridRetrievalMerger()
         self._total_fallbacks = 0
@@ -292,7 +290,6 @@ class HybridPipeline:
         router = RetrievalRouter(
             graph_retriever=graph_retriever,
             dense_retriever=dense_retriever,
-            evidence_threshold=self._evidence_threshold,
             dense_top_k=k_fallback,
         )
 
@@ -806,10 +803,7 @@ def run_retrieval_mode_ablation(
     cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
     rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
     hybrid_pipeline = HybridPipeline(
-        token_counter=token_counter,
-        evidence_threshold=2,
-        dense_top_k=3,
-        strict=strict,
+        token_counter=token_counter, dense_top_k=3, strict=strict
     )
 
     effective = items[:limit]

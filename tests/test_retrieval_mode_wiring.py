@@ -110,18 +110,22 @@ class TestExplicitRetrieverOverride:
         assert orch.retriever is None
 
 
-class TestEvidenceThreshold:
-    def test_evidence_threshold_flows_to_router(self):
+class TestHybridRouting:
+    def test_hybrid_mode_builds_a_router_with_no_count_threshold(self):
+        """This used to assert that an evidence_threshold of 5 reached the
+        router. The parameter is gone: the router decides by whether the
+        graph covered the question's seeds, which has no number to thread.
+        What the old test guarded beyond the number — that hybrid mode wires
+        an orchestrator to a RetrievalRouter — is kept."""
         orch = QueryOrchestrator(
             graph_engine=_stub_graph_engine(),
             router=_stub_router(),
             retrieval_mode="hybrid",
             dense_retriever=_stub_dense_retriever(),
-            evidence_threshold=5,
         )
         assert isinstance(orch.retriever, HybridEvidenceRetriever)
         inner_router = orch.retriever.retrieval_router
-        assert inner_router.evidence_threshold == 5
+        assert not hasattr(inner_router, "evidence_threshold")
 
 
 class TestDebugInfo:
