@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
+from cke.diagnostics import require_strict_component
 from cke.graph.domain_classifier import UNCLASSIFIED_DOMAIN, DomainClassifier
 from cke.graph.domain_registry import DomainRegistry
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -27,6 +28,9 @@ class QueryRouter:
     ):
         self.strict = bool(strict)
         self.graph_engine = graph_engine
+        require_strict_component(
+            type(self).__name__, domain_classifier, "domain classifier", self.strict
+        )
         self.entity_resolver = EntityResolver(graph_engine=graph_engine, strict=strict)
         self.intent_classifier = IntentClassifier()
         # strict reaches every component under this one that can degrade.
