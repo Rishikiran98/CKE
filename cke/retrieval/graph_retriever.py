@@ -20,6 +20,11 @@ from cke.retrieval.path_ranking import (
 from cke.router.query_plan import QueryPlan
 
 
+#: Below this many selected statements, the diversity filter is not applied:
+#: a small evidence set should not be thinned further for redundancy.
+_DIVERSITY_FLOOR = 8
+
+
 class GraphRetriever:
     """Retrieve sparse evidence paths from the graph for a query plan."""
 
@@ -106,6 +111,17 @@ class GraphRetriever:
             "evidence_graph": evidence_graph.as_dict(),
         }
 
+    @staticmethod
+    def _other_endpoint(edge: Statement, node: str) -> str:
+        """Return the endpoint of *edge* that is not *node*.
+
+        Traversal follows an edge from either end, so the next node is whichever
+        endpoint we did not arrive from. The edge's own direction is untouched.
+        """
+        if edge.subject.strip().lower() == str(node).strip().lower():
+            return edge.object
+        return edge.subject
+
     def _path_mode(
         self,
         seeds,
@@ -151,7 +167,7 @@ class GraphRetriever:
         scored = []
         expanded = 0
         for seed in seeds:
-            neighbors = self.graph_engine.get_neighbors(seed)
+            neighbors = self.graph_engine.get_incident(seed)
             expanded += len(neighbors)
             for edge in neighbors:
                 scored.append(
@@ -163,7 +179,7 @@ class GraphRetriever:
         if self.monitor:
             self.monitor.record_neighborhood_expansion(expanded)
         scored.sort(key=lambda item: item[1], reverse=True)
-        return scored[: max(1, min(max_results, 12))]
+        return scored[: max(1, max_results)]
 
     def _bridge_mode(self, seeds, max_depth, query_text, seed_entities, decomposition):
         if len(seeds) < 2:
@@ -206,10 +222,10 @@ class GraphRetriever:
             if marker in visited:
                 continue
             visited.add(marker)
-            for edge in self.graph_engine.get_neighbors(node):
+            for edge in self.graph_engine.get_incident(node):
                 next_path = path + [edge]
                 paths.append(next_path)
-                queue.append((edge.object, next_path, depth + 1))
+                queue.append((self._other_endpoint(edge, node), next_path, depth + 1))
         return paths
 
     def _invert_path(self, path):
@@ -280,11 +296,12 @@ class GraphRetriever:
                 continue
             visited_depth[node] = depth
             node_visits += 1
-            for edge in self.graph_engine.get_neighbors(node):
+            for edge in self.graph_engine.get_incident(node):
                 next_path = path + [edge]
                 paths.append(next_path)
-                if depth + 1 <= max_depth and edge.object != node:
-                    queue.append((edge.object, next_path, depth + 1))
+                next_node = self._other_endpoint(edge, node)
+                if depth + 1 <= max_depth and next_node != node:
+                    queue.append((next_node, next_path, depth + 1))
         return paths
 
     def _beam_search(
@@ -299,11 +316,11 @@ class GraphRetriever:
                 if visited >= max_nodes:
                     break
                 visited += 1
-                for edge in self.graph_engine.get_neighbors(node):
+                for edge in self.graph_engine.get_incident(node):
                     candidate = path + [edge]
                     expanded.append(
                         (
-                            edge.object,
+                            self._other_endpoint(edge, node),
                             candidate,
                             self._score_path(candidate, query_text, seed_entities),
                         )
@@ -340,12 +357,13 @@ class GraphRetriever:
             if depth >= max_depth:
                 continue
             expanded += 1
-            for edge in self.graph_engine.get_neighbors(node):
+            for edge in self.graph_engine.get_incident(node):
                 candidate = path + [edge]
+                next_node = self._other_endpoint(edge, node)
                 g = self._score_path(candidate, query_text, seed_entities)
-                h = self._heuristic(edge.object, query_tokens, seed_tokens)
+                h = self._heuristic(next_node, query_tokens, seed_tokens)
                 f = g + h
-                heappush(frontier, (-f, next(tick), edge.object, candidate, depth + 1))
+                heappush(frontier, (-f, next(tick), next_node, candidate, depth + 1))
         return results
 
     def _heuristic(
@@ -414,8 +432,11 @@ class GraphRetriever:
         return 0.55 * score + 0.45 * rank_score
 
     def _select_evidence(self, scored_paths, max_results):
-        cap = min(max_results, 12)
-        min_results = min(8, cap)
+        # max_results used to be clamped to 12 here and in _neighborhood_mode,
+        # so any retrieval budget above 12 silently produced the same evidence
+        # set. The budget the caller asked for is now the budget applied.
+        cap = max(1, int(max_results))
+        min_results = min(_DIVERSITY_FLOOR, cap)
         best_by_key = {}
         for path, score in scored_paths:
             for edge in path:
