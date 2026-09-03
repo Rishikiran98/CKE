@@ -22,10 +22,24 @@ from cke.models import Statement
 #: "text protocol" are the same entity, and keeping both fragments the graph.
 _LEADING_DETERMINERS = re.compile(r"^(?:a|an|the)\s+", re.I)
 
-#: A subject captured by a non-greedy group absorbs any copula sitting between
-#: it and the relation: "Redis is located in memory" yields the subject
-#: "Redis is". Stripped so the subject is the entity.
-_TRAILING_COPULA = re.compile(r"\s+(?:is|was|are|were|has|have|had)$", re.I)
+#: A parenthetical is an aside, never part of the name a later sentence uses.
+#: Encyclopedic prose is full of them — "The Laleli Mosque (Turkish: "Laleli
+#: Camii, or Tulip Mosque")" — and carrying one into the subject makes an
+#: entity that nothing else in the graph can match. The closing bracket is
+#: optional because the sentence splitter cuts inside asides that contain a
+#: full stop.
+_PARENTHETICAL = re.compile(r"\s*[(\[][^)\]]*[)\]]?\s*")
+
+#: A subject holding a finite copula is a clause, not a name: everything from
+#: the copula onwards is predicate. The subject group is non-greedy and starts
+#: at the sentence, so "The Sultan Ahmed Mosque is a historic mosque located
+#: in Istanbul" gives the located_in pattern the subject "The Sultan Ahmed
+#: Mosque is a historic mosque". Cutting at the copula leaves the entity.
+#:
+#: The same cut handles a copula in final position, which is what a subject
+#: ending at the relation looks like: "Redis is located in memory" yields the
+#: subject "Redis is".
+_COPULA = re.compile(r"\s+(?:is|was|are|were|has|have|had)(?:\s|$)", re.I)
 
 #: Where a modifier clause begins. The object is cut here so it is the head
 #: noun phrase rather than the remainder of the sentence.
@@ -90,14 +104,35 @@ class RuleExtractor:
         return re.sub(r"\s+", " ", token.strip(" ,;\n\t"))
 
     def _normalize_entity(self, token: str) -> str:
-        """Normalise a captured subject into an entity name."""
-        cleaned = self._clean(token).strip("\"'()[]")
-        # Applied repeatedly: "Redis has been" reduces through both auxiliaries.
-        while True:
-            stripped = _TRAILING_COPULA.sub("", cleaned)
-            if stripped == cleaned:
-                return cleaned
-            cleaned = stripped.strip()
+        """Normalise a captured subject into an entity name.
+
+        Deliberately not the object's normalisation. An object is a
+        description — "song from the 1968 musical film featurette" — so
+        cutting it at a modifier boundary leaves its head noun. A subject in
+        this kind of prose is overwhelmingly a name, and the same cut damages
+        one: "Deliver Us from Evil" becomes "Deliver Us" and "A Kiss for
+        Corliss" becomes "Kiss". Stripping a leading determiner is wrong here
+        for the same reason, and unnecessary — "The Laleli Mosque" and "Laleli
+        Mosque" are joined by the resolver's containment rung.
+
+        What is safe on this side is removing what is not part of any name: a
+        parenthetical aside, and a predicate hanging off a copula.
+        """
+        cleaned = _PARENTHETICAL.sub(" ", str(token))
+
+        # Once, not repeatedly: the cut is made at the first copula, which
+        # removes every later one with it. "Redis has been located in memory"
+        # gives the subject "Redis has been" and one cut leaves "Redis".
+        #
+        # A cut that leaves nothing is not refused. A subject that is all
+        # predicate holds no entity, and the empty string it becomes is
+        # rejected by _is_valid_statement, which drops the triple. Keeping the
+        # uncut text instead would name an entity "is a historic mosque".
+        copula = _COPULA.search(cleaned)
+        if copula:
+            cleaned = cleaned[: copula.start()]
+
+        return self._clean(cleaned).strip("\"'“”()[]")
 
     def _normalize_object(self, token: str) -> str:
         """Normalise a captured object into the head noun phrase."""

@@ -123,3 +123,91 @@ def test_path_ranking_prefers_relation_match():
     result = retriever.retrieve(plan, mode="astar")
 
     assert result["evidence"][0]["relation"] == "directed_by"
+
+
+def test_retrieval_seeds_every_entity_a_mention_could_name():
+    """A mention naming several graph entities starts a walk from each.
+
+    "PubSub" and "pubsub" are one entity here, but a query mentioning "Redis"
+    against a graph that also held "Redis Cluster" would have to pick one if
+    seeds were resolved one-to-one. The retriever fans out instead, and this
+    asserts the fan-out reaches the retriever rather than stopping in the
+    resolver.
+    """
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Redis Cluster", "shards", "Keyspace", confidence=0.9),
+            Statement("Redis Sentinel", "monitors", "Failover", confidence=0.9),
+            Statement("Unrelated", "touches", "Nothing", confidence=0.9),
+        ]
+    )
+    retriever = GraphRetriever(graph)
+    plan = QueryPlan(
+        query_text="What does Redis do?",
+        seed_entities=["Redis"],
+        intent="factoid",
+        max_depth=2,
+        max_results=10,
+    )
+
+    objects = {edge["object"] for edge in retriever.retrieve(plan).get("evidence", [])}
+
+    assert {"Keyspace", "Failover"} <= objects
+
+
+def test_comparison_bridges_between_two_mentions_not_within_one():
+    """Fan-out must widen a comparison, never displace what it compares to.
+
+    Seeding from a flat list put two expansions of "Alpha" in the first two
+    positions, so the bridge compared Alpha against Alpha Group and never
+    looked at Beta — and an Alpha-Beta bridge that exists returned nothing.
+    """
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Alpha", "linked_to", "Bridge", confidence=0.9),
+            Statement("Beta", "linked_to", "Bridge", confidence=0.9),
+            Statement("Alpha Group", "owns", "Something", confidence=0.9),
+        ]
+    )
+    plan = QueryPlan(
+        query_text="Compare Alpha and Beta",
+        seed_entities=["Alpha", "Beta"],
+        intent="comparison",
+        max_depth=2,
+        max_results=10,
+    )
+
+    evidence = GraphRetriever(graph).retrieve(plan).get("evidence", [])
+    subjects = {edge["subject"] for edge in evidence}
+
+    assert evidence, "an Alpha-Beta bridge exists and must be found"
+    assert "Alpha" in subjects
+
+
+def test_comparison_bridges_from_every_entity_a_mention_expands_to():
+    """The bridge may hang off a candidate that is not the mention's first.
+
+    Here "Alpha" resolves exactly and leads its group, but it is "Alpha Group"
+    that reaches Beta. Bridging only the leading candidate finds nothing.
+    """
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Alpha Group", "linked_to", "Bridge", confidence=0.9),
+            Statement("Beta", "linked_to", "Bridge", confidence=0.9),
+            Statement("Alpha", "owns", "Something", confidence=0.9),
+        ]
+    )
+    plan = QueryPlan(
+        query_text="Compare Alpha and Beta",
+        seed_entities=["Alpha", "Beta"],
+        intent="comparison",
+        max_depth=2,
+        max_results=10,
+    )
+
+    evidence = GraphRetriever(graph).retrieve(plan).get("evidence", [])
+
+    assert {edge["subject"] for edge in evidence} & {"Alpha Group", "Bridge"}
