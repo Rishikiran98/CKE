@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 cke/logs/reasoning_traces/
 data/
+*.db
+flake8_output.txt
+black_diff.txt
