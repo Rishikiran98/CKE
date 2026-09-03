@@ -40,7 +40,14 @@ def test_llm_extractor_parses_valid_json_payload():
     assert statements[0].relation == "uses"
 
 
-def test_rule_extractor_filters_generic_relations_and_long_objects():
+def test_rule_extractor_reduces_a_rambling_object_to_its_head_noun():
+    """A trailing clause must not become an entity.
+
+    This previously discarded every is_a statement to avoid objects like
+    "song from the 1968 musical film featurette that keeps going". Dropping a
+    whole relation type was the wrong instrument: the object is now cut at its
+    modifier boundary, so the relation is kept and the garbage is not.
+    """
     extractor = RuleExtractor()
     text = (
         "Ed Wood is a song from the 1968 musical film featurette that keeps going. "
@@ -51,12 +58,66 @@ def test_rule_extractor_filters_generic_relations_and_long_objects():
     statements = extractor.extract(text)
     triples = {(s.subject, s.relation, s.object) for s in statements}
 
-    assert not any(relation == "is_a" for _, relation, _ in triples)
-    assert any(
-        subject == "Scott Derrickson" and relation == "uses"
-        for subject, relation, _ in triples
-    )
+    # The is_a statement is kept, and its object is the head noun.
+    assert ("Ed Wood", "is_a", "song") in triples
+
+    # The same cut applies to every relation, not just is_a.
+    assert ("Scott Derrickson", "uses", "practical effects") in triples
+
     assert all(len(obj) <= extractor.MAX_OBJECT_LENGTH for _, _, obj in triples)
+    # No object may still carry the clause it was cut from.
+    assert not any(" that " in obj or " which " in obj for _, _, obj in triples)
+
+
+def test_rule_extractor_keeps_the_subject_clear_of_the_copula():
+    """ "Redis is located in memory" yielded the subject "Redis is".
+
+    That made "Redis" and "Redis is" separate entities, so a path through the
+    two statements about Redis could not connect.
+    """
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        "Redis is located in memory. Redis uses RESP protocol."
+    )
+    subjects = {s.subject for s in statements}
+
+    assert subjects == {"Redis"}
+
+
+def test_rule_extractor_strips_a_leading_determiner_from_an_object():
+    """ "a text protocol" and "text protocol" must not be separate nodes."""
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        "Memcached uses a text protocol. Redis uses the text protocol."
+    )
+    objects = {s.object for s in statements}
+
+    assert objects == {"text protocol"}
+
+
+def test_rule_extractor_rejects_an_object_with_no_entity_left():
+    """Cutting can leave nothing; that is not a statement."""
+    extractor = RuleExtractor()
+
+    assert extractor.extract("Redis uses it.") == []
+    assert extractor._is_valid_statement("Redis", "is_a", "the") is False
+    assert extractor._is_valid_statement("Redis", "is_a", "Redis") is False
+
+
+def test_rule_extractor_truncates_on_a_word_boundary():
+    """Cutting mid-word invents an entity that matches nothing."""
+    extractor = RuleExtractor()
+    long_object = " ".join(["alpha"] * 40)
+
+    statements = extractor.extract(f"Thing uses {long_object}")
+
+    assert statements, "expected an extraction"
+    obj = statements[0].object
+    assert len(obj) <= extractor.MAX_OBJECT_LENGTH
+    assert not obj.endswith("alph"), "the final word was split"
+    assert all(word == "alpha" for word in obj.split())
 
 
 def test_llm_extractor_captures_temporal_and_conditional_qualifiers():
