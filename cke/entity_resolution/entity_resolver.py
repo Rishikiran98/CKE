@@ -539,22 +539,56 @@ class EntityResolver(DegradationMixin):
         what :meth:`resolve` would have returned on its own. Expansion adds
         starting points; it never removes the one already there.
         """
-        per_mention = self.EXPANSION_PER_MENTION if per_mention is None else per_mention
         total = self.EXPANSION_TOTAL if total is None else total
 
-        candidates = self._graph_candidates()
         expanded: list[str] = []
         seen: set[str] = set()
-
-        for mention in mentions:
-            matches = self._containers_by_fit(mention, candidates)[:per_mention]
-            if not matches:
-                matches = [self.resolve(mention)]
-            for match in matches:
-                if match and match not in seen:
+        for group in self.expand_groups(mentions, per_mention=per_mention):
+            for match in group:
+                if match not in seen:
                     seen.add(match)
                     expanded.append(match)
         return expanded[:total]
+
+    def expand_groups(
+        self, mentions: Iterable[str], per_mention: int | None = None
+    ) -> list[list[str]]:
+        """:meth:`expand`, but keeping each mention's candidates together.
+
+        Comparison retrieval bridges between two *different* mentions, so it
+        cannot use the flattened list: with mentions "Alpha" and "Beta" over a
+        graph also holding "Alpha Group", flattening puts two expansions of the
+        first mention in the first two positions, and the bridge compares Alpha
+        against Alpha Group while ignoring Beta entirely.
+        """
+        per_mention = self.EXPANSION_PER_MENTION if per_mention is None else per_mention
+        candidates = self._graph_candidates()
+        known = set(candidates)
+
+        groups: list[list[str]] = []
+        for mention in mentions:
+            group = self._containers_by_fit(mention, candidates)[:per_mention]
+
+            # The resolved form is kept, never traded away for a container. An
+            # alias registered as "NYC" -> "New York City" is a stronger
+            # statement about what the mention names than the fact that some
+            # entity happens to hold "NYC" inside it; dropping it sent
+            # retrieval to "NYC Department" and nowhere else. It leads when it
+            # names a real entity. When it does not — a title-cased fallback
+            # for a mention nothing matched — it is worth carrying only if
+            # there is nothing else, so the mention still reaches the caller.
+            resolved = self.resolve(mention)
+            if resolved in known:
+                group = [resolved] + [c for c in group if c != resolved]
+            elif not group and resolved:
+                group = [resolved]
+
+            # The cap bounds the whole group, resolved form included: it exists
+            # so that one generic mention cannot flood a query with entities,
+            # and that reason does not care which rung produced them.
+            if group:
+                groups.append(group[:per_mention])
+        return groups
 
     @classmethod
     def _containers_by_fit(cls, name: str, candidates: Iterable[str]) -> list[str]:

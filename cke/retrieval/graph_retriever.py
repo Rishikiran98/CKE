@@ -55,7 +55,13 @@ class GraphRetriever:
         # City" against a graph holding "Kansas City jazz" and "Kansas City
         # Chiefs" should start from both and let path scoring choose. resolve()
         # has to pick one and so refuses that mention outright.
-        seeds = self.entity_resolver.expand(query_plan.seed_entities)
+        #
+        # Kept grouped by mention as well as flattened, because comparison
+        # bridges between two different mentions and cannot read them off a
+        # flat list: expanding the first mention to two entities would leave
+        # the bridge comparing that mention against itself.
+        seed_groups = self.entity_resolver.expand_groups(query_plan.seed_entities)
+        seeds = [seed for group in seed_groups for seed in group]
         intent = (query_plan.intent or "").lower()
 
         if intent == "definition":
@@ -68,7 +74,7 @@ class GraphRetriever:
             )
         elif intent == "comparison":
             scored_paths = self._bridge_mode(
-                seeds=seeds,
+                seed_groups=seed_groups,
                 max_depth=query_plan.max_depth,
                 query_text=query_plan.query_text,
                 seed_entities=query_plan.seed_entities,
@@ -205,29 +211,42 @@ class GraphRetriever:
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[: max(1, max_results)]
 
-    def _bridge_mode(self, seeds, max_depth, query_text, seed_entities, decomposition):
-        if len(seeds) < 2:
+    def _bridge_mode(
+        self, seed_groups, max_depth, query_text, seed_entities, decomposition
+    ):
+        """Find paths joining the first mention to the second.
+
+        Takes candidates grouped by mention, not a flat seed list: a mention
+        expanding to several entities must not be compared against itself.
+        Every entity of the first mention is bridged against every entity of
+        the second, so fan-out widens the search rather than displacing the
+        thing being compared to.
+        """
+        if len(seed_groups) < 2:
             return []
-        left_paths = self._paths_from_seed(seeds[0], max_depth=max_depth)
-        right_paths = self._paths_from_seed(seeds[1], max_depth=max_depth)
+
         right_by_node: dict[str, list[list[Statement]]] = {}
-        for path, reached in right_paths:
-            right_by_node.setdefault(reached, []).append(path)
+        for right_seed in seed_groups[1]:
+            for path, reached in self._paths_from_seed(right_seed, max_depth=max_depth):
+                right_by_node.setdefault(reached, []).append(path)
 
         candidates = []
         bridge_nodes_found = set()
-        for left_path, bridge_node in left_paths:
-            for right_path in right_by_node.get(bridge_node, []):
-                bridge_nodes_found.add(bridge_node)
-                candidate = left_path + self._invert_path(right_path)
-                candidates.append(
-                    (
-                        candidate,
-                        self._rank_path(
-                            candidate, query_text, seed_entities, decomposition
-                        ),
+        for left_seed in seed_groups[0]:
+            for left_path, bridge_node in self._paths_from_seed(
+                left_seed, max_depth=max_depth
+            ):
+                for right_path in right_by_node.get(bridge_node, []):
+                    bridge_nodes_found.add(bridge_node)
+                    candidate = left_path + self._invert_path(right_path)
+                    candidates.append(
+                        (
+                            candidate,
+                            self._rank_path(
+                                candidate, query_text, seed_entities, decomposition
+                            ),
+                        )
                     )
-                )
         if self.monitor:
             self.monitor.record_bridge_nodes(len(bridge_nodes_found))
         candidates.sort(key=lambda item: item[1], reverse=True)

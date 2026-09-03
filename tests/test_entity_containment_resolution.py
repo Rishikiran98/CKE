@@ -210,3 +210,46 @@ def test_expansion_is_reproducible():
     second = _resolver(*reversed(entities)).expand(["Redis"])
 
     assert first == second
+
+
+def test_expansion_keeps_the_resolved_entity_alongside_its_containers():
+    """A container never displaces what the mention actually resolves to.
+
+    An alias registered as "NYC" -> "New York City" is a stronger statement
+    about what the mention names than the fact that some other entity happens
+    to hold "NYC" inside it. Expansion used to return only the container,
+    sending retrieval to "NYC Department" and nowhere else.
+    """
+    resolver = EntityResolver()
+    for alias, canonical in [
+        ("NYC", "New York City"),
+        ("New York City", "New York City"),
+        ("NYC Department", "NYC Department"),
+    ]:
+        resolver.register_alias(alias, canonical)
+
+    expanded = resolver.expand(["NYC"])
+
+    assert expanded[0] == "New York City"
+    assert "NYC Department" in expanded
+
+
+def test_a_resolved_form_that_is_not_an_entity_does_not_displace_a_container():
+    """The title-case fallback names nothing, so it must not lead.
+
+    It is worth carrying only when there is nothing else, so that the mention
+    still reaches the caller.
+    """
+    resolver = _resolver("RESP protocol")
+
+    assert resolver.expand(["RESP"]) == ["RESP protocol"]
+
+
+def test_groups_keep_each_mentions_candidates_separate():
+    resolver = _resolver("Alpha", "Alpha Group", "Beta")
+
+    groups = resolver.expand_groups(["Alpha", "Beta"])
+
+    assert len(groups) == 2
+    assert groups[0][0] == "Alpha"
+    assert groups[1] == ["Beta"]
