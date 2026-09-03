@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from urllib import request
 
@@ -56,6 +57,20 @@ PROMPT = (
 _MAX_NEW_TOKENS = 16
 
 _DEFAULT_LOCAL_MODEL = "google/flan-t5-base"
+
+#: The Hub commit the default model is pinned to. A model name alone is not a
+#: model: the Hub can serve different weights under the same name tomorrow,
+#: and a number whose weights can change underneath it is not reproducible.
+#: This is the commit both measurements in the pull request resolved to.
+_DEFAULT_LOCAL_REVISION = "7bcac572ce56db69c1ea7c8af255c5d7c9672fc2"
+
+#: What a pin is: a full commit hash. The Hub also accepts a branch or a tag
+#: as a ``revision``, and both move — "main" names whatever was pushed last,
+#: and a tag can be re-pointed — so a run given one would load different
+#: weights on a different day while reporting itself pinned. A short hash is
+#: refused too: it is a prefix, and resolves to whatever the Hub matches it
+#: against.
+_COMMIT_HASH = re.compile(r"[0-9a-fA-F]{40}")
 
 
 @dataclass
@@ -83,6 +98,7 @@ class LLMAnswerer(DegradationMixin):
         endpoint: str | None = None,
         timeout_s: float = 30.0,
         max_input_tokens: int | None = None,
+        model_revision: str | None = None,
     ) -> None:
         """
         ``max_input_tokens`` is the longest prompt handed to a local model.
@@ -112,6 +128,9 @@ class LLMAnswerer(DegradationMixin):
 
         if backend == "local":
             self.model_name = model or _DEFAULT_LOCAL_MODEL
+            if model_revision is None and self.model_name == _DEFAULT_LOCAL_MODEL:
+                model_revision = _DEFAULT_LOCAL_REVISION
+            self.model_revision = model_revision
             self._load_local()
         else:
             self.model_name = model or os.getenv("CKE_LLM_MODEL", "gpt-4o-mini")
@@ -142,9 +161,30 @@ class LLMAnswerer(DegradationMixin):
                 f"transformers torch`"
             )
             return
+        if not self.model_revision:
+            self._degrade(
+                f"no revision is pinned for {self.model_name!r}, so which "
+                f"weights would load depends on what the Hub serves at the "
+                f"moment of loading, and no figure produced would be "
+                f"reproducible. Pass model_revision=<commit sha>"
+            )
+            return
+        if not _COMMIT_HASH.fullmatch(self.model_revision):
+            self._degrade(
+                f"revision {self.model_revision!r} for {self.model_name!r} is "
+                f"not a full commit hash. A branch or tag names whatever the "
+                f"Hub holds under it today and something else tomorrow, so "
+                f"weights loaded through it cannot be reproduced. Pass the "
+                f"40-character commit sha from the model's Hub page"
+            )
+            return
         try:
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name, revision=self.model_revision
+            )
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(
+                self.model_name, revision=self.model_revision
+            )
         except Exception as exc:  # noqa: BLE001 - hub and load errors vary
             self._degrade(
                 f"the local model {self.model_name!r} could not be loaded "
@@ -159,7 +199,9 @@ class LLMAnswerer(DegradationMixin):
         # what the model saw and are counted as truncation against it.
         native = int(getattr(self._tokenizer, "model_max_length", 512))
         self._window = self._requested_window or native
-        record_loaded_model("LLMAnswerer", self.model_name, self.model_name)
+        record_loaded_model(
+            "LLMAnswerer", self.model_name, f"{self.model_name}@{self.model_revision}"
+        )
 
     @property
     def available(self) -> bool:
@@ -173,7 +215,8 @@ class LLMAnswerer(DegradationMixin):
         if not self.available:
             return f"NO MODEL ({self.degraded_reason})"
         where = (
-            f"local, transformers, {self._window}-token window"
+            f"@{self.model_revision[:12]}, local, transformers, "
+            f"{self._window}-token window"
             if self.backend == "local"
             else self.endpoint
         )

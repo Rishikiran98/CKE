@@ -17,6 +17,11 @@ from cke.diagnostics import DegradedComponentError, clear_runtime_state
 from cke.evaluation.llm_qa import PROMPT, LLMAnswerer
 
 
+#: A revision with the shape of a pin. The answerer refuses anything that is
+#: not a full commit hash, so a placeholder has to look like one.
+_A_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     clear_runtime_state()
@@ -203,30 +208,35 @@ def test_last_truncation_is_reset_on_a_call_that_fits():
     assert answerer.last_dropped_tokens == 0
 
 
-def _patch_loaders(monkeypatch):
+def _patch_loaders(monkeypatch, seen=None):
     """Route construction through the real _load_local with stub loaders.
 
     The stub helper above sets the window directly and so cannot see whether
     the loader honours a requested one; a mutation ignoring it survived that
-    test. These go through the loader.
+    test. These go through the loader. ``seen`` collects the keyword
+    arguments each loader was called with.
     """
     import transformers
 
-    monkeypatch.setattr(
-        transformers.AutoTokenizer, "from_pretrained", lambda name: _StubTokenizer()
-    )
-    monkeypatch.setattr(
-        transformers.AutoModelForSeq2SeqLM,
-        "from_pretrained",
-        lambda name: type(
+    def tok(name, **kw):
+        if seen is not None:
+            seen.append(("tokenizer", name, kw))
+        return _StubTokenizer()
+
+    def mdl(name, **kw):
+        if seen is not None:
+            seen.append(("model", name, kw))
+        return type(
             "M", (), {"eval": lambda self: None, "generate": _StubModel().generate}
-        )(),
-    )
+        )()
+
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", tok)
+    monkeypatch.setattr(transformers.AutoModelForSeq2SeqLM, "from_pretrained", mdl)
 
 
 def test_the_native_window_is_used_when_none_is_requested(monkeypatch):
     _patch_loaders(monkeypatch)
-    answerer = LLMAnswerer(backend="local", model="stub")
+    answerer = LLMAnswerer(backend="local", model="stub", model_revision=_A_COMMIT)
 
     assert answerer._window == _StubTokenizer.model_max_length
     assert f"{_StubTokenizer.model_max_length}-token window" in answerer.description
@@ -234,9 +244,92 @@ def test_the_native_window_is_used_when_none_is_requested(monkeypatch):
 
 def test_the_requested_window_overrides_the_native_one(monkeypatch):
     _patch_loaders(monkeypatch)
-    answerer = LLMAnswerer(backend="local", model="stub", max_input_tokens=200)
+    answerer = LLMAnswerer(
+        backend="local", model="stub", max_input_tokens=200, model_revision=_A_COMMIT
+    )
     answerer.answer("q", " ".join(["word"] * 40))
 
     assert answerer._window == 200
     assert answerer.truncation.truncated == 0
     assert "200-token window" in answerer.description
+
+
+# ----------------------------------------------------------------------
+# The weights are pinned
+# ----------------------------------------------------------------------
+
+
+def test_the_default_model_loads_at_a_pinned_revision(monkeypatch):
+    """A model name is not a model. Both loaders must be told the commit."""
+    from cke.evaluation.llm_qa import _DEFAULT_LOCAL_REVISION
+
+    seen = []
+    _patch_loaders(monkeypatch, seen)
+    answerer = LLMAnswerer(backend="local")
+
+    assert [kw.get("revision") for _, _, kw in seen] == [_DEFAULT_LOCAL_REVISION] * 2
+    assert _DEFAULT_LOCAL_REVISION[:12] in answerer.description
+
+
+def test_a_model_without_a_pinned_revision_is_declared(monkeypatch, caplog):
+    _patch_loaders(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        answerer = LLMAnswerer(backend="local", model="someone/other-model")
+
+    assert answerer.degraded is True
+    assert answerer.available is False
+    assert "revision" in answerer.degraded_reason
+
+
+def test_a_model_without_a_pinned_revision_stops_a_strict_run(monkeypatch):
+    _patch_loaders(monkeypatch)
+    with pytest.raises(DegradedComponentError, match="revision"):
+        LLMAnswerer(backend="local", model="someone/other-model", strict=True)
+
+
+def test_an_explicit_revision_reaches_both_loaders(monkeypatch):
+    seen = []
+    _patch_loaders(monkeypatch, seen)
+    LLMAnswerer(backend="local", model="someone/other-model", model_revision=_A_COMMIT)
+
+    assert [kw.get("revision") for _, _, kw in seen] == [_A_COMMIT, _A_COMMIT]
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ["main", "v1.0", "deadbeef", _A_COMMIT[:12], _A_COMMIT + "0"],
+    ids=["branch", "tag", "word", "short-hash", "too-long"],
+)
+def test_a_revision_that_is_not_a_full_commit_is_declared(
+    monkeypatch, caplog, revision
+):
+    """A branch or tag moves and a short hash is a prefix; none of them pins.
+
+    Truthiness let ``main`` through, and a run given it would have loaded
+    whatever the Hub served that day while reporting itself pinned. Nothing
+    may be loaded through such a name, so the loaders must not be called.
+    """
+    seen = []
+    _patch_loaders(monkeypatch, seen)
+    with caplog.at_level(logging.WARNING):
+        answerer = LLMAnswerer(
+            backend="local", model="someone/other-model", model_revision=revision
+        )
+
+    assert answerer.degraded is True
+    assert answerer.available is False
+    assert revision in answerer.degraded_reason
+    assert "commit" in answerer.degraded_reason
+    assert seen == []
+    assert any("commit" in record.message for record in caplog.records)
+
+
+def test_a_branch_name_stops_a_strict_run(monkeypatch):
+    _patch_loaders(monkeypatch)
+    with pytest.raises(DegradedComponentError, match="main"):
+        LLMAnswerer(
+            backend="local",
+            model="someone/other-model",
+            model_revision="main",
+            strict=True,
+        )
