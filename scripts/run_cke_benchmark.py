@@ -598,8 +598,6 @@ def produce_comparison_table(
         lines.append(f"## {ds_name}")
         lines.append("")
 
-        rag_k10_tokens = metrics.get("rag_k10", {}).get("median_tokens", 1.0)
-
         header = "| Metric | " + " | ".join(_CONFIG_LABELS[c] for c in CONFIGS) + " |"
         sep = "|--------|" + "|".join("-------" for _ in CONFIGS) + "|"
         lines += [header, sep]
@@ -616,19 +614,20 @@ def produce_comparison_table(
 
         lines.append(row("Answer EM", "em"))
         lines.append(row("Answer F1", "f1"))
-        lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
+        lines.append(row("Median est. prompt tokens", "median_tokens", "{:.0f}"))
         lines.append(row("Median latency (ms)", "median_latency_ms", "{:.1f}"))
-
-        # Token reduction vs RAG k=10
-        reductions = []
-        for c in CONFIGS:
-            cke_tokens = metrics.get(c, {}).get("median_tokens", float("nan"))
-            try:
-                red = rag_k10_tokens / cke_tokens if cke_tokens > 0 else float("nan")
-                reductions.append(f"{red:.1f}×")
-            except (ZeroDivisionError, TypeError):
-                reductions.append("n/a")
-        lines.append("| Token reduction vs RAG k=10 | " + " | ".join(reductions) + " |")
+        lines.append("")
+        # The ratio row that used to sit here divided one TokenCounter estimate
+        # by another. TokenCounter is word count x 1.3, and the two arms count
+        # different units (concatenated documents against triples), so the
+        # ratio followed from the units rather than from retrieval. It was the
+        # source of the retracted headline figure and is not reproduced.
+        lines.append(
+            "Prompt token figures are estimates from TokenCounter "
+            "(word count x 1.3), not tokenizer output. Answers on every arm "
+            "come from SimpleExtractiveQA, not a language model. Neither "
+            "column supports a comparison between retrieval strategies."
+        )
         lines.append("")
 
     return "\n".join(lines)
@@ -824,25 +823,34 @@ def _token_count_static(text: str) -> int:
 def produce_summary(
     combined: dict[str, dict[str, float]],
 ) -> dict[str, Any]:
-    """Produce top-level success-criterion flags."""
+    """Produce the raw per-arm figures, with no verdict attached.
+
+    This used to emit a token-reduction ratio and two pass/fail success flags
+    (``meets_5x_criterion``, ``meets_accuracy_criterion``). It was the source
+    of the retracted headline claim. Those are gone, for two reasons that both
+    hold independently:
+
+    * The token figures are :class:`TokenCounter` output, which is word count
+      multiplied by 1.3 and not a tokenizer. A ratio between two estimates is
+      not a measurement, and the ratio is largely fixed by the units each arm
+      counts in (documents against triples).
+    * Answers on both arms come from :class:`SimpleExtractiveQA`, not a
+      language model, so the accuracy figures do not describe either
+      retrieval strategy.
+
+    The per-arm numbers stay, named so that no reader mistakes an estimate for
+    a measurement. A verdict belongs with an evaluation harness that can
+    support one.
+    """
     rag = combined.get("rag_k10", {})
     cke = combined.get("cke_n12", {})
 
-    rag_tokens = rag.get("median_tokens", 1.0)
-    cke_tokens = cke.get("median_tokens", 1.0)
-    token_reduction = rag_tokens / cke_tokens if cke_tokens > 0 else 0.0
-
-    em_delta = cke.get("em", 0.0) - rag.get("em", 0.0)
-    f1_delta = cke.get("f1", 0.0) - rag.get("f1", 0.0)
-
     return {
-        "token_reduction_rag_k10_vs_cke_n12": round(token_reduction, 2),
-        "meets_5x_criterion": token_reduction >= 5.0,
-        "em_delta_cke_vs_rag": round(em_delta, 4),
-        "f1_delta_cke_vs_rag": round(f1_delta, 4),
-        "meets_accuracy_criterion": em_delta >= -0.02,
-        "rag_k10_median_tokens": rag_tokens,
-        "cke_n12_median_tokens": cke_tokens,
+        "prompt_token_figures_are_estimates": True,
+        "prompt_token_estimator": "word count x 1.3 (TokenCounter), not a tokenizer",
+        "answers_produced_by": "SimpleExtractiveQA (no language model)",
+        "rag_k10_median_estimated_tokens": rag.get("median_tokens", 0.0),
+        "cke_n12_median_estimated_tokens": cke.get("median_tokens", 0.0),
         "rag_k10_em": rag.get("em", 0.0),
         "cke_n12_em": cke.get("em", 0.0),
         "rag_k10_f1": rag.get("f1", 0.0),
@@ -1112,17 +1120,21 @@ def main() -> None:
     c_f1 = cke.get("f1", 0)
     c_tok = cke.get("median_tokens", 0)
     print(
-        f"  RAG k=10  — EM: {r_em:.4f}  " f"F1: {r_f1:.4f}  Median tokens: {r_tok:.0f}"
+        f"  RAG k=10  — EM: {r_em:.4f}  "
+        f"F1: {r_f1:.4f}  Median est. tokens: {r_tok:.0f}"
     )
     print(
-        f"  CKE N=12  — EM: {c_em:.4f}  " f"F1: {c_f1:.4f}  Median tokens: {c_tok:.0f}"
+        f"  CKE N=12  — EM: {c_em:.4f}  "
+        f"F1: {c_f1:.4f}  Median est. tokens: {c_tok:.0f}"
     )
-    tok_red = summary["token_reduction_rag_k10_vs_cke_n12"]
-    meets_5x = summary["meets_5x_criterion"]
-    em_delta = summary["em_delta_cke_vs_rag"]
-    meets_acc = summary["meets_accuracy_criterion"]
-    print(f"  Token reduction: {tok_red:.1f}x " f"(>=5x criterion: {meets_5x})")
-    print(f"  EM delta (CKE vs RAG): {em_delta:+.4f} " f"(within +/-0.02: {meets_acc})")
+    print(
+        "  Prompt token figures above are TokenCounter estimates "
+        "(word count x 1.3), not tokenizer output."
+    )
+    print(
+        "  Answers on every arm come from SimpleExtractiveQA, " "not a language model."
+    )
+    print("  No success criterion is evaluated: these figures cannot support one.")
     print("=" * 60)
 
     # --- Retrieval mode ablation ---

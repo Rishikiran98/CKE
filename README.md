@@ -95,8 +95,9 @@ The test suite needs `pytest`, `networkx`, `numpy`, `pydantic`, `PyYAML`, and
 python -m pytest -q
 ```
 
-198 tests pass. They cover module behaviour in isolation; none of them
-establishes an end-to-end quality claim.
+The suite passes; the command above reports the current count. These tests
+cover module behaviour in isolation; none of them establishes an end-to-end
+quality claim.
 
 ## Datasets
 
