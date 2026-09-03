@@ -178,3 +178,120 @@ def test_every_traversal_mode_follows_incoming_edges(mode):
     subjects = {item["subject"] for item in evidence}
 
     assert "Salvatore" in subjects, f"{mode} never traversed an incoming edge"
+
+
+# ---------------------------------------------------------------------------
+# Consequences of traversing edges in both directions
+# ---------------------------------------------------------------------------
+
+
+def test_a_walk_reports_the_node_it_actually_reached():
+    """Following X -> A from A reaches X, but path[-1].object is still A."""
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("X", "links", "A")
+
+    walks = GraphRetriever(engine)._paths_from_seed("A", max_depth=2)
+
+    assert walks, "expected a walk along the incoming edge"
+    path, reached = walks[0]
+    assert path[-1].object == "A", "the edge keeps its own direction"
+    assert reached == "X", "the walk reached X, not A"
+
+
+def test_bridge_mode_joins_two_walks_at_the_node_they_reached():
+    """A <- X -> B bridges at X.
+
+    Grouping by path[-1].object matches walks on the wrong node once a walk
+    can end by following an edge backwards. It still produces candidates, so a
+    non-empty result proves nothing: what it produces are paths that traverse
+    an edge and then its own inverse, a round trip carrying no information.
+    """
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("X", "links", "A")
+    engine.add_statement("X", "links", "B")
+
+    plan = QueryPlan(
+        query_text="Compare A and B",
+        seed_entities=["A", "B"],
+        intent="comparison",
+        max_depth=2,
+        max_results=10,
+    )
+    paths = GraphRetriever(engine).retrieve(plan)["paths"]
+
+    assert paths, "no bridge candidate through the shared parent"
+
+    for candidate in paths:
+        edges = {
+            (a["subject"], a["relation"], a["object"]) for a in candidate["assertions"]
+        }
+        for subject, relation, obj in edges:
+            inverse = (obj, f"inverse_{relation}", subject)
+            assert (
+                inverse not in edges
+            ), f"candidate retraces {subject}->{obj} and back: {sorted(edges)}"
+
+    # The bridge is two hops: out to X from one seed, back down to the other.
+    assert any(
+        len(c["assertions"]) == 2 for c in paths
+    ), "no minimal two-hop bridge; every candidate detours"
+
+
+def test_an_edge_between_two_seeds_uses_one_budget_slot():
+    """An edge incident to both seeds arrives twice.
+
+    Truncating before deduplication let the duplicate consume the budget and
+    push out a unique lower-ranked edge.
+    """
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("A", "links", "B")
+    engine.add_statement("A", "links", "C")
+    engine.add_statement("B", "links", "D")
+
+    scored = GraphRetriever(engine)._neighborhood_mode(
+        seeds=["A", "B"],
+        max_results=2,
+        query_text="define A and B",
+        seeds_raw=["A", "B"],
+        decomposition=[],
+    )
+    keys = [(p[0].subject, p[0].relation, p[0].object) for p, _ in scored]
+
+    assert len(set(keys)) == len(keys), f"a duplicate consumed a slot: {keys}"
+
+
+def test_a_narrow_beam_does_not_spend_itself_backtracking():
+    """Every non-root node offers the edge just traversed, leading back.
+
+    With beam_width=1 the beam re-selected that higher-confidence edge and
+    never expanded the continuation.
+    """
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("A", "links", "B", confidence=1.0)
+    engine.add_statement("B", "links", "C", confidence=0.8)
+    engine.add_statement("C", "links", "D", confidence=0.8)
+
+    plan = QueryPlan(
+        query_text="A to D",
+        seed_entities=["A"],
+        intent="factoid",
+        max_depth=3,
+        max_results=20,
+    )
+    evidence = GraphRetriever(engine).retrieve(plan, mode="beam", beam_width=1)[
+        "evidence"
+    ]
+    reached = {(item["subject"], item["object"]) for item in evidence}
+
+    assert ("C", "D") in reached, f"beam never got past the backtrack: {reached}"
+
+
+def test_no_path_immediately_retraces_the_edge_it_arrived_on():
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("A", "links", "B")
+
+    for path in GraphRetriever(engine)._bfs_traversal(
+        seeds=["A"], max_depth=3, max_nodes=200
+    ):
+        keys = [edge.key() for edge in path]
+        assert len(keys) == len(set(keys)), f"path retraces an edge: {keys}"

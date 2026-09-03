@@ -122,6 +122,20 @@ class GraphRetriever:
             return edge.object
         return edge.subject
 
+    def _forward_edges(self, node: str, path: list[Statement]) -> list[Statement]:
+        """Incident edges at *node*, excluding the one just traversed.
+
+        Traversal follows edges in both directions, so at every non-root node
+        the edge we arrived on is also a candidate leading straight back. A
+        narrow beam would spend its whole width re-selecting it and never
+        expand a lower-scoring continuation.
+        """
+        incident = self.graph_engine.get_incident(node)
+        if not path:
+            return incident
+        arrived_on = path[-1].key()
+        return [edge for edge in incident if edge.key() != arrived_on]
+
     def _path_mode(
         self,
         seeds,
@@ -166,10 +180,18 @@ class GraphRetriever:
     ):
         scored = []
         expanded = 0
+        # An edge between two seeds is incident to both, so it arrives twice.
+        # Truncating before deduplication let one edge consume several budget
+        # slots and push out unique lower-ranked ones.
+        seen_edges: set = set()
         for seed in seeds:
             neighbors = self.graph_engine.get_incident(seed)
             expanded += len(neighbors)
             for edge in neighbors:
+                key = edge.key()
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
                 scored.append(
                     (
                         [edge],
@@ -186,14 +208,13 @@ class GraphRetriever:
             return []
         left_paths = self._paths_from_seed(seeds[0], max_depth=max_depth)
         right_paths = self._paths_from_seed(seeds[1], max_depth=max_depth)
-        right_by_node = {}
-        for path in right_paths:
-            right_by_node.setdefault(path[-1].object, []).append(path)
+        right_by_node: dict[str, list[list[Statement]]] = {}
+        for path, reached in right_paths:
+            right_by_node.setdefault(reached, []).append(path)
 
         candidates = []
         bridge_nodes_found = set()
-        for left_path in left_paths:
-            bridge_node = left_path[-1].object
+        for left_path, bridge_node in left_paths:
             for right_path in right_by_node.get(bridge_node, []):
                 bridge_nodes_found.add(bridge_node)
                 candidate = left_path + self._invert_path(right_path)
@@ -210,9 +231,19 @@ class GraphRetriever:
         candidates.sort(key=lambda item: item[1], reverse=True)
         return candidates
 
-    def _paths_from_seed(self, seed: str, max_depth: int) -> list[list[Statement]]:
+    def _paths_from_seed(
+        self, seed: str, max_depth: int
+    ) -> list[tuple[list[Statement], str]]:
+        """Walk out from *seed*, returning each path with the node it reached.
+
+        The reached node is returned explicitly because a path may end by
+        following an edge backwards: for ``X -> A`` walked from ``A``, the walk
+        reaches ``X`` while ``path[-1].object`` is still ``A``. Callers that
+        need the endpoint, such as bridge matching, must use this rather than
+        reading it off the last edge.
+        """
         queue = deque([(seed, [], 0)])
-        paths = []
+        paths: list[tuple[list[Statement], str]] = []
         visited = set()
         while queue:
             node, path, depth = queue.popleft()
@@ -222,10 +253,11 @@ class GraphRetriever:
             if marker in visited:
                 continue
             visited.add(marker)
-            for edge in self.graph_engine.get_incident(node):
+            for edge in self._forward_edges(node, path):
+                next_node = self._other_endpoint(edge, node)
                 next_path = path + [edge]
-                paths.append(next_path)
-                queue.append((self._other_endpoint(edge, node), next_path, depth + 1))
+                paths.append((next_path, next_node))
+                queue.append((next_node, next_path, depth + 1))
         return paths
 
     def _invert_path(self, path):
@@ -296,7 +328,7 @@ class GraphRetriever:
                 continue
             visited_depth[node] = depth
             node_visits += 1
-            for edge in self.graph_engine.get_incident(node):
+            for edge in self._forward_edges(node, path):
                 next_path = path + [edge]
                 paths.append(next_path)
                 next_node = self._other_endpoint(edge, node)
@@ -316,7 +348,7 @@ class GraphRetriever:
                 if visited >= max_nodes:
                     break
                 visited += 1
-                for edge in self.graph_engine.get_incident(node):
+                for edge in self._forward_edges(node, path):
                     candidate = path + [edge]
                     expanded.append(
                         (
@@ -357,7 +389,7 @@ class GraphRetriever:
             if depth >= max_depth:
                 continue
             expanded += 1
-            for edge in self.graph_engine.get_incident(node):
+            for edge in self._forward_edges(node, path):
                 candidate = path + [edge]
                 next_node = self._other_endpoint(edge, node)
                 g = self._score_path(candidate, query_text, seed_entities)
