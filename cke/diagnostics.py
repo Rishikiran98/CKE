@@ -45,6 +45,7 @@ __all__ = [
     "environment_report",
     "record_degradation",
     "record_loaded_model",
+    "require_strict_component",
 ]
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,36 @@ def declare_degradation(component: str, reason: str, strict: bool = False) -> No
     record_degradation(component, reason)
 
 
+def require_strict_component(
+    component: str, supplied: object, label: str, strict: bool
+) -> None:
+    """Refuse a caller-supplied component that is degraded or not strict.
+
+    A strict run cannot verify an arbitrary injected object, so it requires
+    that object to declare itself strict. Without this, passing a prebuilt
+    non-strict component silently exempts it from the contract while the
+    caller still reports itself strict.
+    """
+    if not strict or supplied is None:
+        return
+
+    if getattr(supplied, "degraded", False):
+        raise DegradedComponentError(
+            f"{component} was given a {label} that has already degraded "
+            f"({getattr(supplied, 'degraded_reason', 'unknown reason')}), and "
+            f"{component} was constructed with strict=True, which forbids that."
+        )
+
+    if not getattr(supplied, "strict", False):
+        raise DegradedComponentError(
+            f"{component} was constructed with strict=True but given a "
+            f"{label} ({type(supplied).__name__}) that does not declare "
+            f"itself strict, so its own fallbacks would not be refused. "
+            f"Construct it with strict=True, or construct {component} with "
+            f"strict=False."
+        )
+
+
 class DegradationMixin:
     """Give a component the three-part degradation contract.
 
@@ -161,6 +192,9 @@ class DegradationMixin:
         self.strict = bool(strict)
         self.degraded = False
         self.degraded_reason = ""
+        # The reasons are kept as a list, not recovered by splitting
+        # degraded_reason: a reason may itself contain the separator.
+        self._degradation_reasons: list[str] = []
 
     def _degrade(self, reason: str) -> None:
         """Declare that this component is running with reduced capability.
@@ -179,8 +213,9 @@ class DegradationMixin:
         # Keep every distinct reason, but never repeat one. A degradation
         # reached from inside a loop would otherwise emit a warning per
         # iteration and grow degraded_reason quadratically.
-        existing = getattr(self, "degraded_reason", "")
-        reasons = existing.split("; ") if existing else []
+        reasons = getattr(self, "_degradation_reasons", None)
+        if reasons is None:
+            reasons = self._degradation_reasons = []
         if reason in reasons:
             return
 

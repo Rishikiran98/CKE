@@ -480,3 +480,40 @@ def test_dimension_is_measured_when_a_healthy_model_reports_none(monkeypatch):
     monkeypatch.setattr(module, "_FAILED_MODEL_LOADS", {})
 
     assert module.EmbeddingModel(model_name="quiet").dimension == 512
+
+
+def test_a_strict_pipeline_refuses_a_non_strict_injected_reasoner(monkeypatch):
+    """A prebuilt reasoner bypassed strict entirely: the pipeline reported
+    itself strict while running on a hashed embedder."""
+    from cke.experiments import reasoning_eval_pipeline as module
+    from cke.reasoning.path_reasoner import PathReasoner
+    from cke.retrieval import embedding_model as embed_module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", None)
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(embed_module, "_FAILED_MODEL_LOADS", {})
+
+    weak = PathReasoner(strict=False)
+    assert weak.degraded is True
+
+    with pytest.raises(DegradedComponentError, match="already degraded"):
+        module.ReasoningEvalPipeline(reasoner=weak, strict=True)
+
+    # Opting out still accepts it.
+    assert module.ReasoningEvalPipeline(reasoner=weak, strict=False) is not None
+
+
+def test_path_reasoner_inherits_its_embedders_degradation(monkeypatch):
+    from cke.reasoning.path_reasoner import PathReasoner
+    from cke.retrieval import embedding_model as embed_module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", None)
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(embed_module, "_FAILED_MODEL_LOADS", {})
+
+    reasoner = PathReasoner()
+    assert reasoner.degraded is True
+    assert "embedding model is degraded" in reasoner.degraded_reason
+
+    with pytest.raises(DegradedComponentError):
+        PathReasoner(strict=True)

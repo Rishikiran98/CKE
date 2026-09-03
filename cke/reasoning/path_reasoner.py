@@ -14,6 +14,7 @@ from cke.reasoning.pattern_memory import PatternMemory
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
 from cke.reasoning.verifier import ReasoningVerifier
+from cke.diagnostics import DegradationMixin
 from cke.retrieval.embedding_model import EmbeddingModel
 
 
@@ -51,7 +52,7 @@ class InferenceRule:
         return inferred
 
 
-class PathReasoner:
+class PathReasoner(DegradationMixin):
     """Reason over subject→relation→object chains with probabilistic scoring."""
 
     def __init__(
@@ -62,7 +63,7 @@ class PathReasoner:
         embedding_model: EmbeddingModel | None = None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.rules = rules or [
             InferenceRule(
                 name="located_in_transitivity",
@@ -76,6 +77,11 @@ class PathReasoner:
         self._verifier = verifier or ReasoningVerifier()
         self._pattern_memory = pattern_memory or PatternMemory()
         self._embedding_model = embedding_model or EmbeddingModel(strict=strict)
+        if getattr(self._embedding_model, "degraded", False):
+            self._degrade(
+                "its embedding model is degraded: "
+                f"{self._embedding_model.degraded_reason}"
+            )
         self._advanced_reasoner = TemplateReasoner()
 
     def answer(self, query: str, context: Iterable[Statement]) -> str:

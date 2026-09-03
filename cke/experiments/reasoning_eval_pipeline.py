@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cke.diagnostics import degradation_summary, environment_report
+from cke.diagnostics import (
+    degradation_summary,
+    environment_report,
+    require_strict_component,
+)
 from cke.datasets.registry import DATASET_REGISTRY
 from cke.models import Statement
 from cke.reasoning.path_reasoner import PathReasoner
@@ -32,6 +36,7 @@ class ReasoningEvalPipeline:
         self, reasoner: PathReasoner | None = None, strict: bool = True
     ) -> None:
         self.strict = bool(strict)
+        require_strict_component(type(self).__name__, reasoner, "reasoner", self.strict)
         self.reasoner = reasoner or PathReasoner(strict=strict)
 
     def evaluate_dataset(

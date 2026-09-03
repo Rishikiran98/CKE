@@ -226,3 +226,59 @@ def test_degradation_summary_reports_what_degraded():
     assert "DEGRADED COMPONENTS" in summary
     assert "not valid" in summary
     assert "the embedder is hashing" in summary
+
+
+def test_a_reason_containing_the_separator_is_still_deduplicated():
+    """Reasons were recovered by splitting degraded_reason on "; ".
+
+    CoreferenceResolver joins its model failures with that separator, so an
+    identical compound reason failed the membership check and was appended
+    every time it recurred.
+    """
+
+    class Compound(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+
+    component = Compound()
+    reason = "models failed: a: boom; b: bang"
+    for _ in range(3):
+        component._degrade(reason)
+
+    assert component.degraded_reason == reason
+
+
+def test_a_distinct_reason_matching_a_fragment_is_not_suppressed():
+    class Compound(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+
+    component = Compound()
+    component._degrade("alpha; beta")
+    component._degrade("beta")
+
+    assert component.degraded_reason == "alpha; beta; beta"
+
+
+def test_require_strict_component_refuses_a_degraded_injection():
+    from cke.diagnostics import require_strict_component
+
+    class Degraded:
+        degraded = True
+        degraded_reason = "its model is missing"
+        strict = False
+
+    class Strict:
+        degraded = False
+        strict = True
+
+    with pytest.raises(DegradedComponentError, match="already degraded"):
+        require_strict_component("Pipeline", Degraded(), "reasoner", True)
+
+    with pytest.raises(DegradedComponentError, match="does not declare"):
+        require_strict_component("Pipeline", object(), "reasoner", True)
+
+    # Healthy and strict is accepted, and a non-strict caller accepts anything.
+    require_strict_component("Pipeline", Strict(), "reasoner", True)
+    require_strict_component("Pipeline", Degraded(), "reasoner", False)
+    require_strict_component("Pipeline", None, "reasoner", True)
