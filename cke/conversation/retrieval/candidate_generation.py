@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+from cke.diagnostics import DegradationMixin
 from cke.conversation.config import RetrievalConfig
 from cke.conversation.memory_store import ConversationMemoryStore
 from cke.conversation.patterns import lexical_overlap
@@ -11,7 +12,7 @@ from cke.conversation.types import RetrievedMemory
 from cke.retrieval.embedding_model import EmbeddingModel
 
 
-class CandidateGenerator:
+class CandidateGenerator(DegradationMixin):
     """Generate mixed raw-turn and canonical-memory retrieval candidates."""
 
     def __init__(
@@ -21,7 +22,7 @@ class CandidateGenerator:
         config: RetrievalConfig | None = None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.memory_store = memory_store
         self.embedding_model = embedding_model or EmbeddingModel(strict=strict)
         self.config = config or RetrievalConfig()
@@ -93,7 +94,17 @@ class CandidateGenerator:
                 missing_indexes.append(index)
                 missing_texts.append(event.text)
         if missing_texts:
-            fresh_vectors = self.embedding_model.embed_texts(missing_texts)
+            fresh_vectors = list(self.embedding_model.embed_texts(missing_texts))
+            if len(fresh_vectors) != len(missing_texts):
+                # zip() truncates, so a short return silently drops events and
+                # misaligns the caller's zip(events, vectors).
+                self._degrade(
+                    f"the embedding model returned {len(fresh_vectors)} vectors "
+                    f"for {len(missing_texts)} texts, so "
+                    f"{len(missing_texts) - len(fresh_vectors)} conversation "
+                    "events are dropped from retrieval without appearing to be "
+                    "missing"
+                )
             for index, vector in zip(missing_indexes, fresh_vectors):
                 event = events[index]
                 signature = f"{event.timestamp}:{event.text}"

@@ -5,3 +5,5 @@ data/
 *.db
 flake8_output.txt
 black_diff.txt
+# Benchmark drivers default --output-dir to results/.
+results/

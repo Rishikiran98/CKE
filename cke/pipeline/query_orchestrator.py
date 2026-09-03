@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from cke.diagnostics import DegradedComponentError
+from cke.diagnostics import DegradationMixin, DegradedComponentError
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.pipeline.types import (
@@ -29,7 +29,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class QueryOrchestrator:
+#: Used when a query plan reports no route confidence. Not a measurement.
+_SUBSTITUTED_ROUTE_CONFIDENCE = 0.65
+
+
+class QueryOrchestrator(DegradationMixin):
     """Coordinates query routing and grounded reasoning steps."""
 
     def __init__(
@@ -48,7 +52,7 @@ class QueryOrchestrator:
         evidence_threshold: int = 2,
         strict: bool = False,
     ):
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.graph_engine = graph_engine
         self.router = router
         self.retrieval_mode = retrieval_mode
@@ -58,6 +62,7 @@ class QueryOrchestrator:
             graph_engine=graph_engine,
             dense_retriever=dense_retriever,
             evidence_threshold=evidence_threshold,
+            strict=strict,
         )
         self.assembler = assembler or (
             EvidenceAssembler() if self.retriever is not None else None
@@ -71,7 +76,7 @@ class QueryOrchestrator:
         self.verifier = verifier or ReasoningVerifier()
         self.operator_selector = operator_selector or OperatorSelector()
         self.operator_executor = operator_executor or OperatorExecutor()
-        self.reasoner_adapter = ReasonerAdapter(self.reasoner)
+        self.reasoner_adapter = ReasonerAdapter(self.reasoner, strict=strict)
         self.last_context: ReasoningContext | None = None
         self.entity_resolver = entity_resolver or EntityResolver(strict=strict)
         self.confidence_calibrator = ConfidenceCalibrator()
@@ -391,6 +396,7 @@ class QueryOrchestrator:
         graph_engine,
         dense_retriever,
         evidence_threshold: int,
+        strict: bool = False,
     ):
         if retriever is not None:
             return retriever
@@ -410,12 +416,12 @@ class QueryOrchestrator:
                 dense_retriever,
                 evidence_threshold=evidence_threshold,
             )
-            return HybridEvidenceRetriever(router)
+            return HybridEvidenceRetriever(router, strict=strict)
 
         if retrieval_mode == "dense_only" and dense_retriever is not None:
             from cke.retrieval.dense_evidence_retriever import DenseEvidenceRetriever
 
-            return DenseEvidenceRetriever(dense_retriever)
+            return DenseEvidenceRetriever(dense_retriever, strict=strict)
 
         if graph_engine is not None:
             return DefaultEvidenceRetriever(graph_engine)
@@ -507,13 +513,7 @@ class QueryOrchestrator:
                 else 0.0
             ),
             "verification_issues": verification_issues,
-            "route_confidence": float(
-                getattr(
-                    query_plan,
-                    "route_confidence",
-                    getattr(query_plan, "confidence_score", 0.65),
-                )
-            ),
+            "route_confidence": self._route_confidence(query_plan),
         }
         signals["verification_pass"] = not verification_issues
         signals["contradiction_flag"] = any(())
@@ -589,6 +589,25 @@ class QueryOrchestrator:
             return None
 
         return None
+
+    def _route_confidence(self, query_plan) -> float:
+        """Return the plan's route confidence, or declare the substitution.
+
+        A plan that exposes neither attribute used to get a constant that then
+        flowed into the calibrated confidence as if the router had reported it.
+        """
+        for attribute in ("route_confidence", "confidence_score"):
+            value = getattr(query_plan, attribute, None)
+            if value is not None:
+                return float(value)
+
+        self._degrade(
+            f"the query plan ({type(query_plan).__name__}) exposes neither "
+            "route_confidence nor confidence_score, so a substituted value "
+            f"({_SUBSTITUTED_ROUTE_CONFIDENCE}) is used as the router's "
+            "confidence in the calibrated result",
+        )
+        return _SUBSTITUTED_ROUTE_CONFIDENCE
 
     def _verification_failure_policy(self, issues: list[str]) -> tuple[str, str]:
         if "contradictory_evidence" in issues:

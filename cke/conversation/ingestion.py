@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from cke.diagnostics import declare_degradation
+from cke.diagnostics import DegradationMixin
 from cke.observability.system_monitor import SystemMonitor
 
 from cke.conversation.config import ConversationConfig
@@ -27,7 +27,7 @@ from cke.conversation.validation import CandidateMemoryValidator
 logger = logging.getLogger(__name__)
 
 
-class ConversationIngestionPipeline:
+class ConversationIngestionPipeline(DegradationMixin):
     """Deterministic ingestion pipeline for event storage and memory promotion."""
 
     def __init__(
@@ -42,7 +42,7 @@ class ConversationIngestionPipeline:
         strict: bool = False,
     ) -> None:
         self.memory_store = memory_store
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.monitor = monitor
         self.config = config or memory_store.config
         self.extractors = extractors or [
@@ -101,12 +101,10 @@ class ConversationIngestionPipeline:
                     type(exc).__name__,
                     exc,
                 )
-                declare_degradation(
-                    type(self).__name__,
+                self._degrade(
                     f"extractor {type(extractor).__name__} raised "
                     f"{type(exc).__name__} on a conversation turn; its "
                     "candidates were dropped",
-                    strict=getattr(self, "strict", False),
                 )
                 if self.monitor:
                     self.monitor.record_extractor_exception()

@@ -8,6 +8,8 @@ from typing import Any
 
 import networkx as nx
 
+from cke.diagnostics import DegradationMixin
+
 
 @dataclass
 class GraphEntity:
@@ -25,8 +27,14 @@ class GraphAssertion:
     evidence: list[dict[str, Any]] = field(default_factory=list)
 
 
-class GraphStore:
-    def __init__(self) -> None:
+#: Stored for an assertion that arrived with no confidence. Maximum
+#: certainty for something nothing scored, so it is declared.
+_UNSCORED_CONFIDENCE = 1.0
+
+
+class GraphStore(DegradationMixin):
+    def __init__(self, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self.graph = nx.MultiDiGraph()
 
     def add_entity(self, entity: GraphEntity | str) -> None:
@@ -45,10 +53,24 @@ class GraphStore:
             subject,
             object_,
             relation=str(payload["relation"]),
-            confidence=float(payload.get("confidence", 1.0)),
+            confidence=self._resolve_confidence(payload),
             qualifiers=dict(payload.get("qualifiers", {})),
             evidence=list(payload.get("evidence", [])),
         )
+
+    def _resolve_confidence(self, payload: dict[str, Any]) -> float:
+        """Return the payload's confidence, or declare the substitution.
+
+        An edge arriving without one used to be stored at maximum certainty,
+        so anything reading trust off the graph read this constant.
+        """
+        if "confidence" in payload:
+            return float(payload["confidence"])
+        self._degrade(
+            "an assertion arrived with no confidence, so it is stored at "
+            f"{_UNSCORED_CONFIDENCE}, the maximum, for something nothing scored"
+        )
+        return _UNSCORED_CONFIDENCE
 
     def get_entity(self, name: str) -> dict[str, Any] | None:
         if name not in self.graph:

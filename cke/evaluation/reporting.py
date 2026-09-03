@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
+from cke.diagnostics import declare_degradation
 from cke.evaluation.eval_types import CaseEvaluationResult, EvaluationSummary
 
 
@@ -133,7 +134,25 @@ def compare_summaries(
     baseline_metrics = baseline.retrieval_metrics or {}
     candidate_metrics = candidate.retrieval_metrics or {}
     metric_names = set(baseline_metrics) | set(candidate_metrics)
+
+    one_sided = sorted(
+        name
+        for name in metric_names
+        if name not in baseline_metrics or name not in candidate_metrics
+    )
+    if one_sided:
+        # A metric present on one side only was differenced against 0.0, so an
+        # unmeasured metric read as a full-size improvement or regression.
+        declare_degradation(
+            "compare_summaries",
+            f"{len(one_sided)} metrics ({', '.join(one_sided)}) are present on "
+            "only one side of this comparison. They are excluded rather than "
+            "differenced against zero, which would report an unmeasured "
+            "metric as a full-size change",
+        )
+
     return {
-        metric: candidate_metrics.get(metric, 0.0) - baseline_metrics.get(metric, 0.0)
+        metric: candidate_metrics[metric] - baseline_metrics[metric]
         for metric in sorted(metric_names)
+        if metric in baseline_metrics and metric in candidate_metrics
     }

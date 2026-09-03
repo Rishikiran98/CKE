@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from cke.diagnostics import DegradationMixin
 from cke.models import Statement
 from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 
 
-class DenseEvidenceRetriever:
+#: Substituted when a dense result carries no score. Not a measurement.
+_MISSING_SCORE = 0.5
+
+
+class DenseEvidenceRetriever(DegradationMixin):
     """Retrieve evidence from a dense retriever without requiring a ChunkFactStore."""
 
-    def __init__(self, rag_retriever) -> None:
+    def __init__(self, rag_retriever, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self.rag_retriever = rag_retriever
 
     def retrieve(
@@ -28,7 +34,19 @@ class DenseEvidenceRetriever:
             text = str(item.get("text", ""))
             if not text:
                 continue
-            score = float(item.get("score", 0.5))
+            if "score" in item:
+                score = float(item["score"])
+            else:
+                # One missing key used to become three independently-named
+                # figures that agree with each other: confidence, trust_score
+                # and retrieval_score are all this value.
+                self._degrade(
+                    "a dense retrieval result carried no score, so a "
+                    f"substituted value ({_MISSING_SCORE}) is reported as its "
+                    "confidence, trust score and retrieval score alike. None "
+                    "of the three is a measurement",
+                )
+                score = _MISSING_SCORE
             chunk_id = str(item.get("doc_id", f"dense::{idx}"))
 
             retrieved_chunks.append(

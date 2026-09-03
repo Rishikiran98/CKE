@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from cke.diagnostics import declare_degradation
 from collections import Counter
 from typing import Any
 
@@ -58,20 +59,42 @@ class EvaluationMetrics:
         return sum(len(path) for path in evidence_paths) / len(evidence_paths)
 
     @staticmethod
-    def path_confidence(evidence_paths: list[list[dict[str, Any]]]) -> float:
+    def path_confidence(
+        evidence_paths: list[list[dict[str, Any]]], strict: bool = False
+    ) -> float:
+        """Mean per-path edge trust.
+
+        An edge carrying neither trust_score nor confidence used to count as
+        1.0, the maximum, so missing instrumentation raised this metric rather
+        than lowering it. Such edges are now declared and excluded.
+        """
         if not evidence_paths:
             return 0.0
+
+        unscored = 0
         per_path: list[float] = []
         for path in evidence_paths:
             if not path:
                 continue
-            per_path.append(
-                sum(
-                    float(edge.get("trust_score", edge.get("confidence", 1.0)))
-                    for edge in path
-                )
-                / len(path)
+            scores = []
+            for edge in path:
+                value = edge.get("trust_score", edge.get("confidence"))
+                if value is None:
+                    unscored += 1
+                    continue
+                scores.append(float(value))
+            if scores:
+                per_path.append(sum(scores) / len(scores))
+
+        if unscored:
+            declare_degradation(
+                "EvaluationMetrics.path_confidence",
+                f"{unscored} path edges carried neither trust_score nor "
+                "confidence. They previously counted as 1.0, so absent "
+                "instrumentation raised this metric; they are excluded now",
+                strict=strict,
             )
+
         return sum(per_path) / len(per_path) if per_path else 0.0
 
     @staticmethod

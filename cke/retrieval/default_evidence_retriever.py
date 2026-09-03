@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+from cke.diagnostics import DegradationMixin
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.models import Statement
 from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 
 
-class DefaultEvidenceRetriever:
+#: Constant added to every statement's score, so no statement can score
+#: below it. A tuning choice, not a measured quantity.
+_SCORE_FLOOR = 0.35
+
+
+class DefaultEvidenceRetriever(DegradationMixin):
     """Retrieve evidence directly from the in-memory graph when no RAG stack exists."""
 
-    def __init__(self, graph_engine) -> None:
+    def __init__(self, graph_engine, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self.graph_engine = graph_engine
 
     def retrieve(
@@ -104,6 +111,13 @@ class DefaultEvidenceRetriever:
                 add(statement)
 
         if not seen:
+            # Neither the entity seeds nor the relation terms matched anything,
+            # so this returns the whole graph. That is not retrieval, and a
+            # score computed over it does not describe retrieval quality.
+            self._degrade(
+                "no entity seed or relation term matched any statement, so "
+                "every statement in the graph is returned as if retrieved"
+            )
             for entity in self.graph_engine.all_entities():
                 for statement in self.graph_engine.get_neighbors(entity):
                     add(statement)
@@ -127,7 +141,7 @@ class DefaultEvidenceRetriever:
             0.1 if AliasRegistry.normalize(statement.as_text()) in query_norm else 0.0
         )
         return (
-            0.35
+            _SCORE_FLOOR
             + entity_alignment
             + relation_bonus
             + lexical_bonus

@@ -7,14 +7,18 @@ is actually known.**
 ## 1. What the previous report claimed
 
 The earlier revision of this file reported a benchmark comparison between CKE
-and a dense RAG baseline on HotpotQA and 2WikiMultiHopQA. Its headline results
-were an 18.6x reduction in prompt tokens at comparable F1, subsystem maturity
-scores of 8/10 for retrieval and 8.5/10 for conversational memory, and a claim
-that the token-efficiency objective had been met. It drew those numbers from the
+and a dense RAG baseline on HotpotQA and 2WikiMultiHopQA. It claimed a large
+multiple reduction in prompt tokens at comparable F1, gave subsystem maturity
+scores out of ten for retrieval and conversational memory, and concluded that
+the token-efficiency objective had been met. It drew those numbers from the
 files under `results/`.
 
-All of it is withdrawn. The numbers have been deleted along with the `results/`
-directory that held them.
+All of it is withdrawn. The figures are deliberately not restated here, so that
+no reader or search finds them in this repository as though they still stood;
+the original document is at commit `daa581d` for anyone who needs to check what
+was claimed. The `results/` directory that held the underlying numbers has been
+deleted, and `results/` is now ignored so that a benchmark run cannot quietly
+restore it.
 
 ## 2. Why the results were invalid
 
@@ -63,8 +67,9 @@ Only this:
 
 - The codebase is organised into separable modules for extraction, graph
   storage, retrieval, reasoning, conversation, and trust calibration.
-- 198 unit and regression tests pass. They assert module-level behaviour. None
-  of them establishes end-to-end answer quality.
+- The unit and regression suite passes; run `python -m pytest -q` for the
+  current count. Those tests assert module-level behaviour. None of them
+  establishes end-to-end answer quality.
 - Nothing has been evaluated against an externally sourced dataset.
 
 Accuracy, token cost, and latency relative to any baseline are all unknown. The

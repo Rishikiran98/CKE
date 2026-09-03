@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+#: Weight given to evidence that arrived carrying none of its own. It is the
+#: maximum, so evidence nobody scored counts as fully weighted. Callers that
+#: report a number derived from it should treat it as unmeasured.
+UNSCORED_EVIDENCE_WEIGHT = 1.0
+
 
 @dataclass(slots=True)
 class Entity:
@@ -66,8 +71,12 @@ class Statement:
                     chunk_id=ev.get("chunk_id"),
                     span=span,
                     text=ev.get("text", ""),
-                    extractor_confidence=float(ev.get("extractor_confidence", 1.0)),
-                    source_weight=float(ev.get("source_weight", 1.0)),
+                    extractor_confidence=float(
+                        ev.get("extractor_confidence", UNSCORED_EVIDENCE_WEIGHT)
+                    ),
+                    source_weight=float(
+                        ev.get("source_weight", UNSCORED_EVIDENCE_WEIGHT)
+                    ),
                 )
             )
         return Assertion(
