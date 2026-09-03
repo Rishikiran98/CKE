@@ -155,6 +155,20 @@ class CKELitePipeline:
 
         Requires all non-stopword seed tokens to appear in the entity, or an exact
         seed-as-prefix match. Falls back to 80% overlap for single-word seeds.
+
+        This shadows ``EntityResolver``. Every seed reaching ``GraphRetriever``
+        is already an exact graph entity, so no rung of the resolution chain
+        past the first can fire, and a resolver improvement cannot show up in
+        this arm's numbers.
+
+        It is kept anyway, on measurement. Deleting it and letting the resolver
+        map seeds instead was tried over all 300 HotpotQA dev items and made
+        this arm worse on every figure: EM 0.0333 to 0.0300, F1 0.0461 to
+        0.0379, and items retrieving no evidence at all 108 to 145. The cause
+        is fan-out, not matching quality — this returns up to six entities per
+        question while the resolver returns one canonical per seed and refuses
+        an ambiguous mention outright. Consolidating the two needs the resolver
+        to offer fan-out; substituting one for the other loses coverage.
         """
         _STOP = {
             "the",
