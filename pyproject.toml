@@ -67,6 +67,22 @@ files = [
     "cke/schema",
 ]
 
+[tool.coverage.run]
+# The library, not the test code: counting test files as covered lines
+# raised the figure by two points without a line of the package being
+# exercised more.
+source = ["cke"]
+omit = ["cke/tests/*"]
+
+[tool.coverage.report]
+# The floor. It is the value measured when coverage was first enforced,
+# and it only rises: tests/test_coverage_floor.py pins it, so lowering it
+# fails a test a reviewer can see. pytest-cov reads it, so a run under
+# `pytest --cov=cke` fails below it.
+fail_under = 82.5
+precision = 2
+skip_covered = true
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
