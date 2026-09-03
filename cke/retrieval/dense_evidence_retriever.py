@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cke.diagnostics import declare_degradation
+from cke.diagnostics import DegradationMixin
 from cke.models import Statement
 from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 
@@ -11,11 +11,11 @@ from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 _MISSING_SCORE = 0.5
 
 
-class DenseEvidenceRetriever:
+class DenseEvidenceRetriever(DegradationMixin):
     """Retrieve evidence from a dense retriever without requiring a ChunkFactStore."""
 
     def __init__(self, rag_retriever, strict: bool = False) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.rag_retriever = rag_retriever
 
     def retrieve(
@@ -40,13 +40,11 @@ class DenseEvidenceRetriever:
                 # One missing key used to become three independently-named
                 # figures that agree with each other: confidence, trust_score
                 # and retrieval_score are all this value.
-                declare_degradation(
-                    type(self).__name__,
+                self._degrade(
                     "a dense retrieval result carried no score, so a "
                     f"substituted value ({_MISSING_SCORE}) is reported as its "
                     "confidence, trust score and retrieval score alike. None "
                     "of the three is a measurement",
-                    strict=getattr(self, "strict", False),
                 )
                 score = _MISSING_SCORE
             chunk_id = str(item.get("doc_id", f"dense::{idx}"))

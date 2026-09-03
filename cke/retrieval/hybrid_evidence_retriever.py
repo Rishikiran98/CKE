@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from cke.diagnostics import declare_degradation
+from cke.diagnostics import DegradationMixin
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.models import Statement
 from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _SYNTHETIC_TRUST = 0.5
 
 
-class HybridEvidenceRetriever:
+class HybridEvidenceRetriever(DegradationMixin):
     """Bridge between RetrievalRouter (EvidencePack) and the orchestrator interface.
 
     The orchestrator expects ``retrieve(query, resolved_entities,
@@ -31,7 +31,7 @@ class HybridEvidenceRetriever:
     """
 
     def __init__(self, retrieval_router: RetrievalRouter, strict: bool = False) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.retrieval_router = retrieval_router
 
     # ------------------------------------------------------------------
@@ -85,12 +85,10 @@ class HybridEvidenceRetriever:
             # These carry no confidence or trust of their own, so a constant
             # stands in for both. Anything downstream that reads them as
             # scores is reading this constant.
-            declare_degradation(
-                type(self).__name__,
+            self._degrade(
                 f"{len(evidence_pack.fallback_chunks)} dense fallback chunks "
                 f"were wrapped as statements with a substituted confidence and "
                 f"trust score of {_SYNTHETIC_TRUST}; neither is a measurement",
-                strict=getattr(self, "strict", False),
             )
         for idx, chunk_text in enumerate(evidence_pack.fallback_chunks):
             synthetic_stmt = Statement(

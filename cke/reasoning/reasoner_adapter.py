@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cke.diagnostics import declare_degradation
+from cke.diagnostics import DegradationMixin
 from cke.models import Statement
 from cke.pipeline.types import ReasonerOutcome
 from cke.retrieval.path_types import CandidatePath
@@ -22,11 +22,11 @@ class AdaptedReasoningInput:
 _SUBSTITUTED_CONFIDENCE = 0.8
 
 
-class ReasonerAdapter:
+class ReasonerAdapter(DegradationMixin):
     """Thin adapter that prioritizes top candidate paths before fallback facts."""
 
     def __init__(self, reasoner, strict: bool = False) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.reasoner = reasoner
 
     def build_input(
@@ -104,13 +104,11 @@ class ReasonerAdapter:
                 # The wrapped reasoner returned a bare answer string with no
                 # confidence of its own. A constant standing in here is read
                 # downstream as the reasoner's own certainty.
-                declare_degradation(
-                    type(self).__name__,
+                self._degrade(
                     f"{type(self.reasoner).__name__} returned an answer "
                     "carrying no confidence, so a substituted value "
                     f"({_SUBSTITUTED_CONFIDENCE}) is reported as the "
                     "reasoner's confidence",
-                    strict=getattr(self, "strict", False),
                 )
             return ReasonerOutcome(
                 answer=answer,
