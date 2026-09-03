@@ -149,74 +149,6 @@ class CKELitePipeline:
         self._qa = SpanExtractiveQA()
         self._counter = token_counter
 
-    @staticmethod
-    def _expand_seeds(seeds: list[str], engine: KnowledgeGraphEngine) -> list[str]:
-        """Map question entities to actual graph entities via word-level matching.
-
-        Requires all non-stopword seed tokens to appear in the entity, or an exact
-        seed-as-prefix match. Falls back to 80% overlap for single-word seeds.
-
-        This shadows ``EntityResolver``. Every seed reaching ``GraphRetriever``
-        is already an exact graph entity, so no rung of the resolution chain
-        past the first can fire, and a resolver improvement cannot show up in
-        this arm's numbers.
-
-        It is kept anyway, on measurement. Deleting it and letting the resolver
-        map seeds instead was tried over all 300 HotpotQA dev items and made
-        this arm worse on every figure: EM 0.0333 to 0.0300, F1 0.0461 to
-        0.0379, and items retrieving no evidence at all 108 to 145. The cause
-        is fan-out, not matching quality — this returns up to six entities per
-        question while the resolver returns one canonical per seed and refuses
-        an ambiguous mention outright. Consolidating the two needs the resolver
-        to offer fan-out; substituting one for the other loses coverage.
-        """
-        _STOP = {
-            "the",
-            "a",
-            "an",
-            "of",
-            "in",
-            "is",
-            "was",
-            "are",
-            "be",
-            "by",
-            "for",
-            "with",
-        }
-        all_entities = engine.all_entities()
-        if not all_entities:
-            return seeds
-        expanded: list[str] = []
-        for seed in seeds:
-            if len(seed) < 3:
-                continue
-            seed_toks = set(re.findall(r"\w+", seed.lower())) - _STOP
-            if not seed_toks:
-                continue
-            matched: list[tuple[float, str]] = []
-            for e in all_entities:
-                if len(e) < 2:
-                    continue
-                e_lower = e.lower()
-                e_toks = set(re.findall(r"\w+", e_lower)) - _STOP
-                if not e_toks:
-                    continue
-                # Require all seed tokens present in entity
-                if seed_toks.issubset(e_toks):
-                    score = len(seed_toks) / len(e_toks)  # prefer shorter entities
-                    matched.append((score, e))
-            matched.sort(reverse=True)
-            expanded.extend(e for _, e in matched[:3])
-        # Deduplicate preserving order
-        seen: set[str] = set()
-        result: list[str] = []
-        for e in expanded:
-            if e not in seen:
-                seen.add(e)
-                result.append(e)
-        return result[:6] if result else seeds
-
     def run_item(
         self, question: str, docs: list[dict[str, str]], n: int
     ) -> dict[str, Any]:
@@ -239,9 +171,13 @@ class CKELitePipeline:
                 )
                 total_statements += 1
 
-        # 2. Extract seed entities, then expand to actual graph entities
+        # 2. Extract seed entities. Mapping them onto graph entities is the
+        # retriever's EntityResolver's job, which it now does by fan-out. This
+        # used to be done here by a second, private implementation matching on
+        # token subsets, which shadowed the resolver entirely: every seed
+        # reaching the retriever was already an exact graph entity, so no rung
+        # of the resolution chain past the first could ever fire.
         seeds = self._seed_extractor.extract(question)
-        seeds = self._expand_seeds(seeds, engine)
         plan = QueryPlan(
             query_text=question,
             seed_entities=seeds,

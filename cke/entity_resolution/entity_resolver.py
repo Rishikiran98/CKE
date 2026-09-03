@@ -88,6 +88,14 @@ class EntityResolver(DegradationMixin):
         7. Title-case fallback    → confidence = max(fuzzy, emb, 0.50)
     """
 
+    #: Candidates returned per mention, and in total, by :meth:`expand`.
+    #: Carried over from the seed expansion in the benchmark driver that this
+    #: replaces, so that swapping one for the other changes the matching rule
+    #: and not the breadth. They are the reason a mention that names something
+    #: very generic cannot flood a query with the whole graph.
+    EXPANSION_PER_MENTION = 3
+    EXPANSION_TOTAL = 6
+
     #: Confidence of a containment match. Below a normalised match (0.75),
     #: because one name sitting inside another is evidence that they name the
     #: same thing and not proof of it; above the title-case fallback (0.50),
@@ -503,6 +511,74 @@ class EntityResolver(DegradationMixin):
         return sorted(self._canonical_entities)
 
     # ------------------------------------------------------------------
+    # Fan-out: one mention to several entities
+    # ------------------------------------------------------------------
+
+    def expand(
+        self,
+        mentions: Iterable[str],
+        per_mention: int | None = None,
+        total: int | None = None,
+    ) -> list[str]:
+        """Map query mentions onto the graph entities that could carry them.
+
+        :meth:`resolve` answers "which entity is this name?", and has to pick
+        one, so it refuses a mention with several containers rather than
+        guessing. Retrieval asks a different question — "where in the graph
+        should this query start?" — and there several starting points are
+        better than none. A question mentioning "Kansas City" against a graph
+        holding both "Kansas City jazz" and "Kansas City Chiefs" should seed
+        both and let path scoring choose.
+
+        Ordered by how much of the candidate the mention covers, so the
+        tightest fit comes first: "RESP" covers half of "RESP protocol" and a
+        tenth of a clause that merely contains it. Ties break on the name, so
+        a run is reproducible.
+
+        A mention that expands to nothing keeps its resolved form, which is
+        what :meth:`resolve` would have returned on its own. Expansion adds
+        starting points; it never removes the one already there.
+        """
+        per_mention = self.EXPANSION_PER_MENTION if per_mention is None else per_mention
+        total = self.EXPANSION_TOTAL if total is None else total
+
+        candidates = self._graph_candidates()
+        expanded: list[str] = []
+        seen: set[str] = set()
+
+        for mention in mentions:
+            matches = self._containers_by_fit(mention, candidates)[:per_mention]
+            if not matches:
+                matches = [self.resolve(mention)]
+            for match in matches:
+                if match and match not in seen:
+                    seen.add(match)
+                    expanded.append(match)
+        return expanded[:total]
+
+    @classmethod
+    def _containers_by_fit(cls, name: str, candidates: Iterable[str]) -> list[str]:
+        """Candidates holding *name* as a phrase, tightest fit first.
+
+        An exact match sorts first by construction: it covers the whole of
+        itself, which no longer candidate can.
+        """
+        mention = cls._tokens(name)
+        if not mention or all(token in _UNINFORMATIVE_TOKENS for token in mention):
+            return []
+
+        scored: list[tuple[float, str, str]] = []
+        for candidate in candidates:
+            tokens = cls._tokens(candidate)
+            if not tokens or not cls._contains_phrase(tokens, mention):
+                continue
+            # Descending fit, then ascending name: negate the fit so one sort
+            # key orders both.
+            scored.append((-len(mention) / len(tokens), candidate, candidate))
+        scored.sort()
+        return [candidate for _, _, candidate in scored]
+
+    # ------------------------------------------------------------------
     # Private: containment matching
     # ------------------------------------------------------------------
 
@@ -525,18 +601,12 @@ class EntityResolver(DegradationMixin):
         likely a loose mention is ambiguous, and ambiguity declines.
         """
         mention = cls._tokens(name)
-        if not mention or all(token in _UNINFORMATIVE_TOKENS for token in mention):
-            return None
-
-        found: str | None = None
-        for candidate in candidates:
-            tokens = cls._tokens(candidate)
-            if tokens == mention or not cls._contains_phrase(tokens, mention):
-                continue
-            if found is not None:
-                return None
-            found = candidate
-        return found
+        containers = [
+            candidate
+            for candidate in cls._containers_by_fit(name, candidates)
+            if cls._tokens(candidate) != mention
+        ]
+        return containers[0] if len(containers) == 1 else None
 
     @classmethod
     def _tokens(cls, text: str) -> tuple[str, ...]:

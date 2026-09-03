@@ -123,3 +123,34 @@ def test_path_ranking_prefers_relation_match():
     result = retriever.retrieve(plan, mode="astar")
 
     assert result["evidence"][0]["relation"] == "directed_by"
+
+
+def test_retrieval_seeds_every_entity_a_mention_could_name():
+    """A mention naming several graph entities starts a walk from each.
+
+    "PubSub" and "pubsub" are one entity here, but a query mentioning "Redis"
+    against a graph that also held "Redis Cluster" would have to pick one if
+    seeds were resolved one-to-one. The retriever fans out instead, and this
+    asserts the fan-out reaches the retriever rather than stopping in the
+    resolver.
+    """
+    graph = KnowledgeGraphEngine()
+    graph.add_statements(
+        [
+            Statement("Redis Cluster", "shards", "Keyspace", confidence=0.9),
+            Statement("Redis Sentinel", "monitors", "Failover", confidence=0.9),
+            Statement("Unrelated", "touches", "Nothing", confidence=0.9),
+        ]
+    )
+    retriever = GraphRetriever(graph)
+    plan = QueryPlan(
+        query_text="What does Redis do?",
+        seed_entities=["Redis"],
+        intent="factoid",
+        max_depth=2,
+        max_results=10,
+    )
+
+    objects = {edge["object"] for edge in retriever.retrieve(plan).get("evidence", [])}
+
+    assert {"Keyspace", "Failover"} <= objects

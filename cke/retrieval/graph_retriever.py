@@ -51,9 +51,11 @@ class GraphRetriever:
         max_nodes: int = 200,
         beam_width: int = 4,
     ) -> dict:
-        seeds = [
-            self.entity_resolver.resolve(name) for name in query_plan.seed_entities
-        ]
+        # Fan-out, not one canonical per mention: a query mentioning "Kansas
+        # City" against a graph holding "Kansas City jazz" and "Kansas City
+        # Chiefs" should start from both and let path scoring choose. resolve()
+        # has to pick one and so refuses that mention outright.
+        seeds = self.entity_resolver.expand(query_plan.seed_entities)
         intent = (query_plan.intent or "").lower()
 
         if intent == "definition":
