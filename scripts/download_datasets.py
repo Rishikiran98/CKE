@@ -18,6 +18,11 @@ DATA_DIR = ROOT / "data"
 HOTPOTQA_SOURCE = "https://huggingface.co/datasets/hotpotqa/hotpot_qa"
 WIKI2_SOURCE = "https://huggingface.co/datasets/xanhho/2WikiMultihopQA"
 
+# Item ids written by the synthetic generator that this script used to carry.
+# data/ is gitignored, so a checkout that ran the old downloader still holds
+# that corpus on disk and would otherwise be reused silently.
+_LEGACY_SYNTHETIC_ID_PREFIXES = ("synthetic_", "wiki2_synthetic_")
+
 
 class DatasetUnavailableError(RuntimeError):
     """Raised when a required dataset cannot be downloaded.
@@ -182,6 +187,54 @@ def _try_hf_wiki2(
     return True
 
 
+def _load_existing(path: Path, dataset: str, source_url: str) -> list:
+    """Return the rows of an existing dataset file, or raise.
+
+    An existing file is only reused once it is readable, non-empty, and free of
+    the marker ids left by the synthetic generator this script used to contain.
+    Anything else raises rather than being silently evaluated against.
+
+    This detects the corpus this repository generated for itself. It is not a
+    general provenance check; recording dataset checksums alongside results is
+    the durable fix and belongs with the evaluation harness.
+    """
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetUnavailableError(
+            dataset,
+            source_url,
+            [f"existing file {path} could not be read as JSON: {exc}"],
+        ) from exc
+
+    if not isinstance(rows, list) or not rows:
+        raise DatasetUnavailableError(
+            dataset,
+            source_url,
+            [f"existing file {path} is not a non-empty JSON list of items"],
+        )
+
+    synthetic = [
+        str(row.get("_id", ""))
+        for row in rows
+        if isinstance(row, dict)
+        and str(row.get("_id", "")).startswith(_LEGACY_SYNTHETIC_ID_PREFIXES)
+    ]
+    if synthetic:
+        raise DatasetUnavailableError(
+            dataset,
+            source_url,
+            [
+                f"existing file {path} holds {len(synthetic)} generated items "
+                f"(for example {synthetic[0]!r}) written by an earlier version "
+                f"of this script. Delete the file and download the real dataset; "
+                f"it will not be reused"
+            ],
+        )
+
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
@@ -190,7 +243,9 @@ def _try_hf_wiki2(
 def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
     """Ensure HotpotQA is present at ``out_path`` or raise."""
     if out_path.exists():
-        existing = json.loads(out_path.read_text(encoding="utf-8"))
+        existing = _load_existing(
+            out_path, "HotpotQA (distractor dev)", HOTPOTQA_SOURCE
+        )
         print(
             f"[download] HotpotQA already exists: {len(existing)} items at {out_path}"
         )
@@ -206,7 +261,7 @@ def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
 def download_wiki2(out_path: Path, limit: int = 500) -> None:
     """Ensure 2WikiMultiHopQA is present at ``out_path`` or raise."""
     if out_path.exists():
-        existing = json.loads(out_path.read_text(encoding="utf-8"))
+        existing = _load_existing(out_path, "2WikiMultiHopQA (dev)", WIKI2_SOURCE)
         n = len(existing)
         print(f"[download] 2WikiMultiHopQA already exists: {n} items at {out_path}")
         return
