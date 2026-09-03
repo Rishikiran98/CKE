@@ -13,6 +13,9 @@ class TokenTracker(DegradationMixin):
     tokens_completion: int = 0
     cost_per_1k_prompt: float = 0.0
     cost_per_1k_completion: float = 0.0
+    #: Declared as a field because this is a dataclass: the mixin's class-level
+    #: default cannot be set through a generated __init__.
+    strict: bool = False
 
     def add_usage(self, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
         self.tokens_prompt += max(0, int(prompt_tokens))

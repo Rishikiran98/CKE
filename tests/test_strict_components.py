@@ -639,6 +639,20 @@ def test_every_component_in_the_contract_accepts_strict():
                 None,
             )
             if init is None:
+                # A dataclass has no explicit __init__, so the parameter has
+                # to come from an annotated field. TokenTracker sat in the
+                # contract unable to be constructed strict because this
+                # branch used to skip such classes entirely.
+                decorators = [ast.unparse(d) for d in node.decorator_list]
+                if any("dataclass" in d for d in decorators):
+                    fields = [
+                        n.target.id
+                        for n in node.body
+                        if isinstance(n, ast.AnnAssign)
+                        and isinstance(n.target, ast.Name)
+                    ]
+                    if "strict" not in fields:
+                        missing.append(f"{path}:{node.lineno} {node.name} (dataclass)")
                 continue
             names = [a.arg for a in init.args.args + init.args.kwonlyargs]
             if "strict" not in names:
