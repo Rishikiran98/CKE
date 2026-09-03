@@ -71,11 +71,11 @@ These are stated here rather than left for a reader to discover.
   pipeline. It is importable without FastAPI, but `create_app()` needs it.
 - Dependencies in `requirements.txt` are unpinned.
 - There is no evaluation harness that can produce a trustworthy number. Building
-  one is prerequisite work before any result is reported here. In particular
-  several figures the code computes are not measurements: prompt-token counts
-  in `scripts/run_cke_benchmark.py` are word counts multiplied by 1.3 rather
-  than tokenizer output, and confidence values are in places substituted
-  constants rather than scores.
+  one is prerequisite work before any result is reported here. Prompt-token
+  counts in `scripts/run_cke_benchmark.py` are now real counts from `tiktoken`
+  under a named encoding, and the benchmark refuses to run without it, but
+  confidence values are in places substituted constants rather than scores, and
+  no language model answers on either arm.
 - `cke/experiments/retrieval_eval_pipeline.py` cannot be imported at all: it
   hard-imports `faiss`, `pandas` and `sentence_transformers`.
 - There are two test directories, `tests/` and `cke/tests/`.

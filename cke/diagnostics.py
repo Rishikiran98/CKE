@@ -101,6 +101,7 @@ OPTIONAL_DEPENDENCIES: tuple[tuple[str, str, str], ...] = (
     ("yaml", "PyYAML", "YAML configuration parsing"),
     ("rapidfuzz", "rapidfuzz", "fuzzy string matching for entity resolution"),
     ("spacy", "spacy", "coreference resolution"),
+    ("tiktoken", "tiktoken", "tokenizer for prompt token counts"),
 )
 
 

@@ -46,6 +46,16 @@ _EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 #: Width of the hashed fallback vector. Not a semantic embedding dimension.
 _FALLBACK_DIM = 128
 
+#: Words that name nothing on their own. A mention made only of these cannot
+#: be resolved by containment: "the" sits inside most entity names in a graph,
+#: and matching on it would attach a query to whichever one happened to be
+#: unique.
+_UNINFORMATIVE_TOKENS = frozenset(
+    """a an the of in on at to for from by with and or is are was were be been
+    what which who whom whose when where why how that this these those it its
+    his her their he she they i we you as also than then""".split()
+)
+
 
 # ---------------------------------------------------------------------------
 # Lightweight result dataclass shared by resolve_with_score().
@@ -73,9 +83,16 @@ class EntityResolver(DegradationMixin):
         2. Alias-registry lookup  → confidence 0.90
         3. Normalised / key match → confidence 0.75
         4. Fuzzy string match     → confidence = fuzzy score  (≥ *fuzzy_threshold*)
-        5. Embedding similarity   → confidence = emb score    (≥ *embedding_threshold*)
-        6. Title-case fallback    → confidence = max(fuzzy, emb, 0.50)
+        5. Unique containment     → confidence 0.65
+        6. Embedding similarity   → confidence = emb score    (≥ *embedding_threshold*)
+        7. Title-case fallback    → confidence = max(fuzzy, emb, 0.50)
     """
+
+    #: Confidence of a containment match. Below a normalised match (0.75),
+    #: because one name sitting inside another is evidence that they name the
+    #: same thing and not proof of it; above the title-case fallback (0.50),
+    #: because the fallback is what happens when nothing matched at all.
+    CONTAINMENT_CONFIDENCE = 0.65
 
     # Tokens stripped from the beginning of detected phrases.
     _QUESTION_WORDS = {
@@ -208,6 +225,15 @@ class EntityResolver(DegradationMixin):
         if best_fuzzy_candidate and best_fuzzy >= self.fuzzy_threshold:
             self.register_alias(name, best_fuzzy_candidate)
             return ResolutionResult(best_fuzzy_candidate, confidence=best_fuzzy)
+
+        contained = self._unique_container(name, candidates)
+        if contained:
+            # Deliberately not registered as an alias. Every other rung caches
+            # its answer, but this one is conditional on the candidate set: a
+            # mention with exactly one container today may have two once more
+            # text is ingested, and a cached alias would hide that the answer
+            # had become ambiguous.
+            return ResolutionResult(contained, confidence=self.CONTAINMENT_CONFIDENCE)
 
         best_emb_candidate, best_emb = self._best_embedding(name, candidates)
         if best_emb_candidate and best_emb >= self.embedding_threshold:
@@ -475,6 +501,60 @@ class EntityResolver(DegradationMixin):
                 entities = self.graph_engine.all_entities()
             return [str(e) for e in entities if str(e).strip()]
         return sorted(self._canonical_entities)
+
+    # ------------------------------------------------------------------
+    # Private: containment matching
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _unique_container(cls, name: str, candidates: Iterable[str]) -> str | None:
+        """Return the one candidate that contains *name*, or None.
+
+        A source that names an entity both ways — "RESP" in one sentence and
+        "RESP protocol" in the next — leaves a query mention that matches no
+        node exactly and scores far below the fuzzy threshold, because the two
+        strings differ by most of their characters. Fuzzy matching measures
+        edit distance; this measures whether one name sits inside the other as
+        a whole phrase.
+
+        Ambiguity is refused rather than guessed. "mosque" is inside many
+        names in a graph of buildings, and there is no basis here for choosing
+        among them, so a mention with more than one container resolves to
+        nothing and the caller keeps its original string. That refusal is what
+        keeps the rule safe as a graph grows: the more text ingested, the more
+        likely a loose mention is ambiguous, and ambiguity declines.
+        """
+        mention = cls._tokens(name)
+        if not mention or all(token in _UNINFORMATIVE_TOKENS for token in mention):
+            return None
+
+        found: str | None = None
+        for candidate in candidates:
+            tokens = cls._tokens(candidate)
+            if tokens == mention or not cls._contains_phrase(tokens, mention):
+                continue
+            if found is not None:
+                return None
+            found = candidate
+        return found
+
+    @classmethod
+    def _tokens(cls, text: str) -> tuple[str, ...]:
+        return tuple(re.findall(r"\w+", cls._normalize(text)))
+
+    @staticmethod
+    def _contains_phrase(haystack: tuple[str, ...], needle: tuple[str, ...]) -> bool:
+        """True when *needle* appears in *haystack* as consecutive tokens.
+
+        Consecutive, not as a subset: "Kansas City" is inside "Kansas City
+        jazz" and not inside "Kansas has a city".
+        """
+        span = len(needle)
+        if not span or span > len(haystack):
+            return False
+        return any(
+            haystack[i : i + span] == needle for i in range(len(haystack) - span + 1)
+        )
 
     # ------------------------------------------------------------------
     # Private: fuzzy matching
