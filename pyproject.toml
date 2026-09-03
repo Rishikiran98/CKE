@@ -47,6 +47,26 @@ exclude = ["cke.tests*", "cke.logs*"]
 # relations.yaml is read from beside its module at runtime.
 "cke.schema" = ["*.yaml"]
 
+[tool.mypy]
+# The type-checked module list. It is a ratchet: a module is added when it
+# checks clean and is never removed. tests/test_typecheck_ratchet.py pins
+# the floor, so dropping a module fails a test a reviewer can see.
+#
+# follow_imports = "silent" is what makes a small list possible: a listed
+# module's imports are analysed for the types they provide, but errors
+# inside an unlisted module are not reported until that module is listed.
+# ignore_missing_imports covers third-party packages without stubs.
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_configs = true
+files = [
+    "cke/models.py",
+    "cke/pipeline/types.py",
+    "cke/retrieval/path_types.py",
+    "cke/schema",
+]
+
 [tool.black]
 line-length = 88
 target-version = ['py311']

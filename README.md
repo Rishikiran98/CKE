@@ -121,6 +121,10 @@ pip install -e ".[dev]"
 python -m pytest -q
 ```
 
+CI also runs `black --check`, `flake8` and `mypy`. mypy checks the modules
+listed under `[tool.mypy]` in `pyproject.toml`; that list is a ratchet, added
+to when a module checks clean and never shortened.
+
 The suite passes; the command above reports the current count. These tests
 cover module behaviour in isolation; none of them establishes an end-to-end
 quality claim.
