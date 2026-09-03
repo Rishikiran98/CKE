@@ -64,27 +64,35 @@ class HotpotDataset(DatasetLoader, DegradationMixin):
             )
         return documents
 
+    def normalize_record(self, index: int, record: dict[str, Any]) -> dict[str, Any]:
+        """Normalise one raw HotpotQA record into the CKE item shape.
+
+        Public so that a caller evaluating only a prefix of a file can stop
+        normalising, and therefore stop declaring, at the last record it
+        evaluates. A malformed context in a record past that point is not
+        part of the evaluation and must not refuse a strict run.
+        """
+        question = record.get("question")
+        answer = record.get("answer")
+        return {
+            "id": str(record.get("_id", f"hotpot_{index}")),
+            "question": (
+                self._clean_text(str(question)) if question is not None else None
+            ),
+            "answer": self._clean_text(str(answer)) if answer is not None else None,
+            "documents": self._context_to_documents(record.get("context", [])),
+            "supporting_facts": record.get("supporting_facts", []),
+            "metadata": {
+                "type": record.get("type"),
+                "level": record.get("level"),
+            },
+        }
+
     def load(self, path: str) -> "HotpotDataset":
         with open(path, "r", encoding="utf-8") as f:
             raw_items = json.load(f)
 
-        self.items = []
-        for idx, item in enumerate(raw_items):
-            item_id = str(item.get("_id", f"hotpot_{idx}"))
-            question = item.get("question")
-            answer = item.get("answer")
-            normalized = {
-                "id": item_id,
-                "question": (
-                    self._clean_text(str(question)) if question is not None else None
-                ),
-                "answer": self._clean_text(str(answer)) if answer is not None else None,
-                "documents": self._context_to_documents(item.get("context", [])),
-                "supporting_facts": item.get("supporting_facts", []),
-                "metadata": {
-                    "type": item.get("type"),
-                    "level": item.get("level"),
-                },
-            }
-            self.items.append(normalized)
+        self.items = [
+            self.normalize_record(idx, item) for idx, item in enumerate(raw_items)
+        ]
         return self

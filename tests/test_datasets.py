@@ -151,3 +151,32 @@ def test_wiki2_loader_via_alias(tmp_path):
     _assert_normalized_item(item)
     assert item["id"] == "w2"
     assert item["documents"][0]["text"] == "Plain text body"
+
+
+def test_hotpot_normalize_record_matches_load(tmp_path):
+    """load() is the per-record method applied in order, nothing more."""
+    from cke.datasets.hotpot_loader import HotpotDataset
+
+    records = [
+        {
+            "_id": "hp1",
+            "question": " Who  won? ",
+            "answer": "Team A",
+            "supporting_facts": [["Doc One", 0]],
+            "context": [["Doc One", [" Team A won ", "in 2020. "]]],
+            "type": "bridge",
+            "level": "easy",
+        },
+        {"question": "No id, no context"},
+    ]
+    path = tmp_path / "hotpot.json"
+    path.write_text(json.dumps(records), encoding="utf-8")
+
+    loaded = HotpotDataset().load(str(path)).items
+    one_by_one = [
+        HotpotDataset().normalize_record(index, record)
+        for index, record in enumerate(records)
+    ]
+
+    assert one_by_one == loaded
+    assert one_by_one[1]["id"] == "hotpot_1"

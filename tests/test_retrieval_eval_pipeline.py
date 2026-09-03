@@ -175,6 +175,16 @@ def test_search_returns_corpus_positions_even_when_ids_repeat():
     assert retriever.search(["q"], top_k=1) == [[1]]
 
 
+def test_search_refuses_a_non_positive_top_k():
+    """The index clamps k to one; asking for zero must not return a document."""
+    embedder = _FixedEmbedder({"one": [1.0, 0.0], "q": [1.0, 0.0]})
+    retriever = DenseRetriever(embedding_model=embedder, strict=True)
+    retriever.build_index(_corpus(("a", "A", "one")))
+
+    with pytest.raises(ValueError, match="top_k"):
+        retriever.search(["q"], top_k=0)
+
+
 def test_search_before_build_is_an_error():
     retriever = DenseRetriever(embedding_model=_FixedEmbedder({}), strict=True)
     with pytest.raises(RuntimeError, match="build_index"):
@@ -313,6 +323,43 @@ def test_hotpot_queries_go_through_the_contract_loader(tmp_path):
     with pytest.raises(DegradedComponentError, match="context entries"):
         load_hotpot_queries(path, strict=True)
     assert len(load_hotpot_queries(path, strict=False)) == 1
+
+
+def test_the_hotpot_cap_stops_before_records_it_does_not_evaluate(tmp_path):
+    """A malformed context past the cap must not refuse a strict run.
+
+    Loading the whole file through the registry loader normalised, and so
+    declared, every record before the cap was applied.
+    """
+    path = tmp_path / "hotpot.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"_id": "hp1", "question": "Who?", "context": [["Doc", ["text"]]]},
+                {"_id": "hp2", "question": "What?", "context": [["only title"]]},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    queries = load_hotpot_queries(path, max_queries=1, strict=True)
+    assert [q.query_id for q in queries] == ["hp1"]
+
+    with pytest.raises(DegradedComponentError, match="context entries"):
+        load_hotpot_queries(path, strict=True)
+
+
+@pytest.mark.parametrize(
+    "flag", ["--top-k", "--batch-size", "--max-docs", "--max-hotpot", "--max-locomo"]
+)
+@pytest.mark.parametrize("value", ["0", "-3"])
+def test_the_parser_rejects_counts_below_one(flag, value, tmp_path, capsys):
+    """``--top-k 0`` retrieved one document and labelled it Recall@0."""
+    paths = _write_inputs(tmp_path)
+
+    with pytest.raises(SystemExit):
+        pipeline.parse_args(paths + [flag, value])
+    assert "at least 1" in capsys.readouterr().err
 
 
 def test_a_query_set_with_no_queries_is_not_reported_as_zero_recall(

@@ -228,6 +228,10 @@ class DenseRetriever(DegradationMixin):
         self, queries: Sequence[str], top_k: int = 10, batch_size: int = 64
     ) -> list[list[int]]:
         """Return, per query, the corpus positions of its top-k documents."""
+        if top_k < 1:
+            # The index clamps k to one, so a caller asking for zero would
+            # get one document back and report it under the wrong k.
+            raise ValueError(f"top_k must be at least 1, got {top_k}")
         if not self.documents:
             raise RuntimeError("Index has not been built. Call build_index first.")
         vectors = self._embed(list(queries), batch_size)
@@ -298,15 +302,23 @@ def _extract_hotpot_relevance(item: dict[str, Any]) -> set[str]:
 def load_hotpot_queries(
     path: Path, max_queries: int | None = None, strict: bool = False
 ) -> list[QueryExample]:
-    """Read HotpotQA questions through the registry loader.
+    """Read HotpotQA questions through the registry loader, one record at a time.
 
-    The loader carries the degradation contract, so a file whose context
-    entries are malformed is declared rather than silently thinned.
+    The loader carries the degradation contract, so a malformed context is
+    declared rather than silently thinned. Records are normalised one by one
+    up to the cap: a record after the cap is not evaluated, so a fault in it
+    must not refuse the run. Loading the whole file first did exactly that.
     """
-    dataset = HotpotDataset(strict=strict).load(str(path))
+    records = _read_json(path)
+    if not isinstance(records, list):
+        raise ValueError("HotpotQA file should be a JSON list.")
+    dataset = HotpotDataset(strict=strict)
 
     queries: list[QueryExample] = []
-    for item in dataset.items:
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        item = dataset.normalize_record(index, record)
         question = str(item.get("question") or "").strip()
         if not question:
             continue
@@ -443,6 +455,22 @@ def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, flo
     return recall
 
 
+def _positive_int(value: str) -> int:
+    """argparse type for a count that must be at least one.
+
+    ``--top-k 0`` used to be accepted: the index clamps k to one, so one
+    document was retrieved and the summary was labelled Recall@0. A cap of
+    zero or less is the same kind of misstatement about what ran.
+    """
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from exc
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {number}")
+    return number
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="MS MARCO + HotpotQA + LoCoMo retrieval evaluator"
@@ -463,19 +491,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--locomo-path", type=Path, required=True, help="Path to LoCoMo JSON/JSONL"
     )
     parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME)
-    parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--top-k", type=_positive_int, default=10)
+    parser.add_argument("--batch-size", type=_positive_int, default=64)
     parser.add_argument(
         "--max-docs",
-        type=int,
+        type=_positive_int,
         default=None,
         help="Optional cap for indexed MS MARCO docs",
     )
     parser.add_argument(
-        "--max-hotpot", type=int, default=None, help="Optional cap for HotpotQA queries"
+        "--max-hotpot",
+        type=_positive_int,
+        default=None,
+        help="Optional cap for HotpotQA queries",
     )
     parser.add_argument(
-        "--max-locomo", type=int, default=None, help="Optional cap for LoCoMo queries"
+        "--max-locomo",
+        type=_positive_int,
+        default=None,
+        help="Optional cap for LoCoMo queries",
     )
     parser.add_argument(
         "--allow-degraded",
