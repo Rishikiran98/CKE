@@ -121,9 +121,12 @@ pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-CI also runs `black --check`, `flake8` and `mypy`. mypy checks the modules
+CI also runs `black --check`, `flake8` and `mypy`, and measures statement
+coverage of the library with `pytest --cov=cke`. mypy checks the modules
 listed under `[tool.mypy]` in `pyproject.toml`; that list is a ratchet, added
-to when a module checks clean and never shortened.
+to when a module checks clean and never shortened. Coverage has a floor under
+`[tool.coverage.report]` that a run must clear; it was set at the measured
+value when enforcement began and only rises.
 
 The suite passes; the command above reports the current count. These tests
 cover module behaviour in isolation; none of them establishes an end-to-end
