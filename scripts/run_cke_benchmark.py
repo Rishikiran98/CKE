@@ -963,6 +963,14 @@ def main() -> None:
         help="Model name for the LLM answerer (default: google/flan-t5-base locally)",
     )
     parser.add_argument(
+        "--llm-revision",
+        default=None,
+        help=(
+            "Hub commit to pin a local model to. The default model is pinned "
+            "already; any other model must be given one, or a strict run refuses."
+        ),
+    )
+    parser.add_argument(
         "--llm-window",
         type=int,
         default=None,
@@ -991,6 +999,7 @@ def main() -> None:
             model=args.llm_model,
             strict=strict,
             max_input_tokens=args.llm_window,
+            model_revision=args.llm_revision,
         )
     else:
         answerer = SpanExtractiveQA()

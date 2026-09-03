@@ -203,30 +203,35 @@ def test_last_truncation_is_reset_on_a_call_that_fits():
     assert answerer.last_dropped_tokens == 0
 
 
-def _patch_loaders(monkeypatch):
+def _patch_loaders(monkeypatch, seen=None):
     """Route construction through the real _load_local with stub loaders.
 
     The stub helper above sets the window directly and so cannot see whether
     the loader honours a requested one; a mutation ignoring it survived that
-    test. These go through the loader.
+    test. These go through the loader. ``seen`` collects the keyword
+    arguments each loader was called with.
     """
     import transformers
 
-    monkeypatch.setattr(
-        transformers.AutoTokenizer, "from_pretrained", lambda name: _StubTokenizer()
-    )
-    monkeypatch.setattr(
-        transformers.AutoModelForSeq2SeqLM,
-        "from_pretrained",
-        lambda name: type(
+    def tok(name, **kw):
+        if seen is not None:
+            seen.append(("tokenizer", name, kw))
+        return _StubTokenizer()
+
+    def mdl(name, **kw):
+        if seen is not None:
+            seen.append(("model", name, kw))
+        return type(
             "M", (), {"eval": lambda self: None, "generate": _StubModel().generate}
-        )(),
-    )
+        )()
+
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", tok)
+    monkeypatch.setattr(transformers.AutoModelForSeq2SeqLM, "from_pretrained", mdl)
 
 
 def test_the_native_window_is_used_when_none_is_requested(monkeypatch):
     _patch_loaders(monkeypatch)
-    answerer = LLMAnswerer(backend="local", model="stub")
+    answerer = LLMAnswerer(backend="local", model="stub", model_revision="abc")
 
     assert answerer._window == _StubTokenizer.model_max_length
     assert f"{_StubTokenizer.model_max_length}-token window" in answerer.description
@@ -234,9 +239,52 @@ def test_the_native_window_is_used_when_none_is_requested(monkeypatch):
 
 def test_the_requested_window_overrides_the_native_one(monkeypatch):
     _patch_loaders(monkeypatch)
-    answerer = LLMAnswerer(backend="local", model="stub", max_input_tokens=200)
+    answerer = LLMAnswerer(
+        backend="local", model="stub", max_input_tokens=200, model_revision="abc"
+    )
     answerer.answer("q", " ".join(["word"] * 40))
 
     assert answerer._window == 200
     assert answerer.truncation.truncated == 0
     assert "200-token window" in answerer.description
+
+
+# ----------------------------------------------------------------------
+# The weights are pinned
+# ----------------------------------------------------------------------
+
+
+def test_the_default_model_loads_at_a_pinned_revision(monkeypatch):
+    """A model name is not a model. Both loaders must be told the commit."""
+    from cke.evaluation.llm_qa import _DEFAULT_LOCAL_REVISION
+
+    seen = []
+    _patch_loaders(monkeypatch, seen)
+    answerer = LLMAnswerer(backend="local")
+
+    assert [kw.get("revision") for _, _, kw in seen] == [_DEFAULT_LOCAL_REVISION] * 2
+    assert _DEFAULT_LOCAL_REVISION[:12] in answerer.description
+
+
+def test_a_model_without_a_pinned_revision_is_declared(monkeypatch, caplog):
+    _patch_loaders(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        answerer = LLMAnswerer(backend="local", model="someone/other-model")
+
+    assert answerer.degraded is True
+    assert answerer.available is False
+    assert "revision" in answerer.degraded_reason
+
+
+def test_a_model_without_a_pinned_revision_stops_a_strict_run(monkeypatch):
+    _patch_loaders(monkeypatch)
+    with pytest.raises(DegradedComponentError, match="revision"):
+        LLMAnswerer(backend="local", model="someone/other-model", strict=True)
+
+
+def test_an_explicit_revision_reaches_both_loaders(monkeypatch):
+    seen = []
+    _patch_loaders(monkeypatch, seen)
+    LLMAnswerer(backend="local", model="someone/other-model", model_revision="deadbeef")
+
+    assert [kw.get("revision") for _, _, kw in seen] == ["deadbeef", "deadbeef"]
