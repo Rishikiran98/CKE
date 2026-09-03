@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from cke.diagnostics import DegradationMixin
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 from cke.retrieval.chunk_fact_store import ChunkFactStore
@@ -12,7 +13,11 @@ from cke.retrieval.ranking_config import RetrievalRankingConfig, load_ranking_co
 logger = logging.getLogger(__name__)
 
 
-class EvidenceRetriever:
+#: Reported when a statement carries no trust of its own. Not a measurement.
+_SUBSTITUTED_TRUST = 0.5
+
+
+class EvidenceRetriever(DegradationMixin):
     """Retrieve chunks and hydrate them with per-chunk extracted statements."""
 
     def __init__(
@@ -23,11 +28,22 @@ class EvidenceRetriever:
         config_path: str = "configs/retrieval_ranking.yaml",
         strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
         self.rag_retriever = rag_retriever
         self.chunk_fact_store = chunk_fact_store
         self.ranking_config = ranking_config or load_ranking_config(
             config_path, strict=strict
         )
+
+    def _resolve_trust(self, statement) -> float:
+        """Return the statement's trust, or declare the substitution."""
+        if statement.trust_score is not None:
+            return float(statement.trust_score)
+        self._degrade(
+            "a retrieved statement carried no trust score, so a substituted "
+            f"value ({_SUBSTITUTED_TRUST}) is reported as its trust"
+        )
+        return _SUBSTITUTED_TRUST
 
     def retrieve(
         self,
@@ -139,11 +155,7 @@ class EvidenceRetriever:
                     statement=statement,
                     chunk_id=chunk_id,
                     source=statement.source or source,
-                    trust_score=(
-                        float(statement.trust_score)
-                        if statement.trust_score is not None
-                        else 0.5
-                    ),
+                    trust_score=self._resolve_trust(statement),
                     retrieval_score=combined_score,
                     entity_alignment_score=entity_bonus,
                     supporting_span=statement.supporting_span,

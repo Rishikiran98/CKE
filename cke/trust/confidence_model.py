@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from cke.diagnostics import DegradationMixin
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -24,7 +25,16 @@ class ReasoningConfidenceSignals:
     retrieval_relevance: float = 0.5
 
 
-class ConfidenceModel:
+#: Substituted when an assertion carries no measured feature. Not measurements.
+_FEATURE_DEFAULTS: dict[str, float] = {
+    "span_quality": 0.7,
+    "entity_link_confidence": 0.7,
+    "llm_logprob": -0.5,
+    "source_reliability": 0.7,
+}
+
+
+class ConfidenceModel(DegradationMixin):
     """Predict confidence scores from extraction and reasoning features."""
 
     RELATION_PRIOR = {
@@ -35,7 +45,8 @@ class ConfidenceModel:
         "acted_in": 0.75,
     }
 
-    def __init__(self) -> None:
+    def __init__(self, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self.weights = {
             "bias": -0.15,
             "span_quality": 1.25,
@@ -83,16 +94,46 @@ class ConfidenceModel:
         )
 
     def _coerce_features(self, assertion: Any) -> ConfidenceFeatures:
+        """Read the confidence features off an assertion's context.
+
+        Statements produced by the rule-based extractor carry none of these,
+        so every feature falls back to a constant and the resulting sigmoid
+        describes the constants rather than the assertion.
+        """
         context = getattr(assertion, "context", {}) or {}
         relation = getattr(
             assertion, "relation", context.get("relation_type", "related_to")
         )
+
+        missing = [name for name in _FEATURE_DEFAULTS if name not in context]
+        if missing:
+            self._degrade(
+                f"an assertion carried none of {', '.join(missing)}, so "
+                "substituted constants "
+                f"({', '.join(f'{n}={_FEATURE_DEFAULTS[n]}' for n in missing)}) "
+                "were scored instead. The confidence returned describes those "
+                "constants, not the assertion"
+            )
+
         return ConfidenceFeatures(
-            span_quality=float(context.get("span_quality", 0.7)),
+            span_quality=float(
+                context.get("span_quality", _FEATURE_DEFAULTS["span_quality"])
+            ),
             relation_type=str(relation),
-            entity_link_confidence=float(context.get("entity_link_confidence", 0.7)),
-            llm_logprob=float(context.get("llm_logprob", -0.5)),
-            source_reliability=float(context.get("source_reliability", 0.7)),
+            entity_link_confidence=float(
+                context.get(
+                    "entity_link_confidence",
+                    _FEATURE_DEFAULTS["entity_link_confidence"],
+                )
+            ),
+            llm_logprob=float(
+                context.get("llm_logprob", _FEATURE_DEFAULTS["llm_logprob"])
+            ),
+            source_reliability=float(
+                context.get(
+                    "source_reliability", _FEATURE_DEFAULTS["source_reliability"]
+                )
+            ),
         )
 
     @staticmethod

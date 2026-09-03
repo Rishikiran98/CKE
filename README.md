@@ -34,8 +34,13 @@ known accuracy, token cost, or latency characteristics.
 
 ## Degradation is never silent
 
-Several components can run with reduced capability when an optional dependency,
-a model, an API key, or a config file is missing. None of them does so quietly.
+Two things can make a CKE number untrustworthy, and neither happens quietly.
+
+A component can run with reduced capability when an optional dependency, a
+model, an API key, or a config file is missing. And a value can be substituted
+where nothing was measured: a retrieval result with no score, a statement with
+no trust, an evaluated row with no prediction, a stored context that will not
+decode. Twenty-six components declare both kinds.
 Any such component warns at `WARNING` naming the specific cause, sets an
 inspectable `degraded` flag with a `degraded_reason`, and raises
 `DegradedComponentError` instead of degrading when constructed with
@@ -50,7 +55,8 @@ component rather than reporting a number produced by a hash function. Pass
 
 Three entry points are deliberately outside this: `demo.py`, `cke.api.server`,
 and the deprecation shim in `cke.router.entity_linker`. None of them reports a
-measurement.
+measurement. Where those substitute a value anyway, the constant is named and
+documented at its definition rather than written inline.
 
 ## Known limitations
 

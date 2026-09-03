@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from cke.diagnostics import DegradationMixin
 from cke.graph.assertion import Assertion
 
 
-class DomainClassifier:
+#: Label applied when nothing matched. Not a classification.
+_UNCLASSIFIED_DOMAIN = "programming"
+
+
+class DomainClassifier(DegradationMixin):
     """Assign domain labels to entities/assertions via lightweight heuristics."""
 
     DOMAIN_KEYWORDS: dict[str, set[str]] = {
@@ -62,7 +67,10 @@ class DomainClassifier:
         },
     }
 
-    def __init__(self, embedding_backend: object | None = None) -> None:
+    def __init__(
+        self, embedding_backend: object | None = None, strict: bool = False
+    ) -> None:
+        self._init_degradation(strict)
         self.embedding_backend = embedding_backend
 
     def _keyword_score(self, text: str) -> dict[str, int]:
@@ -83,11 +91,26 @@ class DomainClassifier:
         return None
 
     def classify_entity(self, entity_name: str) -> str:
+        """Classify an entity, or declare that it could not be classified.
+
+        No keyword matched and no embedding hint is available, so the result
+        used to be a real domain label indistinguishable from a match.
+        """
         scores = self._keyword_score(entity_name)
         best_domain, best_score = max(scores.items(), key=lambda item: item[1])
         if best_score > 0:
             return best_domain
-        return self._embedding_hint(entity_name) or "programming"
+
+        hint = self._embedding_hint(entity_name)
+        if hint:
+            return hint
+
+        self._degrade(
+            f"no keyword matched {entity_name!r} and no embedding hint is "
+            f"available, so it is labelled {_UNCLASSIFIED_DOMAIN!r}, which is "
+            "indistinguishable downstream from a real classification"
+        )
+        return _UNCLASSIFIED_DOMAIN
 
     def classify_assertion(self, assertion: Assertion) -> str:
         content = " ".join(

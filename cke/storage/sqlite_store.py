@@ -8,16 +8,18 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional
 
+from cke.diagnostics import DegradationMixin
 from cke.models import Statement
 from cke.storage.adapter import StorageAdapter
 
 logger = logging.getLogger(__name__)
 
 
-class SQLiteStore(StorageAdapter):
+class SQLiteStore(StorageAdapter, DegradationMixin):
     """Persist graph entities, aliases, and statements in SQLite."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self.db_path = str(db_path)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
@@ -27,15 +29,31 @@ class SQLiteStore(StorageAdapter):
     def _normalize_name(value: str) -> str:
         return " ".join(str(value).strip().lower().split())
 
-    @staticmethod
-    def _decode_context(raw_context: str | None) -> dict:
+    def _decode_context(self, raw_context: str | None) -> dict:
+        """Decode a stored context blob.
+
+        An unreadable blob used to become an empty dict, silently dropping the
+        qualifiers, evidence spans and validity window a statement was stored
+        with. The statement then reads as if it had never carried them.
+        """
         if not raw_context:
             return {}
         try:
             parsed = json.loads(raw_context)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            self._degrade(
+                f"a stored statement context could not be decoded ({exc}), so "
+                "its qualifiers, evidence spans and validity window are lost "
+                "and the statement reads as if it never carried them"
+            )
             return {}
-        return parsed if isinstance(parsed, dict) else {}
+        if not isinstance(parsed, dict):
+            self._degrade(
+                f"a stored statement context decoded to {type(parsed).__name__} "
+                "rather than a mapping, so its qualifiers and evidence are lost"
+            )
+            return {}
+        return parsed
 
     def close(self) -> None:
         self._conn.close()

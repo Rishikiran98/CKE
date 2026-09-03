@@ -25,6 +25,14 @@ except ImportError:  # pragma: no cover - optional runtime dependency
     nx = None
 
 
+#: Applied when a stored edge lost its relation. Not an observed relation.
+_UNKNOWN_RELATION = "related_to"
+
+#: Applied when a stored edge lost its confidence. Maximum certainty for
+#: something nothing scored, so it is declared rather than assumed.
+_UNKNOWN_CONFIDENCE = 1.0
+
+
 class KnowledgeGraphEngine(DegradationMixin):
     """Manages entity-relation graph operations.
 
@@ -111,6 +119,21 @@ class KnowledgeGraphEngine(DegradationMixin):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _note_unscored_edge(self, edge: dict[str, Any]) -> None:
+        """Declare an edge that lost its relation or confidence in storage."""
+        if "relation" not in edge:
+            self._degrade(
+                "a stored edge carried no relation, so it is returned as "
+                f"{_UNKNOWN_RELATION!r}, which is indistinguishable from an "
+                "observed relation of that name"
+            )
+        if "confidence" not in edge:
+            self._degrade(
+                "a stored edge carried no confidence, so it is returned at "
+                f"{_UNKNOWN_CONFIDENCE}, the maximum, for something nothing "
+                "scored"
+            )
 
     @staticmethod
     def _init_storage(db_path: Optional[str | Path]):
@@ -337,11 +360,11 @@ class KnowledgeGraphEngine(DegradationMixin):
             return [
                 Statement(
                     subject=self._display_entity(entity),
-                    relation=edge_data.get("relation", "related_to"),
+                    relation=edge_data.get("relation", _UNKNOWN_RELATION),
                     object=edge_data.get(
                         "object_display", self._display_entity(target)
                     ),
-                    confidence=float(edge_data.get("confidence", 1.0)),
+                    confidence=float(edge_data.get("confidence", _UNKNOWN_CONFIDENCE)),
                     source=edge_data.get("source"),
                     timestamp=edge_data.get("timestamp"),
                     qualifiers=dict(edge_data.get("context", {}).get("qualifiers", {})),
@@ -357,11 +380,11 @@ class KnowledgeGraphEngine(DegradationMixin):
         return [
             Statement(
                 subject=self._display_entity(entity),
-                relation=item.get("relation", "related_to"),
+                relation=item.get("relation", _UNKNOWN_RELATION),
                 object=item.get(
                     "object_display", self._display_entity(item.get("object", ""))
                 ),
-                confidence=float(item.get("confidence", 1.0)),
+                confidence=float(item.get("confidence", _UNKNOWN_CONFIDENCE)),
                 source=item.get("source"),
                 timestamp=item.get("timestamp"),
                 qualifiers=dict(item.get("context", {}).get("qualifiers", {})),
@@ -401,10 +424,12 @@ class KnowledgeGraphEngine(DegradationMixin):
                     statement_path.append(
                         Statement(
                             subject=self._display_entity(src),
-                            relation=edge.get("relation", "related_to"),
+                            relation=edge.get("relation", _UNKNOWN_RELATION),
                             object=self._display_entity(dst),
                             context=dict(edge.get("context", {})),
-                            confidence=float(edge.get("confidence", 1.0)),
+                            confidence=float(
+                                edge.get("confidence", _UNKNOWN_CONFIDENCE)
+                            ),
                             qualifiers=dict(
                                 edge.get("context", {}).get("qualifiers", {})
                             ),
@@ -438,10 +463,12 @@ class KnowledgeGraphEngine(DegradationMixin):
                         + [
                             Statement(
                                 subject=self._display_entity(node),
-                                relation=item.get("relation", "related_to"),
+                                relation=item.get("relation", _UNKNOWN_RELATION),
                                 object=self._display_entity(nxt),
                                 context=dict(item.get("context", {})),
-                                confidence=float(item.get("confidence", 1.0)),
+                                confidence=float(
+                                    item.get("confidence", _UNKNOWN_CONFIDENCE)
+                                ),
                                 qualifiers=dict(
                                     item.get("context", {}).get("qualifiers", {})
                                 ),
@@ -475,7 +502,7 @@ class KnowledgeGraphEngine(DegradationMixin):
                     object=edge_data.get(
                         "object_display", self._display_entity(target)
                     ),
-                    confidence=float(edge_data.get("confidence", 1.0)),
+                    confidence=float(edge_data.get("confidence", _UNKNOWN_CONFIDENCE)),
                     qualifiers=dict(edge_data.get("context", {}).get("qualifiers", {})),
                     source=edge_data.get("source"),
                     timestamp=edge_data.get("timestamp"),
@@ -490,7 +517,7 @@ class KnowledgeGraphEngine(DegradationMixin):
                 object=item.get(
                     "object_display", self._display_entity(item.get("object", ""))
                 ),
-                confidence=float(item.get("confidence", 1.0)),
+                confidence=float(item.get("confidence", _UNKNOWN_CONFIDENCE)),
                 qualifiers=dict(item.get("context", {}).get("qualifiers", {})),
                 source=item.get("source"),
                 timestamp=item.get("timestamp"),

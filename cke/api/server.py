@@ -14,6 +14,13 @@ except ImportError:  # pragma: no cover - optional runtime dependency
     FastAPI = None
 
 
+#: Stored when a caller ingests an assertion without a confidence. It is the
+#: maximum, so an omitted field reads downstream as full certainty. This
+#: endpoint is outside the strict contract by design (see the README); the
+#: constant is named so the substitution is at least visible.
+_UNSCORED_INGEST_CONFIDENCE = 1.0
+
+
 class MissingDependencyError(RuntimeError):
     """Raised when an optional dependency needed for this feature is absent."""
 
@@ -55,7 +62,9 @@ def create_app(graph_engine: KnowledgeGraphEngine | None = None):
                 assertion["relation"],
                 assertion["object"],
                 context=assertion.get("context"),
-                confidence=float(assertion.get("confidence", 1.0)),
+                confidence=float(
+                    assertion.get("confidence", _UNSCORED_INGEST_CONFIDENCE)
+                ),
                 source=assertion.get("source"),
                 timestamp=assertion.get("timestamp"),
             )

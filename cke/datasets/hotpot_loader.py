@@ -5,19 +5,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from cke.diagnostics import DegradationMixin
 from cke.datasets.base_loader import DatasetLoader
 from cke.utils.text_cleaning import merge_sentences, normalize_whitespace
 
 
-class HotpotDataset(DatasetLoader):
+class HotpotDataset(DatasetLoader, DegradationMixin):
     """Loads official HotpotQA JSON into the normalized CKE format."""
 
     def __init__(
         self,
         merge_context_sentences: bool = True,
         normalize_text: bool = True,
+        strict: bool = False,
     ) -> None:
         super().__init__()
+        self._init_degradation(strict)
         self.merge_context_sentences = merge_context_sentences
         self.normalize_text = normalize_text
 
@@ -28,8 +31,12 @@ class HotpotDataset(DatasetLoader):
 
     def _context_to_documents(self, context: list[list[Any]]) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
+        malformed = 0
         for idx, ctx in enumerate(context):
             if len(ctx) != 2:
+                # A dropped paragraph changes what the item was evaluated
+                # against without changing anything a reader can see.
+                malformed += 1
                 continue
             title, sentences = ctx
             title_str = str(title)
@@ -48,6 +55,12 @@ class HotpotDataset(DatasetLoader):
                     "title": title_str,
                     "text": text,
                 }
+            )
+        if malformed:
+            self._degrade(
+                f"{malformed} of {len(context)} context entries were not "
+                "[title, sentences] pairs and were dropped, so this item is "
+                "evaluated against fewer documents than it carries"
             )
         return documents
 

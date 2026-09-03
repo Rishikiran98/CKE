@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from cke.diagnostics import DegradationMixin
 from cke.evaluation.extended_metrics import EvaluationMetrics
 
 
@@ -37,7 +38,7 @@ class AblationConfig:
         return "custom"
 
 
-class AblationRunner:
+class AblationRunner(DegradationMixin):
     """Execute variant configurations and persist metrics.json."""
 
     DEFAULT_VARIANTS = [
@@ -79,8 +80,11 @@ class AblationRunner:
     ]
 
     def __init__(
-        self, evaluator: Callable[[dict[str, Any], AblationConfig], dict[str, Any]]
+        self,
+        evaluator: Callable[[dict[str, Any], AblationConfig], dict[str, Any]],
+        strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
         self.evaluator = evaluator
 
     def run(
@@ -108,6 +112,17 @@ class AblationRunner:
 
     def _aggregate(self, rows: list[dict[str, Any]]) -> dict[str, float]:
         total = max(len(rows), 1)
+
+        incomplete = sum(1 for r in rows if "prediction" not in r or "answer" not in r)
+        if incomplete:
+            # A row missing either key used to be scored as empty against
+            # empty, which is a score rather than an omission.
+            self._degrade(
+                f"{incomplete} of {len(rows)} evaluated rows carried no "
+                "prediction or no gold answer. They are scored as empty "
+                "strings, so they lower these metrics without being reported "
+                "as missing",
+            )
         em = (
             sum(
                 EvaluationMetrics.exact_match(

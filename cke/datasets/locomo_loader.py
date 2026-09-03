@@ -5,14 +5,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from cke.diagnostics import DegradationMixin
 from cke.datasets.base_loader import DatasetLoader
 from cke.utils.text_cleaning import normalize_whitespace
 
 
-class LoCoMoDataset(DatasetLoader):
+#: Keys a LoCoMo record may use for its turn list.
+_TURN_KEYS = ("turns", "conversation", "messages", "dialogue")
+
+
+class LoCoMoDataset(DatasetLoader, DegradationMixin):
     """Load conversation-style JSON records into normalized CKE documents."""
 
-    def __init__(self, normalize_text: bool = True) -> None:
+    def __init__(self, normalize_text: bool = True, strict: bool = False) -> None:
+        self._init_degradation(strict)
         super().__init__()
         self.normalize_text = normalize_text
 
@@ -22,10 +28,22 @@ class LoCoMoDataset(DatasetLoader):
         return text.strip()
 
     def _extract_turns(self, item: dict[str, Any]) -> list[dict[str, Any]]:
-        for key in ("turns", "conversation", "messages", "dialogue"):
+        """Find the turn list, or declare that this record has none.
+
+        A record using none of the recognised keys used to load as a valid
+        item with zero documents, so it counted toward the dataset size while
+        contributing nothing to retrieve from.
+        """
+        for key in _TURN_KEYS:
             value = item.get(key)
             if isinstance(value, list):
                 return value
+
+        self._degrade(
+            f"a record uses none of the recognised turn keys "
+            f"({', '.join(_TURN_KEYS)}); it loads with zero documents and "
+            "still counts toward the dataset size"
+        )
         return []
 
     def load(self, path: str) -> "LoCoMoDataset":

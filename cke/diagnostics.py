@@ -183,9 +183,14 @@ class DegradationMixin:
     work that might degrade, then ``_degrade(reason)`` at each fallback.
     """
 
-    strict: bool
-    degraded: bool
-    degraded_reason: str
+    # Class-level defaults, so the flag is inspectable on any subclass from
+    # the moment it exists, including dataclasses and classes that never call
+    # _init_degradation. Without these, reading `.degraded` on a healthy
+    # component raised AttributeError, which is the opposite of an
+    # inspectable flag.
+    strict: bool = False
+    degraded: bool = False
+    degraded_reason: str = ""
 
     def _init_degradation(self, strict: bool = False) -> None:
         """Initialise degradation state. Call first in ``__init__``."""
