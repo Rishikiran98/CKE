@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from cke.diagnostics import DegradedComponentError
+from cke.diagnostics import DegradedComponentError, declare_degradation
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.pipeline.types import (
@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+#: Used when a query plan reports no route confidence. Not a measurement.
+_SUBSTITUTED_ROUTE_CONFIDENCE = 0.65
 
 
 class QueryOrchestrator:
@@ -507,13 +511,7 @@ class QueryOrchestrator:
                 else 0.0
             ),
             "verification_issues": verification_issues,
-            "route_confidence": float(
-                getattr(
-                    query_plan,
-                    "route_confidence",
-                    getattr(query_plan, "confidence_score", 0.65),
-                )
-            ),
+            "route_confidence": self._route_confidence(query_plan),
         }
         signals["verification_pass"] = not verification_issues
         signals["contradiction_flag"] = any(())
@@ -589,6 +587,27 @@ class QueryOrchestrator:
             return None
 
         return None
+
+    def _route_confidence(self, query_plan) -> float:
+        """Return the plan's route confidence, or declare the substitution.
+
+        A plan that exposes neither attribute used to get a constant that then
+        flowed into the calibrated confidence as if the router had reported it.
+        """
+        for attribute in ("route_confidence", "confidence_score"):
+            value = getattr(query_plan, attribute, None)
+            if value is not None:
+                return float(value)
+
+        declare_degradation(
+            type(self).__name__,
+            f"the query plan ({type(query_plan).__name__}) exposes neither "
+            "route_confidence nor confidence_score, so a substituted value "
+            f"({_SUBSTITUTED_ROUTE_CONFIDENCE}) is used as the router's "
+            "confidence in the calibrated result",
+            strict=getattr(self, "strict", False),
+        )
+        return _SUBSTITUTED_ROUTE_CONFIDENCE
 
     def _verification_failure_policy(self, issues: list[str]) -> tuple[str, str]:
         if "contradictory_evidence" in issues:

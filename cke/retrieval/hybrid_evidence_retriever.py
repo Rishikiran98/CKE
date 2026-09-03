@@ -5,12 +5,18 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from cke.diagnostics import declare_degradation
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.models import Statement
 from cke.pipeline.types import EvidenceFact, ResolvedEntity, RetrievedChunk
 from cke.retrieval.retrieval_router import RetrievalRouter
 
 logger = logging.getLogger(__name__)
+
+
+#: Substituted as confidence and trust for a dense fallback chunk, which
+#: carries neither of its own. Not a measurement.
+_SYNTHETIC_TRUST = 0.5
 
 
 class HybridEvidenceRetriever:
@@ -24,7 +30,8 @@ class HybridEvidenceRetriever:
     converts between the two and applies entity/relation scoring for ranking.
     """
 
-    def __init__(self, retrieval_router: RetrievalRouter) -> None:
+    def __init__(self, retrieval_router: RetrievalRouter, strict: bool = False) -> None:
+        self.strict = bool(strict)
         self.retrieval_router = retrieval_router
 
     # ------------------------------------------------------------------
@@ -74,12 +81,23 @@ class HybridEvidenceRetriever:
             scored.append((score, chunk, fact))
 
         # --- dense fallback chunks ---
+        if evidence_pack.fallback_chunks:
+            # These carry no confidence or trust of their own, so a constant
+            # stands in for both. Anything downstream that reads them as
+            # scores is reading this constant.
+            declare_degradation(
+                type(self).__name__,
+                f"{len(evidence_pack.fallback_chunks)} dense fallback chunks "
+                f"were wrapped as statements with a substituted confidence and "
+                f"trust score of {_SYNTHETIC_TRUST}; neither is a measurement",
+                strict=getattr(self, "strict", False),
+            )
         for idx, chunk_text in enumerate(evidence_pack.fallback_chunks):
             synthetic_stmt = Statement(
                 subject="",
                 relation="dense_fallback",
                 object=chunk_text,
-                confidence=0.5,
+                confidence=_SYNTHETIC_TRUST,
                 source="dense_fallback",
                 chunk_id=f"hybrid_dense::{idx}",
             )
@@ -96,7 +114,7 @@ class HybridEvidenceRetriever:
                 statement=synthetic_stmt,
                 chunk_id=chunk_id,
                 source="dense_fallback",
-                trust_score=0.5,
+                trust_score=_SYNTHETIC_TRUST,
                 retrieval_score=score,
                 entity_alignment_score=0.0,
                 metadata={"retriever": "hybrid_dense", "synthetic": True},
