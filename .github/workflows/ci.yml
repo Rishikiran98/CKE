@@ -22,11 +22,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install the package and pytest
+      - name: Install the package with its development tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest
+          pip install -e ".[dev]"
 
       - name: Run tests
         run: pytest -q

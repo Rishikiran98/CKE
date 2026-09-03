@@ -13,6 +13,8 @@ import pathlib
 import re
 import tomllib
 
+import pytest
+
 import cke
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -72,12 +74,63 @@ def test_the_declared_console_scripts_are_the_installed_ones():
 
 
 def test_the_declared_dependencies_are_requirements_txt():
-    """The dependency list is read from requirements.txt, not typed twice."""
-    declared = importlib.metadata.requires("cke") or []
+    """The dependency list is read from requirements.txt, not typed twice.
+
+    Requirements carrying an extra marker belong to the dev extra, which
+    has its own test; the runtime list is everything without one.
+    """
+    declared = [
+        requirement
+        for requirement in importlib.metadata.requires("cke") or []
+        if "extra ==" not in requirement
+    ]
     wanted = (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
 
     assert _names(declared) == _names(wanted)
     assert _names(declared), "no dependencies declared"
+
+
+_BOUNDED = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*>=\d[\w.]*,<\d[\w.]*$")
+
+
+@pytest.mark.parametrize("filename", ["requirements.txt", "requirements-dev.txt"])
+def test_every_requirement_has_a_lower_and_an_upper_bound(filename):
+    """Thirteen names with no bounds meant a fresh install could differ from
+    the one anything was verified on, with nothing to say so."""
+    lines = [
+        line.strip()
+        for line in (ROOT / filename).read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert lines, f"{filename} declares nothing"
+    unbounded = [line for line in lines if not _BOUNDED.match(line)]
+    assert unbounded == [], f"{filename}: no lower-and-upper bound on {unbounded}"
+
+
+def test_the_dev_extra_is_requirements_dev_txt():
+    """The development tools are read from requirements-dev.txt, not typed twice."""
+    declared = [
+        requirement
+        for requirement in importlib.metadata.requires("cke") or []
+        if 'extra == "dev"' in requirement
+    ]
+    wanted = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines()
+
+    assert _names(declared) == _names(wanted)
+    assert _names(declared), "no dev extra declared"
+
+
+def test_the_workflows_install_the_tools_from_the_dev_file():
+    """CI pinned black and flake8 inline; a pin in two places drifts."""
+    for name in ("ci.yml", "lint.yml", "security.yml"):
+        workflow = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        assert ".[dev]" in workflow or "requirements-dev.txt" in workflow, name
+        inline = [
+            line.strip()
+            for line in workflow.splitlines()
+            if "pip install" in line and "==" in line
+        ]
+        assert inline == [], f"{name} pins a tool inline: {inline}"
 
 
 def test_the_python_requirement_matches_ci():

@@ -1,0 +1,11 @@
+# Tools for developing and checking the package, not for running it. Same
+# bounding rule as requirements.txt. black is held inside one major version
+# because its formatting is only stable within one; CI and a contributor's
+# machine must format identically or `black --check` means nothing.
+#
+# pyproject.toml reads this file for the `dev` extra: pip install -e ".[dev]"
+bandit>=1.9.4,<2
+black>=25.11.0,<26
+flake8>=7.1.2,<8
+mypy>=2.3.1,<3
+pytest>=9.1.1,<10

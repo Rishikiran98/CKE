@@ -101,8 +101,10 @@ From a clone, with Python 3.11 or later:
 pip install -e .
 ```
 
-That installs the library and its dependencies from `requirements.txt`, and
-four console commands for the in-package entry points: `cke-eval`,
+That installs the library and its dependencies from `requirements.txt`, each
+bounded below by a verified version and above by the next major release (the
+next minor for a library still at 0.x), and four console commands for the
+in-package entry points: `cke-eval`,
 `cke-experiment`, `cke-reasoning-eval` and `cke-retrieval-eval`. The drivers
 under `scripts/` and `demo.py` are run as files from the repository root.
 Components that read `configs/*.yaml` look for that directory relative to the
@@ -110,10 +112,12 @@ working directory, so run them from the repository root too.
 
 ## Running the tests
 
-The tests run against the installed package, so install it first, then:
+The tests run against the installed package. The `dev` extra adds the
+checking tools from `requirements-dev.txt` (pytest, black, flake8, mypy,
+bandit) at the versions CI uses:
 
 ```bash
-pip install -e . pytest
+pip install -e ".[dev]"
 python -m pytest -q
 ```
 

@@ -1,15 +1,25 @@
-networkx
-pydantic
-sentence-transformers
-faiss-cpu
-tqdm
-numpy
-scikit-learn
-openai
-python-dotenv
-fastapi
-uvicorn
-neo4j
-PyYAML
-rapidfuzz
-tiktoken
+# Runtime dependencies, each with a lower and an upper bound.
+#
+# The lower bound is the version the test suite and the strict benchmark runs
+# were verified against. The upper bound is the next major version, or for a
+# library still at 0.x the next minor, since that is where 0.x libraries make
+# their breaking changes. Raising a bound is a deliberate change that CI then
+# verifies, not something a fresh install does on its own.
+#
+# pyproject.toml reads this file for the package's dependency list, so it is
+# the only place the list is written.
+faiss-cpu>=1.15.0,<2
+fastapi>=0.141.1,<0.142
+neo4j>=6.3.0,<7
+networkx>=3.6.1,<4
+numpy>=2.4.6,<3
+openai>=3.8.0,<4
+pydantic>=2.13.5,<3
+python-dotenv>=1.2.3,<2
+PyYAML>=6.0.1,<7
+rapidfuzz>=3.14.6,<4
+scikit-learn>=1.9.0,<2
+sentence-transformers>=6.0.1,<7
+tiktoken>=0.14.0,<0.15
+tqdm>=4.70.0,<5
+uvicorn>=0.52.4,<0.53
