@@ -1,0 +1,328 @@
+"""Every component with a degradation path must honour strict mode.
+
+These tests exist because a benchmark once ran on a SHA256 hashing embedder
+while reporting itself as a dense retrieval baseline. Each case here asserts
+that the same substitution now either announces itself or refuses to happen.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from cke.diagnostics import DegradedComponentError, clear_runtime_state
+
+
+@pytest.fixture(autouse=True)
+def _clean_runtime_state():
+    clear_runtime_state()
+    yield
+    clear_runtime_state()
+
+
+# ---------------------------------------------------------------------------
+# Embedding model — the fallback that invalidated the prior results
+# ---------------------------------------------------------------------------
+
+
+def test_embedding_model_declares_the_hash_fallback(monkeypatch, caplog):
+    from cke.retrieval import embedding_model as module
+
+    monkeypatch.setattr(module, "SentenceTransformer", None)
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {})
+
+    with caplog.at_level(logging.WARNING):
+        model = module.EmbeddingModel()
+
+    assert model.degraded is True
+    assert "sentence-transformers" in model.degraded_reason
+    assert "hash" in model.degraded_reason.lower()
+    # The reason must say why it matters, not merely that it happened.
+    assert "meaningless" in model.degraded_reason
+    assert "pip install sentence-transformers" in caplog.text
+
+
+def test_embedding_model_strict_refuses_to_hash(monkeypatch):
+    from cke.retrieval import embedding_model as module
+
+    monkeypatch.setattr(module, "SentenceTransformer", None)
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {})
+
+    with pytest.raises(DegradedComponentError):
+        module.EmbeddingModel(strict=True)
+
+
+def test_a_failed_model_load_is_not_cached_as_the_fallback(monkeypatch):
+    """A transient load failure must not pin the process to hashing."""
+    from cke.retrieval import embedding_model as module
+
+    cache: dict = {}
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", cache)
+
+    def _fail(name):
+        raise OSError("network unreachable")
+
+    monkeypatch.setattr(module, "SentenceTransformer", _fail)
+
+    degraded = module.EmbeddingModel()
+    assert degraded.degraded is True
+    assert cache == {}, "a failed load must not be cached"
+
+    # A later strict construction still sees the real cause and refuses.
+    with pytest.raises(DegradedComponentError) as excinfo:
+        module.EmbeddingModel(strict=True)
+    assert "network unreachable" in str(excinfo.value)
+
+
+def test_empty_input_uses_the_real_dimension(monkeypatch):
+    """The fallback width must not be hardcoded into the healthy path."""
+    from cke.retrieval import embedding_model as module
+
+    class FakeModel:
+        def get_sentence_embedding_dimension(self):
+            return 384
+
+        def encode(self, texts, **kwargs):
+            import numpy as np
+
+            return np.zeros((len(texts), 384), dtype="float32")
+
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {"m": FakeModel()})
+    model = module.EmbeddingModel(model_name="m")
+
+    assert model.embed_texts([]).shape == (0, 384)
+
+
+# ---------------------------------------------------------------------------
+# LLM extractor — the regex substitution
+# ---------------------------------------------------------------------------
+
+
+def test_llm_extractor_declares_the_regex_fallback(monkeypatch, caplog):
+    from cke.extractor import llm_extractor as module
+
+    monkeypatch.delenv("CKE_LLM_API_KEY", raising=False)
+    monkeypatch.setattr(module, "OpenAI", None)
+
+    with caplog.at_level(logging.WARNING):
+        extractor = module.LLMExtractor()
+
+    assert extractor.degraded is True
+    assert "no LLM is in the loop" in extractor.degraded_reason
+
+
+def test_llm_extractor_distinguishes_missing_package_from_missing_key(monkeypatch):
+    from cke.extractor import llm_extractor as module
+
+    monkeypatch.delenv("CKE_LLM_API_KEY", raising=False)
+    monkeypatch.setattr(module, "OpenAI", None)
+    assert "not installed" in module.LLMExtractor().degraded_reason
+
+    monkeypatch.setattr(module, "OpenAI", lambda **kwargs: object())
+    assert "no API key" in module.LLMExtractor().degraded_reason
+
+
+def test_llm_extractor_strict_refuses(monkeypatch):
+    from cke.extractor import llm_extractor as module
+
+    monkeypatch.delenv("CKE_LLM_API_KEY", raising=False)
+    monkeypatch.setattr(module, "OpenAI", None)
+
+    with pytest.raises(DegradedComponentError):
+        module.LLMExtractor(strict=True)
+
+
+# ---------------------------------------------------------------------------
+# Index, baseline, and the rest
+# ---------------------------------------------------------------------------
+
+
+def test_faiss_index_declares_the_numpy_scan(monkeypatch):
+    from cke.retrieval import faiss_index as module
+
+    monkeypatch.setattr(module, "faiss", None)
+    index = module.FaissIndex()
+
+    assert index.degraded is True
+    assert "latency" in index.degraded_reason
+
+    with pytest.raises(DegradedComponentError):
+        module.FaissIndex(strict=True)
+
+
+def test_rag_retriever_inherits_its_components_degradation(monkeypatch):
+    """The dense baseline must not report itself healthy on a hashed embedder."""
+    from cke.retrieval import embedding_model as embed_module
+    from cke.retrieval import faiss_index as faiss_module
+    from cke.retrieval import rag_baseline as module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", None)
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(faiss_module, "faiss", None)
+
+    retriever = module.RAGRetriever()
+
+    assert retriever.degraded is True
+    assert "not a dense retrieval baseline" in retriever.degraded_reason
+
+    with pytest.raises(DegradedComponentError):
+        module.RAGRetriever(strict=True)
+
+
+def test_rag_retriever_tolerates_a_caller_supplied_embedder():
+    """A duck-typed embedder need not implement the contract."""
+    from cke.retrieval import rag_baseline as module
+
+    class Stub:
+        def embed_texts(self, texts, **kwargs):
+            import numpy as np
+
+            return np.zeros((len(list(texts)), 8), dtype="float32")
+
+        def embed_text(self, text):
+            import numpy as np
+
+            return np.zeros((8,), dtype="float32")
+
+    retriever = module.RAGRetriever(embedding_model=Stub())
+    assert retriever.embedding_model.__class__ is Stub
+
+
+def test_relation_mapper_declares_the_two_relation_ontology(monkeypatch):
+    from cke.schema import relation_mapper as module
+
+    monkeypatch.setattr(module, "yaml", None)
+    mapper = module.RelationMapper()
+
+    assert mapper.degraded is True
+    assert sorted(mapper.relations) == ["acted_in", "directed"]
+
+    with pytest.raises(DegradedComponentError):
+        module.RelationMapper(strict=True)
+
+
+def test_coreference_resolver_declares_the_regex_fallback(monkeypatch):
+    from cke.extractor import coreference_resolver as module
+
+    monkeypatch.setattr(module, "spacy", None)
+    resolver = module.CoreferenceResolver()
+
+    assert resolver.degraded is True
+    with pytest.raises(DegradedComponentError):
+        module.CoreferenceResolver(strict=True)
+
+
+def test_graph_engine_declares_the_handrolled_graph(monkeypatch):
+    from cke.graph_engine import graph_engine as module
+
+    monkeypatch.setattr(module, "nx", None)
+    engine = module.KnowledgeGraphEngine()
+
+    assert engine.degraded is True
+    with pytest.raises(DegradedComponentError):
+        module.KnowledgeGraphEngine(strict=True)
+
+
+def test_llm_reasoner_declares_the_template_fallback(monkeypatch):
+    from cke.reasoning import llm_reasoner as module
+
+    monkeypatch.delenv("CKE_LLM_API_KEY", raising=False)
+    reasoner = module.LLMReasoner()
+
+    assert reasoner.degraded is True
+    assert "no LLM is in the loop" in reasoner.degraded_reason
+
+    with pytest.raises(DegradedComponentError):
+        module.LLMReasoner(strict=True)
+
+
+def test_trust_engine_declares_a_missing_config(tmp_path):
+    from cke.graph.trust_engine import TrustEngine
+
+    engine = TrustEngine(config_path=tmp_path / "absent.yaml")
+    assert engine.degraded is True
+
+    with pytest.raises(DegradedComponentError):
+        TrustEngine(config_path=tmp_path / "absent.yaml", strict=True)
+
+
+def test_trust_engine_opting_out_of_config_is_not_a_degradation():
+    from cke.graph.trust_engine import TrustEngine
+
+    assert TrustEngine(config_path=None).degraded is False
+
+
+def test_trust_engine_reads_the_configured_tau(tmp_path):
+    """A non-None tau default used to overwrite the configured value."""
+    from cke.graph.trust_engine import TrustEngine
+
+    config = tmp_path / "trust.yaml"
+    config.write_text("tau: 12345.0\nw_src: 0.5\n", encoding="utf-8")
+
+    engine = TrustEngine(config_path=config)
+
+    assert engine.degraded is False
+    assert engine.calibrator.config.tau == 12345.0
+    assert engine.calibrator.config.w_src == 0.5
+
+
+def test_trust_engine_explicit_tau_still_wins(tmp_path):
+    from cke.graph.trust_engine import TrustEngine
+
+    config = tmp_path / "trust.yaml"
+    config.write_text("tau: 12345.0\n", encoding="utf-8")
+
+    assert TrustEngine(tau=7.0, config_path=config).calibrator.config.tau == 7.0
+
+
+def test_ranking_config_declares_a_missing_file(tmp_path):
+    from cke.retrieval.ranking_config import load_ranking_config
+
+    load_ranking_config(tmp_path / "absent.yaml")
+
+    with pytest.raises(DegradedComponentError):
+        load_ranking_config(tmp_path / "absent.yaml", strict=True)
+
+
+def test_ranking_config_declares_a_typo_in_a_section(tmp_path):
+    """A file that parses but names no known section is not a successful load."""
+    from cke.retrieval.ranking_config import load_ranking_config
+
+    config = tmp_path / "ranking.yaml"
+    config.write_text("chunkk:\n  dense_weight: 0.9\n", encoding="utf-8")
+
+    with pytest.raises(DegradedComponentError):
+        load_ranking_config(config, strict=True)
+
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+
+
+def test_entity_resolver_fallback_is_deterministic(monkeypatch):
+    """The fallback used builtin hash(), which is salted per process."""
+    from cke.entity_resolution import entity_resolver as module
+
+    monkeypatch.setattr(module, "SentenceTransformer", None)
+
+    first = module.EntityResolver()._embed("Stanford University research")
+    second = module.EntityResolver()._embed("Stanford University research")
+
+    assert first == second
+    # Pin the values against the process-salted implementation: a SHA256 digest
+    # of a fixed token always lands in the same bucket.
+    import hashlib
+
+    expected = int(hashlib.sha256(b"stanford").hexdigest(), 16) % 128
+    assert first[expected] > 0
+
+
+def test_entity_resolver_strict_refuses_hashed_similarity(monkeypatch):
+    from cke.entity_resolution import entity_resolver as module
+
+    monkeypatch.setattr(module, "SentenceTransformer", None)
+
+    with pytest.raises(DegradedComponentError):
+        module.EntityResolver(strict=True)._embed("anything")

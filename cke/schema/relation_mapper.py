@@ -1,20 +1,47 @@
-"""Mapping extracted relation text to canonical ontology labels."""
+"""Mapping extracted relation text to canonical ontology labels.
+
+Without PyYAML the ontology cannot be read and collapses to two hardcoded
+relations, so nearly every relation passes through unmapped. That is a large
+change in behaviour from a missing dependency, and it is declared rather than
+absorbed.
+"""
 
 from __future__ import annotations
 
 from difflib import SequenceMatcher
 from pathlib import Path
 
+from cke.diagnostics import DegradationMixin
+
 try:
     import yaml
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     yaml = None
 
 
-class RelationMapper:
-    """Map free-text relation labels to canonical relation ontology names."""
+#: Used only when PyYAML is absent. Two relations out of the full ontology.
+_MINIMAL_RELATIONS: dict[str, dict[str, list[str]]] = {
+    "directed": {"aliases": ["directed", "director_of", "was_director_of"]},
+    "acted_in": {"aliases": ["starred_in", "acted_in", "featured_in"]},
+}
 
-    def __init__(self, schema_path: str | None = None, threshold: float = 0.78) -> None:
+
+class RelationMapper(DegradationMixin):
+    """Map free-text relation labels to canonical relation ontology names.
+
+    Args:
+        schema_path: path to the relation ontology YAML.
+        threshold: minimum fuzzy-match ratio to accept an alias.
+        strict: when True, raise rather than fall back to the minimal ontology.
+    """
+
+    def __init__(
+        self,
+        schema_path: str | None = None,
+        threshold: float = 0.78,
+        strict: bool = False,
+    ) -> None:
+        self._init_degradation(strict)
         self.threshold = threshold
         self.schema_path = schema_path or str(
             Path(__file__).with_name("relations.yaml")
@@ -47,10 +74,15 @@ class RelationMapper:
 
     def _load_relations(self) -> dict[str, dict[str, list[str]]]:
         if yaml is None:
-            return {
-                "directed": {"aliases": ["directed", "director_of", "was_director_of"]},
-                "acted_in": {"aliases": ["starred_in", "acted_in", "featured_in"]},
-            }
+            self._degrade(
+                "PyYAML is not installed, so the relation ontology at "
+                f"{self.schema_path} cannot be read and only "
+                f"{len(_MINIMAL_RELATIONS)} relations "
+                f"({', '.join(sorted(_MINIMAL_RELATIONS))}) are recognised. "
+                "Every other relation passes through unmapped. Install it "
+                "with `pip install PyYAML`"
+            )
+            return dict(_MINIMAL_RELATIONS)
         with open(self.schema_path, "r", encoding="utf-8") as handle:
             payload = yaml.safe_load(handle) or {}
         return payload.get("relations", {})

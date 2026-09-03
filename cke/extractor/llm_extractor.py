@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -11,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from cke.diagnostics import DegradationMixin
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.models import Statement
 from cke.observability.token_tracker import TokenTracker
@@ -18,8 +20,11 @@ from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
 
 try:
     from openai import OpenAI
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     OpenAI = None
+
+
+logger = logging.getLogger(__name__)
 
 
 _VALID_QUALIFIER_KEYS = {"temporal", "condition", "scope", "modality"}
@@ -86,15 +91,31 @@ class LLMConfig:
     retry_delay_s: float = 0.3
 
 
-class LLMExtractor(BaseExtractor):
-    """Extract structured assertions from text using an LLM."""
+class LLMExtractor(BaseExtractor, DegradationMixin):
+    """Extract structured assertions from text using an LLM.
+
+    Without a client this class does not extract with an LLM at all: it
+    delegates to a handful of regexes. Anything measured in that state
+    describes the rule-based extractor, so the fallback is declared rather
+    than taken quietly.
+
+    Args:
+        config: model and API-key configuration.
+        fallback: extractor used when no LLM client is available.
+        token_tracker: token accounting sink.
+        strict: when True, raise rather than fall back to rule-based
+            extraction. Every evaluation and benchmark path must pass
+            ``strict=True``.
+    """
 
     def __init__(
         self,
         config: LLMConfig | None = None,
         fallback: BaseExtractor | None = None,
         token_tracker: TokenTracker | None = None,
+        strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
         self.config = config or LLMConfig(api_key=os.getenv("CKE_LLM_API_KEY"))
         self.fallback = fallback or RuleBasedExtractor()
         self.token_tracker = token_tracker or TokenTracker()
@@ -104,6 +125,20 @@ class LLMExtractor(BaseExtractor):
             else None
         )
         self.trace_logger = ReasoningTraceLogger()
+
+        if self.client is None:
+            if OpenAI is None:
+                cause = "the openai package is not installed " "(`pip install openai`)"
+            else:
+                cause = (
+                    "no API key is configured; set CKE_LLM_API_KEY or pass "
+                    "LLMConfig(api_key=...)"
+                )
+            self._degrade(
+                f"{cause}, so no LLM is in the loop and extraction falls back "
+                f"to {type(self.fallback).__name__}. Any extraction quality "
+                "measured in this state describes that fallback, not an LLM"
+            )
 
     def extract(self, text: str) -> list[Statement]:
         if self.client is None:
@@ -136,11 +171,26 @@ class LLMExtractor(BaseExtractor):
                         stage="llm_extractor",
                     )
                 return statements or self.fallback.extract(text)
-            except Exception as exc:  # pragma: no cover - network/runtime variability
+            except Exception as exc:  # noqa: BLE001 - network/runtime variability
                 last_error = exc
+                logger.warning(
+                    "LLM extraction attempt %d/%d failed (%s: %s)",
+                    attempt + 1,
+                    self.config.max_retries + 1,
+                    type(exc).__name__,
+                    exc,
+                )
                 if attempt < self.config.max_retries:
                     time.sleep(self.config.retry_delay_s)
-        if last_error:
+
+        if last_error is not None:
+            # Every attempt failed. Falling back now would silently substitute
+            # regex output for LLM output in the middle of a run.
+            self._degrade(
+                f"all {self.config.max_retries + 1} LLM extraction attempts "
+                f"failed ({type(last_error).__name__}: {last_error}); falling "
+                f"back to {type(self.fallback).__name__}"
+            )
             return self.fallback.extract(text)
         return []
 

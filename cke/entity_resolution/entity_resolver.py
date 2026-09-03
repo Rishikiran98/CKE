@@ -8,12 +8,14 @@ both the ingestion pipeline and the query pipeline.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
+from cke.diagnostics import DegradationMixin, record_loaded_model
 from cke.entity_resolution.alias_registry import AliasRegistry
 
 if TYPE_CHECKING:
@@ -25,18 +27,24 @@ if TYPE_CHECKING:
 
 try:
     from rapidfuzz import fuzz  # type: ignore[import-untyped]
-except Exception:  # pragma: no cover – optional dependency
+except ImportError:  # pragma: no cover – optional dependency
     fuzz = None
 
 try:
     import numpy as np  # type: ignore[import-untyped]
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     np = None
 
 try:
     from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]  # noqa: E501
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     SentenceTransformer = None
+
+
+_EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+
+#: Width of the hashed fallback vector. Not a semantic embedding dimension.
+_FALLBACK_DIM = 128
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +65,7 @@ class ResolutionResult:
 # ---------------------------------------------------------------------------
 
 
-class EntityResolver:
+class EntityResolver(DegradationMixin):
     """Resolve entity mentions to canonical names and extract entities from queries.
 
     Resolution chain (in order):
@@ -112,7 +120,9 @@ class EntityResolver:
         fuzzy_threshold: float = 0.9,
         embedding_threshold: float = 0.8,
         embedding_similarity_fn: Callable[[str, str], float] | None = None,
+        strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
         self.registry = AliasRegistry()
         self._canonical_entities: set[str] = set()
         self.graph_engine = graph_engine
@@ -459,10 +469,16 @@ class EntityResolver:
     # Private: fuzzy matching
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _fuzzy_score(left: str, right: str) -> float:
+    def _fuzzy_score(self, left: str, right: str) -> float:
         if fuzz is not None:
             return float(fuzz.ratio(left, right) / 100.0)
+        self._degrade(
+            "rapidfuzz is not installed, so fuzzy matching uses "
+            "difflib.SequenceMatcher, a different algorithm whose ratios are "
+            f"not comparable to rapidfuzz's. The fuzzy threshold "
+            f"({self.fuzzy_threshold}) was not calibrated for it. Install it "
+            "with `pip install rapidfuzz`"
+        )
         return SequenceMatcher(a=left, b=right).ratio()
 
     def _best_fuzzy(
@@ -483,11 +499,28 @@ class EntityResolver:
 
     def _load_embedding_model(self) -> Any | None:
         if SentenceTransformer is None:
+            self._degrade(
+                "sentence-transformers is not installed, so entity similarity "
+                "is computed from hashed token counts rather than embeddings, "
+                f"and the embedding threshold ({self.embedding_threshold}) was "
+                "not calibrated for that. Install it with "
+                "`pip install sentence-transformers`"
+            )
             return None
         try:
-            return SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception:
+            model = SentenceTransformer(_EMBEDDING_MODEL_NAME)
+        except Exception as exc:  # noqa: BLE001 - download/runtime failures vary
+            self._degrade(
+                f"sentence-transformers could not load "
+                f"{_EMBEDDING_MODEL_NAME!r} ({type(exc).__name__}: {exc}), so "
+                "entity similarity is computed from hashed token counts "
+                "rather than embeddings"
+            )
             return None
+        record_loaded_model(
+            "EntityResolver", _EMBEDDING_MODEL_NAME, _EMBEDDING_MODEL_NAME
+        )
+        return model
 
     def _embed(self, text: str) -> list[float]:
         key = str(text)
@@ -504,10 +537,21 @@ class EntityResolver:
             self._embedding_cache[key] = out
             return out
 
+        if self._embedding_model is not None and np is None:
+            self._degrade(
+                "numpy is not installed, so the loaded embedding model cannot "
+                "be used and entity similarity falls back to hashed token "
+                "counts. Install it with `pip install numpy`"
+            )
+
         # Bag-of-hashes fallback when SentenceTransformer is unavailable.
-        vec = [0.0] * 128
+        # Hashing is SHA256 rather than the builtin hash(): builtin string
+        # hashing is salted per process, which made resolution differ between
+        # two runs of the same commit on the same data.
+        vec = [0.0] * _FALLBACK_DIM
         for token in re.findall(r"\w+", self._normalize(text)):
-            vec[hash(token) % 128] += 1.0
+            digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            vec[int(digest, 16) % _FALLBACK_DIM] += 1.0
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         out = [v / norm for v in vec]
         self._embedding_cache[key] = out
