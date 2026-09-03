@@ -117,3 +117,32 @@ def test_truncation_is_aggregated_per_arm():
     assert agg["rag_k10"]["truncated_items"] == 2
     assert agg["rag_k10"]["truncation_rate"] == 1.0
     assert agg["cke_n12"]["truncated_items"] == 0
+
+
+def test_a_scored_row_keeps_the_truncation_the_pipeline_recorded():
+    """Six hand-written row literals each dropped this, so per-arm truncation
+    read zero against a shared total of 596. The aggregation test above could
+    not see it: it fed rows straight to aggregate_metrics, bypassing the row
+    builder that was losing the field."""
+    raw = {
+        "answer": "Elon Musk",
+        "prompt_tokens": 1250,
+        "latency_ms": 3.0,
+        "answer_truncated": True,
+        "answer_dropped_tokens": 700,
+        "n_statements": 4,
+    }
+    row = bench._score_row(raw, "Elon Musk", "n_statements")
+
+    assert row["answer_truncated"] is True
+    assert row["answer_dropped_tokens"] == 700
+    assert row["n_statements"] == 4
+    assert row["em"] == 1.0
+
+
+def test_a_scored_row_defaults_truncation_when_the_answerer_has_none():
+    raw = {"answer": "x", "prompt_tokens": 5, "latency_ms": 1.0}
+    row = bench._score_row(raw, "x")
+
+    assert row["answer_truncated"] is False
+    assert row["answer_dropped_tokens"] == 0

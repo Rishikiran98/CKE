@@ -349,6 +349,29 @@ class HybridPipeline:
 # ---------------------------------------------------------------------------
 
 
+def _score_row(r: dict[str, Any], gold: str, *extra: str) -> dict[str, Any]:
+    """One per-configuration row, scored.
+
+    Six hand-written dict literals used to do this, each copying a fixed list
+    of keys. When the answerer began reporting whether it had truncated the
+    context, the pipelines recorded it and every one of the six dropped it on
+    the floor, so the per-arm truncation counts read zero against a shared
+    total of 596. One function, one list of keys.
+    """
+    scored = {
+        "answer": r["answer"],
+        "prompt_tokens": r["prompt_tokens"],
+        "latency_ms": r["latency_ms"],
+        "answer_truncated": bool(r.get("answer_truncated", False)),
+        "answer_dropped_tokens": int(r.get("answer_dropped_tokens", 0)),
+        "em": EvaluationMetrics.exact_match(r["answer"], gold),
+        "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+    }
+    for key in extra:
+        scored[key] = r[key]
+    return scored
+
+
 def run_dataset(
     items: list[dict[str, Any]],
     dataset_name: str,
@@ -397,68 +420,27 @@ def run_dataset(
 
         # --- RAG k=5 ---
         r = rag_pipeline.run_item(question, docs, k=5)
-        row["rag_k5"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["rag_k5"] = _score_row(r, gold)
 
         # --- RAG k=10 ---
         r = rag_pipeline.run_item(question, docs, k=10)
-        row["rag_k10"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["rag_k10"] = _score_row(r, gold)
 
         # --- CKE-lite N=8 ---
         r = cke_pipeline.run_item(question, docs, n=8)
-        row["cke_n8"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["cke_n8"] = _score_row(r, gold, "n_statements")
 
         # --- CKE-lite N=12 ---
         r = cke_pipeline.run_item(question, docs, n=12)
-        row["cke_n12"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["cke_n12"] = _score_row(r, gold, "n_statements")
 
         # --- CKE-lite N=20 ---
         r = cke_pipeline.run_item(question, docs, n=20)
-        row["cke_n20"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["cke_n20"] = _score_row(r, gold, "n_statements")
 
         # --- Hybrid N=12, k_fallback=3 ---
         r = hybrid_pipeline.run_item(question, docs, n=12, k_fallback=3)
-        row["hybrid_n12"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "mode": r["mode"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["hybrid_n12"] = _score_row(r, gold, "n_statements", "mode")
 
         results.append(row)
 
