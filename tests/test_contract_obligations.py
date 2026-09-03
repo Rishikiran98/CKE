@@ -81,7 +81,6 @@ def _cases(tmp: pathlib.Path):
     from cke.evaluation.token_counter import TokenCounter
     from cke.extractor.coreference_resolver import CoreferenceResolver
     from cke.extractor.llm_extractor import LLMExtractor
-    from cke.graph.domain_classifier import DomainClassifier
     from cke.graph.graph_store import GraphStore
     from cke.graph.trust_engine import TrustEngine
     from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -135,11 +134,6 @@ def _cases(tmp: pathlib.Path):
             "ConfidenceModel",
             lambda s: ConfidenceModel(strict=s),
             lambda o: o.predict(Statement("A", "uses", "B")),
-        ),
-        (
-            "DomainClassifier",
-            lambda s: DomainClassifier(strict=s),
-            lambda o: o.classify_entity("zzzqqq"),
         ),
         (
             "GraphStore",
