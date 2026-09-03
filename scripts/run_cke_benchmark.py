@@ -966,8 +966,9 @@ def main() -> None:
         "--llm-revision",
         default=None,
         help=(
-            "Hub commit to pin a local model to. The default model is pinned "
-            "already; any other model must be given one, or a strict run refuses."
+            "The 40-character Hub commit sha to pin a local model to. A branch "
+            "or tag is refused: it moves. The default model is pinned already; "
+            "any other model must be given one, or a strict run refuses."
         ),
     )
     parser.add_argument(

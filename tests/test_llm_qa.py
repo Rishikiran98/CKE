@@ -17,6 +17,11 @@ from cke.diagnostics import DegradedComponentError, clear_runtime_state
 from cke.evaluation.llm_qa import PROMPT, LLMAnswerer
 
 
+#: A revision with the shape of a pin. The answerer refuses anything that is
+#: not a full commit hash, so a placeholder has to look like one.
+_A_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     clear_runtime_state()
@@ -231,7 +236,7 @@ def _patch_loaders(monkeypatch, seen=None):
 
 def test_the_native_window_is_used_when_none_is_requested(monkeypatch):
     _patch_loaders(monkeypatch)
-    answerer = LLMAnswerer(backend="local", model="stub", model_revision="abc")
+    answerer = LLMAnswerer(backend="local", model="stub", model_revision=_A_COMMIT)
 
     assert answerer._window == _StubTokenizer.model_max_length
     assert f"{_StubTokenizer.model_max_length}-token window" in answerer.description
@@ -240,7 +245,7 @@ def test_the_native_window_is_used_when_none_is_requested(monkeypatch):
 def test_the_requested_window_overrides_the_native_one(monkeypatch):
     _patch_loaders(monkeypatch)
     answerer = LLMAnswerer(
-        backend="local", model="stub", max_input_tokens=200, model_revision="abc"
+        backend="local", model="stub", max_input_tokens=200, model_revision=_A_COMMIT
     )
     answerer.answer("q", " ".join(["word"] * 40))
 
@@ -285,6 +290,46 @@ def test_a_model_without_a_pinned_revision_stops_a_strict_run(monkeypatch):
 def test_an_explicit_revision_reaches_both_loaders(monkeypatch):
     seen = []
     _patch_loaders(monkeypatch, seen)
-    LLMAnswerer(backend="local", model="someone/other-model", model_revision="deadbeef")
+    LLMAnswerer(backend="local", model="someone/other-model", model_revision=_A_COMMIT)
 
-    assert [kw.get("revision") for _, _, kw in seen] == ["deadbeef", "deadbeef"]
+    assert [kw.get("revision") for _, _, kw in seen] == [_A_COMMIT, _A_COMMIT]
+
+
+@pytest.mark.parametrize(
+    "revision",
+    ["main", "v1.0", "deadbeef", _A_COMMIT[:12], _A_COMMIT + "0"],
+    ids=["branch", "tag", "word", "short-hash", "too-long"],
+)
+def test_a_revision_that_is_not_a_full_commit_is_declared(
+    monkeypatch, caplog, revision
+):
+    """A branch or tag moves and a short hash is a prefix; none of them pins.
+
+    Truthiness let ``main`` through, and a run given it would have loaded
+    whatever the Hub served that day while reporting itself pinned. Nothing
+    may be loaded through such a name, so the loaders must not be called.
+    """
+    seen = []
+    _patch_loaders(monkeypatch, seen)
+    with caplog.at_level(logging.WARNING):
+        answerer = LLMAnswerer(
+            backend="local", model="someone/other-model", model_revision=revision
+        )
+
+    assert answerer.degraded is True
+    assert answerer.available is False
+    assert revision in answerer.degraded_reason
+    assert "commit" in answerer.degraded_reason
+    assert seen == []
+    assert any("commit" in record.message for record in caplog.records)
+
+
+def test_a_branch_name_stops_a_strict_run(monkeypatch):
+    _patch_loaders(monkeypatch)
+    with pytest.raises(DegradedComponentError, match="main"):
+        LLMAnswerer(
+            backend="local",
+            model="someone/other-model",
+            model_revision="main",
+            strict=True,
+        )
