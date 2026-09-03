@@ -43,6 +43,17 @@ except ImportError:  # pragma: no cover
 
 _EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 
+#: Loaded models, keyed by name, shared across every resolver in the process.
+#: A resolver is constructed per GraphRetriever, and a benchmark builds one per
+#: item, so without this the transformer was loaded from disk three hundred
+#: times in a run and every latency figure measured the load. EmbeddingModel
+#: already caches this way; this is the same fix on the other loader.
+_MODEL_CACHE: dict[str, Any] = {}
+
+#: Names whose load already failed, with the reason. A failure is declared once
+#: per resolver, as before, but retried no more than once per process.
+_FAILED_MODEL_LOADS: dict[str, str] = {}
+
 #: Width of the hashed fallback vector. Not a semantic embedding dimension.
 _FALLBACK_DIM = 128
 
@@ -697,16 +708,30 @@ class EntityResolver(DegradationMixin):
                 "`pip install sentence-transformers`"
             )
             return None
+
+        cached = _MODEL_CACHE.get(_EMBEDDING_MODEL_NAME)
+        if cached is not None:
+            return cached
+
+        previous_failure = _FAILED_MODEL_LOADS.get(_EMBEDDING_MODEL_NAME)
+        if previous_failure is not None:
+            self._degrade(previous_failure)
+            return None
+
         try:
             model = SentenceTransformer(_EMBEDDING_MODEL_NAME)
         except Exception as exc:  # noqa: BLE001 - download/runtime failures vary
-            self._degrade(
+            reason = (
                 f"sentence-transformers could not load "
                 f"{_EMBEDDING_MODEL_NAME!r} ({type(exc).__name__}: {exc}), so "
                 "entity similarity is computed from hashed token counts "
                 "rather than embeddings"
             )
+            _FAILED_MODEL_LOADS[_EMBEDDING_MODEL_NAME] = reason
+            self._degrade(reason)
             return None
+
+        _MODEL_CACHE[_EMBEDDING_MODEL_NAME] = model
         record_loaded_model(
             "EntityResolver", _EMBEDDING_MODEL_NAME, _EMBEDDING_MODEL_NAME
         )
