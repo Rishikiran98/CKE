@@ -76,7 +76,10 @@ def _try_hf_hotpotqa(
                 kwargs["name"] = cfg
             ds = load_dataset(name, split="validation", **kwargs)
             break
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
+            # Broad by necessity: datasets/huggingface_hub raise many distinct
+            # error types. Every one is recorded and surfaced in the final
+            # DatasetUnavailableError rather than discarded.
             log.append(f"HuggingFace load of {name!r} failed: {exc}")
             ds = None
 
@@ -139,7 +142,7 @@ def _try_hf_wiki2(
                 kwargs["name"] = cfg
             ds = load_dataset(name, split="validation", **kwargs)
             break
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
             log.append(f"HuggingFace load of {name!r} failed: {exc}")
 
     if ds is None:
