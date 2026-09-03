@@ -1,29 +1,73 @@
-"""Retrieval and evaluation pipeline for MS MARCO, HotpotQA, and LoCoMo.
+"""Dense retrieval evaluation: MS MARCO documents, HotpotQA and LoCoMo queries.
 
-This script:
-1. Loads MS MARCO fulldocs TSV as the retrieval corpus.
-2. Builds sentence-transformer embeddings.
-3. Indexes embeddings with FAISS.
-4. Loads query sets from HotpotQA and LoCoMo.
-5. Retrieves top-k MS MARCO documents for each query.
-6. Evaluates retrieval with Recall@k.
+Indexes MS MARCO full documents with a sentence-transformer and a vector
+index, retrieves the top-k documents for each HotpotQA and LoCoMo query, and
+reports Recall@k against each query's relevance hints.
 
-The implementation is designed to be robust to slight schema differences
-in dataset files.
+Contract
+--------
+This module used to import faiss, pandas and sentence-transformers at the top
+and build a ``SentenceTransformer`` directly, so it could not be imported
+without all three and had no way to say what it was running on. It now
+composes :class:`~cke.retrieval.embedding_model.EmbeddingModel` and
+:class:`~cke.retrieval.faiss_index.FaissIndex`, the components every other
+evaluation path uses, and inherits their degradation: without
+sentence-transformers or faiss it declares what is missing and, under
+``strict`` (the command line's default), refuses to run rather than report a
+Recall@k measured on a hashed embedder or a numpy scan.
+
+Two readers stay local to this module rather than coming from the dataset
+registry, because the registry's are the wrong shape for what the metric
+needs. The corpus reader takes the four-column MS MARCO full-document TSV
+(id, url, title, body); :class:`~cke.datasets.msmarco_loader.MSMarcoDocumentDataset`
+reads two-column rows and would swallow the title the relevance test matches
+on. The LoCoMo reader keeps the relevance fields the registry loader drops.
+Reconciling them belongs to the evaluation rebuild, not to this change.
+
+What Recall@k means here
+------------------------
+A retrieved document counts as relevant when its id is among the query's
+hints or a hint is a substring of its lower-cased title. Hints come from
+HotpotQA's supporting-fact titles and answer, and from whichever relevance
+fields a LoCoMo record carries. That is a title-matching proxy, not a judged
+relevance set: MS MARCO documents were never labelled against HotpotQA or
+LoCoMo queries, and a figure from here says how often a title matched, not
+how often the right passage was found.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
-import faiss
 import numpy as np
-import pandas as pd
-from sentence_transformers import SentenceTransformer
+
+from cke.datasets.hotpot_loader import HotpotDataset
+from cke.diagnostics import (
+    DegradationMixin,
+    degradation_summary,
+    environment_report,
+    require_strict_component,
+)
+from cke.retrieval.embedding_model import EmbeddingModel
+from cke.retrieval.faiss_index import FaissIndex
+
+__all__ = [
+    "CorpusDocument",
+    "DenseRetriever",
+    "MSMARCOCorpus",
+    "QueryExample",
+    "evaluate_recall_at_k",
+    "load_hotpot_queries",
+    "load_locomo_queries",
+    "run_pipeline",
+]
+
+DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 @dataclass(frozen=True)
@@ -35,104 +79,171 @@ class QueryExample:
     relevant_hints: set[str]
 
 
-class MSMARCOCorpus:
-    """Loads MS MARCO full documents and exposes metadata needed for retrieval."""
+@dataclass(frozen=True)
+class CorpusDocument:
+    """One MS MARCO document: its id, title, and the text that is embedded."""
 
-    def __init__(self, tsv_path: Path, max_docs: int | None = None) -> None:
-        self.tsv_path = tsv_path
+    doc_id: str
+    title: str
+    text: str
+
+    @property
+    def title_norm(self) -> str:
+        return self.title.lower().strip()
+
+
+class MSMARCOCorpus(DegradationMixin):
+    """MS MARCO full documents from the TSV of ``id, url, title, body`` rows.
+
+    A three-column file (``id, title, body``) is accepted too. Rows with fewer
+    columns carry no title and no body; they are not padded into empty
+    documents, since an empty document that can never be relevant would lower
+    every recall figure without anyone seeing why. They are counted and the
+    count is declared as a degradation.
+    """
+
+    def __init__(
+        self, tsv_path: Path, max_docs: int | None = None, strict: bool = False
+    ) -> None:
+        self._init_degradation(strict)
+        self.tsv_path = Path(tsv_path)
         self.max_docs = max_docs
-        self.df = self._load()
+        self.documents = self._load()
 
-    def _load(self) -> pd.DataFrame:
-        df = pd.read_csv(
-            self.tsv_path, sep="\t", header=None, dtype=str, keep_default_na=False
-        )
+    def _load(self) -> list[CorpusDocument]:
+        documents: list[CorpusDocument] = []
+        malformed = 0
+        with self.tsv_path.open("r", encoding="utf-8", newline="") as handle:
+            # MS MARCO bodies contain quotation marks that are text, not
+            # quoting; a quote-aware reader would join rows across them.
+            reader = csv.reader(handle, delimiter="\t", quoting=csv.QUOTE_NONE)
+            for row in reader:
+                if not row or not any(cell.strip() for cell in row):
+                    continue
+                if len(row) >= 4:
+                    doc_id, _url, title, body = row[:4]
+                elif len(row) == 3:
+                    doc_id, title, body = row
+                else:
+                    malformed += 1
+                    continue
+                text = f"{title.strip()}\n{body.strip()}".strip()
+                documents.append(
+                    CorpusDocument(doc_id=str(doc_id).strip(), title=title, text=text)
+                )
+                if self.max_docs is not None and len(documents) >= self.max_docs:
+                    break
 
-        # Common MS MARCO full-doc layout has 4 columns: doc_id, url, title, body.
-        # Fall back gracefully if column count differs.
-        if df.shape[1] >= 4:
-            df = df.iloc[:, :4].copy()
-            df.columns = ["doc_id", "url", "title", "body"]
-        elif df.shape[1] == 3:
-            df = df.copy()
-            df.columns = ["doc_id", "title", "body"]
-            df["url"] = ""
-        else:
-            raise ValueError(
-                "Unsupported MS MARCO TSV format. Expected >=3 columns like: "
-                "doc_id, url, title, body"
+        if malformed:
+            self._degrade(
+                f"{malformed} rows of {self.tsv_path} had fewer than three "
+                "columns and were dropped, so the corpus is smaller than the "
+                "file. Expected id, url, title, body"
             )
-
-        if self.max_docs is not None:
-            df = df.iloc[: self.max_docs].copy()
-
-        df["doc_id"] = df["doc_id"].astype(str)
-        df["title"] = df["title"].fillna("")
-        df["body"] = df["body"].fillna("")
-        df["text"] = (
-            df["title"].str.strip() + "\n" + df["body"].str.strip()
-        ).str.strip()
-
-        # Normalize title for fuzzy title-based relevance matching.
-        df["title_norm"] = df["title"].str.lower().str.strip()
-        return df.reset_index(drop=True)
+        if not documents:
+            raise ValueError(
+                f"No documents were read from {self.tsv_path}. Expected "
+                "tab-separated rows of id, url, title, body"
+            )
+        return documents
 
     @property
     def texts(self) -> list[str]:
-        return self.df["text"].tolist()
+        return [document.text for document in self.documents]
 
     @property
     def doc_ids(self) -> list[str]:
-        return self.df["doc_id"].tolist()
+        return [document.doc_id for document in self.documents]
 
 
-class DenseRetriever:
-    """Sentence-transformer embedder + FAISS inner-product index."""
+def _l2_normalize(vectors: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    return vectors / np.clip(norms, a_min=1e-12, a_max=None)
 
-    def __init__(self, model_name: str) -> None:
-        self.model = SentenceTransformer(model_name)
-        self.index: faiss.Index | None = None
-        self.doc_embeddings: np.ndarray | None = None
 
-    @staticmethod
-    def _l2_normalize(x: np.ndarray) -> np.ndarray:
-        norms = np.linalg.norm(x, axis=1, keepdims=True)
-        norms = np.clip(norms, a_min=1e-12, a_max=None)
-        return x / norms
+class DenseRetriever(DegradationMixin):
+    """Sentence-transformer embeddings in a vector index, ranked by cosine.
 
-    def build_index(self, docs: list[str], batch_size: int = 64) -> None:
-        embeddings = self.model.encode(
-            docs,
-            batch_size=batch_size,
-            show_progress_bar=True,
-            convert_to_numpy=True,
-            normalize_embeddings=False,
-        ).astype("float32")
+    Vectors are L2-normalised before indexing and before search. On unit
+    vectors the index's L2 distance orders documents exactly as cosine
+    similarity does, which is the ranking this evaluation has always
+    reported; it previously built a raw inner-product index over the same
+    normalised vectors.
 
-        embeddings = self._l2_normalize(embeddings)
-        self.doc_embeddings = embeddings
+    Args:
+        model_name: sentence-transformers model identifier.
+        embedding_model: an embedder to reuse. Under ``strict`` it must
+            itself be strict and not already degraded.
+        strict: when True, refuse to construct on a hashed embedder or a
+            numpy-scan index instead of measuring recall against them.
+    """
 
-        dim = embeddings.shape[1]
-        index = faiss.IndexFlatIP(dim)
-        index.add(embeddings)
-        self.index = index
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL_NAME,
+        embedding_model: EmbeddingModel | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._init_degradation(strict)
+        require_strict_component(
+            type(self).__name__, embedding_model, "embedding model", strict
+        )
+        self.embedding_model = embedding_model or EmbeddingModel(
+            model_name, strict=strict
+        )
+        self.model_name = str(getattr(self.embedding_model, "model_name", model_name))
+        self.index = FaissIndex(strict=strict)
+        self.documents: list[CorpusDocument] = []
+
+        if getattr(self.embedding_model, "degraded", False):
+            self._degrade(
+                "its embedding model is degraded, so this is not dense "
+                "retrieval: "
+                f"{getattr(self.embedding_model, 'degraded_reason', 'unknown')}"
+            )
+        if self.index.degraded:
+            self._degrade(f"its vector index is degraded: {self.index.degraded_reason}")
+
+    def build_index(
+        self, documents: Sequence[CorpusDocument], batch_size: int = 64
+    ) -> None:
+        """Embed and index the corpus, keyed by position."""
+        self.documents = list(documents)
+        vectors = self._embed(
+            [document.text for document in self.documents], batch_size
+        )
+        # The index is keyed by row position, not by the corpus's own ids:
+        # a corpus may repeat an id, and a hit has to map back to exactly the
+        # row that was embedded.
+        self.index.build_index(
+            [
+                {"doc_id": str(position), "text": document.text, "embedding": vector}
+                for position, (document, vector) in enumerate(
+                    zip(self.documents, vectors)
+                )
+            ]
+        )
 
     def search(
-        self, queries: list[str], top_k: int = 10, batch_size: int = 64
-    ) -> tuple[np.ndarray, np.ndarray]:
-        if self.index is None:
+        self, queries: Sequence[str], top_k: int = 10, batch_size: int = 64
+    ) -> list[list[int]]:
+        """Return, per query, the corpus positions of its top-k documents."""
+        if not self.documents:
             raise RuntimeError("Index has not been built. Call build_index first.")
+        vectors = self._embed(list(queries), batch_size)
+        return [
+            [int(hit["doc_id"]) for hit in self.index.search(vector, top_k)]
+            for vector in vectors
+        ]
 
-        q_emb = self.model.encode(
-            queries,
-            batch_size=batch_size,
-            show_progress_bar=True,
-            convert_to_numpy=True,
-            normalize_embeddings=False,
-        ).astype("float32")
-        q_emb = self._l2_normalize(q_emb)
-        scores, indices = self.index.search(q_emb, top_k)
-        return scores, indices
+    def _embed(self, texts: list[str], batch_size: int) -> np.ndarray:
+        vectors = np.asarray(
+            self.embedding_model.embed_texts(texts, batch_size=batch_size),
+            dtype=np.float32,
+        )
+        if vectors.size == 0:
+            return vectors
+        return _l2_normalize(vectors)
 
 
 def _read_json(path: Path) -> Any:
@@ -173,7 +284,7 @@ def _extract_string_list(value: Any) -> set[str]:
 def _extract_hotpot_relevance(item: dict[str, Any]) -> set[str]:
     # Primary signal: supporting_facts => list[[title, sent_id], ...]
     hints: set[str] = set()
-    for sf in item.get("supporting_facts", []):
+    for sf in item.get("supporting_facts") or []:
         if isinstance(sf, list) and sf:
             title = str(sf[0]).strip().lower()
             if title:
@@ -185,23 +296,26 @@ def _extract_hotpot_relevance(item: dict[str, Any]) -> set[str]:
 
 
 def load_hotpot_queries(
-    path: Path, max_queries: int | None = None
+    path: Path, max_queries: int | None = None, strict: bool = False
 ) -> list[QueryExample]:
-    data = _read_json(path)
-    if not isinstance(data, list):
-        raise ValueError("HotpotQA file should be a JSON list.")
+    """Read HotpotQA questions through the registry loader.
+
+    The loader carries the degradation contract, so a file whose context
+    entries are malformed is declared rather than silently thinned.
+    """
+    dataset = HotpotDataset(strict=strict).load(str(path))
 
     queries: list[QueryExample] = []
-    for i, item in enumerate(data):
-        if not isinstance(item, dict):
-            continue
-        question = str(item.get("question", "")).strip()
+    for item in dataset.items:
+        question = str(item.get("question") or "").strip()
         if not question:
             continue
-        hints = _extract_hotpot_relevance(item)
-        qid = str(item.get("_id", f"hotpot-{i}"))
         queries.append(
-            QueryExample(query_id=qid, query_text=question, relevant_hints=hints)
+            QueryExample(
+                query_id=str(item["id"]),
+                query_text=question,
+                relevant_hints=_extract_hotpot_relevance(item),
+            )
         )
         if max_queries is not None and len(queries) >= max_queries:
             break
@@ -255,90 +369,89 @@ def load_locomo_queries(
     return queries
 
 
-def _is_relevant(doc_id: str, title_norm: str, hints: set[str]) -> bool:
+def _is_relevant(document: CorpusDocument, hints: set[str]) -> bool:
     if not hints:
         return False
-    if doc_id.lower() in hints:
+    if document.doc_id.lower() in hints:
         return True
-    for hint in hints:
-        if hint and hint in title_norm:
-            return True
-    return False
+    title_norm = document.title_norm
+    return any(hint and hint in title_norm for hint in hints)
 
 
 def evaluate_recall_at_k(
-    queries: list[QueryExample],
-    topk_indices: np.ndarray,
-    corpus_df: pd.DataFrame,
+    queries: Sequence[QueryExample],
+    ranked_positions: Sequence[Sequence[int]],
+    documents: Sequence[CorpusDocument],
 ) -> float:
+    """Fraction of queries with at least one relevant document retrieved."""
     if len(queries) == 0:
         return 0.0
+    if len(ranked_positions) != len(queries):
+        raise ValueError(
+            f"{len(ranked_positions)} result lists for {len(queries)} queries"
+        )
 
     hit_count = 0
-    for q_idx, query in enumerate(queries):
-        found = False
-        for doc_row_idx in topk_indices[q_idx]:
-            if doc_row_idx < 0:
-                continue
-            row = corpus_df.iloc[int(doc_row_idx)]
-            if _is_relevant(
-                str(row["doc_id"]), str(row["title_norm"]), query.relevant_hints
-            ):
-                found = True
-                break
-        if found:
+    for query, positions in zip(queries, ranked_positions):
+        if any(
+            _is_relevant(documents[position], query.relevant_hints)
+            for position in positions
+            if 0 <= position < len(documents)
+        ):
             hit_count += 1
-
     return hit_count / len(queries)
 
 
-def run_pipeline(args: argparse.Namespace) -> None:
-    corpus = MSMARCOCorpus(args.msmarco_path, max_docs=args.max_docs)
-    retriever = DenseRetriever(args.model_name)
-    retriever.build_index(corpus.texts, batch_size=args.batch_size)
+def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, float]:
+    """Index the corpus, run both query sets, print and return Recall@k."""
+    corpus = MSMARCOCorpus(args.msmarco_path, max_docs=args.max_docs, strict=strict)
+    retriever = DenseRetriever(args.model_name, strict=strict)
+    retriever.build_index(corpus.documents, batch_size=args.batch_size)
 
-    hotpot_queries = load_hotpot_queries(args.hotpot_path, max_queries=args.max_hotpot)
-    locomo_queries = load_locomo_queries(args.locomo_path, max_queries=args.max_locomo)
-
-    if not hotpot_queries and not locomo_queries:
+    query_sets = {
+        "HotpotQA": load_hotpot_queries(
+            args.hotpot_path, max_queries=args.max_hotpot, strict=strict
+        ),
+        "LoCoMo": load_locomo_queries(args.locomo_path, max_queries=args.max_locomo),
+    }
+    if not any(query_sets.values()):
         raise ValueError("No valid queries loaded from HotpotQA or LoCoMo.")
 
-    if hotpot_queries:
-        _, hotpot_idx = retriever.search(
-            [q.query_text for q in hotpot_queries],
+    recall: dict[str, float] = {}
+    for name, queries in query_sets.items():
+        if not queries:
+            continue
+        ranked = retriever.search(
+            [query.query_text for query in queries],
             top_k=args.top_k,
             batch_size=args.batch_size,
         )
-        hotpot_recall = evaluate_recall_at_k(hotpot_queries, hotpot_idx, corpus.df)
-    else:
-        hotpot_recall = 0.0
-
-    if locomo_queries:
-        _, locomo_idx = retriever.search(
-            [q.query_text for q in locomo_queries],
-            top_k=args.top_k,
-            batch_size=args.batch_size,
-        )
-        locomo_recall = evaluate_recall_at_k(locomo_queries, locomo_idx, corpus.df)
-    else:
-        locomo_recall = 0.0
+        recall[name] = evaluate_recall_at_k(queries, ranked, corpus.documents)
 
     print("=== Retrieval Evaluation Summary ===")
-    print(f"MS MARCO docs indexed: {len(corpus.df)}")
-    print(f"Embedding model: {args.model_name}")
+    print(f"MS MARCO docs indexed: {len(corpus.documents)}")
+    print(f"Embedding model: {retriever.model_name}")
     print(f"top_k: {args.top_k}")
-    print(f"HotpotQA queries: {len(hotpot_queries)}")
-    print(f"LoCoMo queries: {len(locomo_queries)}")
-    print(f"HotpotQA Recall@{args.top_k}: {hotpot_recall:.4f}")
-    print(f"LoCoMo Recall@{args.top_k}: {locomo_recall:.4f}")
+    for name, queries in query_sets.items():
+        print(f"{name} queries: {len(queries)}")
+        if name in recall:
+            print(f"{name} Recall@{args.top_k}: {recall[name]:.4f}")
+        else:
+            # Not 0.0: a dataset with no queries has no recall, and printing
+            # a zero for it would read as a measured miss.
+            print(f"{name} Recall@{args.top_k}: not measured, no queries loaded")
+    return recall
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="MS MARCO + HotpotQA + LoCoMo retrieval evaluator"
     )
     parser.add_argument(
-        "--msmarco-path", type=Path, required=True, help="Path to MS MARCO fulldocs.tsv"
+        "--msmarco-path",
+        type=Path,
+        required=True,
+        help="Path to the MS MARCO full-document TSV (id, url, title, body)",
     )
     parser.add_argument(
         "--hotpot-path",
@@ -349,9 +462,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--locomo-path", type=Path, required=True, help="Path to LoCoMo JSON/JSONL"
     )
-    parser.add_argument(
-        "--model-name", type=str, default="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME)
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument(
@@ -366,12 +477,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-locomo", type=int, default=None, help="Optional cap for LoCoMo queries"
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit components to run degraded. Off by default: a recall "
+            "figure from a hashed embedder or a numpy scan is not a "
+            "measurement of dense retrieval."
+        ),
+    )
+    return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
-    run_pipeline(args)
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
+    print(environment_report().render(), flush=True)
+    run_pipeline(args, strict=not args.allow_degraded)
+    print(degradation_summary(), flush=True)
 
 
 if __name__ == "__main__":
