@@ -81,6 +81,17 @@ def _ablation_evaluator(item, variant):
 
 def main() -> None:
     args = parse_args()
+    if not args.skip_ablation:
+        # Fail before the benchmark runs rather than after, so a refused
+        # ablation does not discard metrics that were already computed.
+        raise AblationNotImplementedError(
+            "This script has no ablation evaluator. The previous one returned "
+            "the gold answer as its own prediction and ignored the variant, "
+            "so every variant scored exact_match=1.0 by construction. "
+            "Implement an evaluator that runs the pipeline under each variant "
+            "and returns its real prediction, or pass --skip-ablation."
+        )
+
     print(environment_report().render(), flush=True)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

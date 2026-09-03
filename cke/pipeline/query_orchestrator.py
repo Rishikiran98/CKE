@@ -46,7 +46,9 @@ class QueryOrchestrator:
         retrieval_mode: str = "hybrid",
         dense_retriever=None,
         evidence_threshold: int = 2,
+        strict: bool = False,
     ):
+        self.strict = bool(strict)
         self.graph_engine = graph_engine
         self.router = router
         self.retrieval_mode = retrieval_mode
@@ -63,7 +65,7 @@ class QueryOrchestrator:
         if reasoner is None:
             from cke.reasoning.path_reasoner import PathReasoner
 
-            self.reasoner = PathReasoner()
+            self.reasoner = PathReasoner(strict=strict)
         else:
             self.reasoner = reasoner
         self.verifier = verifier or ReasoningVerifier()
@@ -71,7 +73,7 @@ class QueryOrchestrator:
         self.operator_executor = operator_executor or OperatorExecutor()
         self.reasoner_adapter = ReasonerAdapter(self.reasoner)
         self.last_context: ReasoningContext | None = None
-        self.entity_resolver = entity_resolver or EntityResolver()
+        self.entity_resolver = entity_resolver or EntityResolver(strict=strict)
         self.confidence_calibrator = ConfidenceCalibrator()
 
     def answer(self, query: str) -> QueryResult:

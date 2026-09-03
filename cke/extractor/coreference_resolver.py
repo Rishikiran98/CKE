@@ -45,6 +45,16 @@ class CoreferenceResolver(DegradationMixin):
         resolved = self._resolve_with_spacy(document)
         if resolved is not None:
             return resolved
+        if self._nlp is not None:
+            # A model is loaded but produced no entities for this document, so
+            # this answer comes from the regex, not from the model. Without
+            # this the loaded-model path silently used the fallback.
+            self._degrade(
+                "a spaCy model is loaded but found no entities in a document, "
+                "so coreference for it fell back to the regular expression "
+                "that rewrites every pronoun to the most recently seen "
+                "capitalised name"
+            )
         return self._resolve_heuristic(document)
 
     def _load_spacy(self):

@@ -517,3 +517,84 @@ def test_path_reasoner_inherits_its_embedders_degradation(monkeypatch):
 
     with pytest.raises(DegradedComponentError):
         PathReasoner(strict=True)
+
+
+def test_graph_retriever_propagates_strict(monkeypatch):
+    """Every graph evaluation path built a non-strict EntityResolver."""
+    from cke.entity_resolution import entity_resolver as resolver_module
+    from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+    from cke.retrieval import graph_retriever as module
+
+    monkeypatch.setattr(resolver_module, "fuzz", None)
+
+    with pytest.raises(DegradedComponentError, match="rapidfuzz"):
+        module.GraphRetriever(KnowledgeGraphEngine(), strict=True)
+
+
+def test_query_orchestrator_propagates_strict(monkeypatch):
+    """The orchestrator hardcoded non-strict for its reasoner and resolver."""
+    import inspect
+
+    from cke.pipeline import query_orchestrator as module
+
+    signature = inspect.signature(module.QueryOrchestrator.__init__)
+    assert "strict" in signature.parameters
+
+    source = inspect.getsource(module.QueryOrchestrator.__init__)
+    assert "PathReasoner(strict=strict)" in source
+    assert "EntityResolver(strict=strict)" in source
+
+
+def test_coreference_declares_the_fallback_when_a_model_finds_nothing(monkeypatch):
+    """A loaded model that finds no entities silently used the regex."""
+    from cke.extractor import coreference_resolver as module
+
+    class ModelWithNoEntities:
+        def __call__(self, document):
+            class Doc:
+                ents: list = []
+
+            return Doc()
+
+    resolver = module.CoreferenceResolver()
+    resolver.degraded = False
+    resolver.degraded_reason = ""
+    resolver._degradation_reasons = []
+    resolver._nlp = ModelWithNoEntities()
+
+    resolver.resolve("Ada Lovelace wrote notes. She was a mathematician.")
+
+    assert resolver.degraded is True
+    assert "found no entities" in resolver.degraded_reason
+
+
+def test_relation_mapper_declares_an_ontology_with_no_relations(tmp_path):
+    """A file that parses but has no relations key was a silent empty load."""
+    from cke.schema.relation_mapper import RelationMapper
+
+    schema = tmp_path / "relations.yaml"
+    schema.write_text("something_else: {}\n", encoding="utf-8")
+
+    mapper = RelationMapper(schema_path=str(schema))
+    assert mapper.degraded is True
+    assert "no 'relations' mapping" in mapper.degraded_reason
+
+    with pytest.raises(DegradedComponentError):
+        RelationMapper(schema_path=str(schema), strict=True)
+
+
+def test_trust_engine_does_not_load_a_config_it_will_discard(tmp_path):
+    """A supplied calibrator carries its own config, so a missing file here
+    was refusing over values that would never be used."""
+    from cke.graph.trust_engine import TrustEngine
+    from cke.trust.calibration import TrustCalibrator
+
+    calibrator = TrustCalibrator()
+    engine = TrustEngine(
+        calibrator=calibrator,
+        config_path=tmp_path / "absent.yaml",
+        strict=True,
+    )
+
+    assert engine.calibrator is calibrator
+    assert engine.degraded is False

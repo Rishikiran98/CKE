@@ -85,7 +85,15 @@ class RelationMapper(DegradationMixin):
             return dict(_MINIMAL_RELATIONS)
         with open(self.schema_path, "r", encoding="utf-8") as handle:
             payload = yaml.safe_load(handle) or {}
-        return payload.get("relations", {})
+
+        relations = payload.get("relations", {}) if isinstance(payload, dict) else {}
+        if not relations:
+            self._degrade(
+                f"the relation ontology at {self.schema_path} parsed but "
+                "contains no 'relations' mapping, so no relation is recognised "
+                "and every one passes through unmapped"
+            )
+        return relations
 
     def _build_alias_index(
         self, relations: dict[str, dict[str, list[str]]]
