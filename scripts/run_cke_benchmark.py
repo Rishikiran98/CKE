@@ -31,6 +31,7 @@ from cke.diagnostics import degradation_summary, environment_report  # noqa: E40
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.evaluation.span_qa import SpanExtractiveQA  # noqa: E402
+from cke.evaluation.token_counter import TokenCounter  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine  # noqa: E402
 from cke.retrieval.graph_retriever import GraphRetriever  # noqa: E402
@@ -43,28 +44,6 @@ from cke.router.query_plan import QueryPlan  # noqa: E402
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
-
-
-class TokenCounter:
-    """Word count x 1.3. An ESTIMATE, not a tokenizer.
-
-    Every "prompt tokens" figure this script reports comes from here, so those
-    figures are not measurements. A real comparison needs the tokenizer of the
-    model actually being prompted. Callers must label output from this class as
-    estimated.
-    """
-
-    #: Multiplier applied to whitespace-delimited word counts.
-    WORDS_TO_TOKENS = 1.3
-
-    #: Set on every row this class contributes to, so a reader of the results
-    #: file cannot mistake the figure for a tokenizer measurement.
-    IS_ESTIMATE = True
-
-    @staticmethod
-    def count(text: str) -> int:
-        words = len(text.split())
-        return max(1, int(words * TokenCounter.WORDS_TO_TOKENS))
 
 
 class SeedEntityExtractor:
@@ -111,10 +90,10 @@ def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
 
 
 class RAGPipeline:
-    def __init__(self, strict: bool = True) -> None:
+    def __init__(self, *, token_counter: TokenCounter, strict: bool = True) -> None:
         self._strict = strict
         self._qa = SpanExtractiveQA()
-        self._counter = TokenCounter()
+        self._counter = token_counter
 
     def run_item(
         self, question: str, docs: list[dict[str, str]], k: int
@@ -163,12 +142,12 @@ class RAGPipeline:
 
 
 class CKELitePipeline:
-    def __init__(self, strict: bool = True) -> None:
+    def __init__(self, *, token_counter: TokenCounter, strict: bool = True) -> None:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
         self._qa = SpanExtractiveQA()
-        self._counter = TokenCounter()
+        self._counter = token_counter
 
     @staticmethod
     def _expand_seeds(seeds: list[str], engine: KnowledgeGraphEngine) -> list[str]:
@@ -301,6 +280,8 @@ class HybridPipeline:
 
     def __init__(
         self,
+        *,
+        token_counter: TokenCounter,
         evidence_threshold: int = 2,
         dense_top_k: int = 3,
         strict: bool = True,
@@ -309,7 +290,7 @@ class HybridPipeline:
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
         self._qa = SpanExtractiveQA()
-        self._counter = TokenCounter()
+        self._counter = token_counter
         self._evidence_threshold = evidence_threshold
         self._dense_top_k = dense_top_k
         self._merger = HybridRetrievalMerger()
@@ -407,14 +388,19 @@ def run_dataset(
     items: list[dict[str, Any]],
     dataset_name: str,
     limit: int,
+    token_counter: TokenCounter,
     verbose: bool = False,
     strict: bool = True,
 ) -> list[dict[str, Any]]:
-    """Run all pipeline configurations for each item and return per-item results."""
+    """Run all pipeline configurations for each item and return per-item results.
 
-    rag_pipeline = RAGPipeline(strict=strict)
-    cke_pipeline = CKELitePipeline(strict=strict)
-    hybrid_pipeline = HybridPipeline(strict=strict)
+    Every arm counts with the same counter object, so a token figure cannot
+    differ between arms because of how it was counted.
+    """
+
+    rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
+    cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
+    hybrid_pipeline = HybridPipeline(token_counter=token_counter, strict=strict)
     results: list[dict[str, Any]] = []
 
     effective = items[:limit]
@@ -561,6 +547,7 @@ _CONFIG_LABELS = {
 def produce_comparison_table(
     per_dataset: dict[str, dict[str, dict[str, float]]],
     combined: dict[str, dict[str, float]],
+    token_counter: TokenCounter,
 ) -> str:
     """Generate a markdown comparison table."""
     lines: list[str] = ["# RAG vs CKE-lite Comparison Table", ""]
@@ -585,20 +572,24 @@ def produce_comparison_table(
 
         lines.append(row("Answer EM", "em"))
         lines.append(row("Answer F1", "f1"))
-        lines.append(row("Median est. prompt tokens", "median_tokens", "{:.0f}"))
+        lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
         lines.append(row("Median latency (ms)", "median_latency_ms", "{:.1f}"))
         lines.append("")
-        # The ratio row that used to sit here divided one TokenCounter estimate
-        # by another. TokenCounter is word count x 1.3, and the two arms count
-        # different units (concatenated documents against triples), so the
-        # ratio followed from the units rather than from retrieval. It was the
-        # source of the retracted headline figure and is not reproduced.
+        # The ratio row that used to sit here was the source of the retracted
+        # headline figure. It divided one word-count estimate by another, and
+        # that arithmetic objection is now gone: both arms are counted by one
+        # tokenizer under one encoding. The row stays out anyway, because the
+        # objection that survives is the one that mattered. The arms do not
+        # supply the same information, and nothing holds accuracy constant
+        # between them, so a context-size ratio is not a result about
+        # retrieval. Both columns are printed; a reader who wants the quotient
+        # can take it, and own it.
         lines.append(
-            "Prompt token figures are estimates from TokenCounter "
-            "(word count x 1.3), not tokenizer output. Answers on every arm "
-            "come from SpanExtractiveQA, a lexical span baseline with no "
-            "learned components, not a language model. Neither "
-            "column supports a comparison between retrieval strategies."
+            f"Prompt tokens counted by {token_counter.description}. A count is "
+            f"only comparable to another count made with the same encoding. "
+            f"Answers on every arm come from SpanExtractiveQA, a lexical span "
+            f"baseline with no learned components, not a language model, so "
+            f"the accuracy columns do not describe either retrieval strategy."
         )
         lines.append("")
 
@@ -675,6 +666,7 @@ def produce_ablation_table(
 def produce_token_distribution_plot(
     all_rows: list[dict[str, Any]],
     output_path: Path,
+    token_counter: TokenCounter,
 ) -> None:
     """Save a histogram comparing RAG k=10 vs CKE N=12 prompt token distributions."""
     rag_tokens = [r["rag_k10"]["prompt_tokens"] for r in all_rows if "rag_k10" in r]
@@ -691,7 +683,7 @@ def produce_token_distribution_plot(
         ax.hist(
             cke_tokens, bins=40, alpha=0.6, color="darkorange", label="CKE-lite N=12"
         )
-        ax.set_xlabel("Prompt tokens (word count × 1.3)")
+        ax.set_xlabel(f"Prompt tokens ({token_counter.description})")
         ax.set_ylabel("Number of items")
         ax.set_title("Token Distribution: RAG k=10 vs CKE-lite N=12")
         ax.legend()
@@ -730,6 +722,7 @@ def produce_token_distribution_plot(
 
 def produce_failure_analysis(
     all_rows: list[dict[str, Any]],
+    token_counter: TokenCounter,
     n: int = 10,
 ) -> list[dict[str, Any]]:
     """Select n items where both RAG k=10 and CKE N=12 fail (EM=0)."""
@@ -762,7 +755,7 @@ def produce_failure_analysis(
         # Classify failure mode
         rag_tokens = rag.get("prompt_tokens", 0)
         cke_tokens = cke.get("prompt_tokens", 0)
-        if cke_tokens == 0 or cke_tokens <= _token_count_static(r.get("question", "")):
+        if cke_tokens == 0 or cke_tokens <= token_counter.count(r.get("question", "")):
             note = "CKE graph empty — no statements extracted"
         elif rag.get("f1", 0) > cke.get("f1", 0) + 0.1:
             note = "RAG outperforms CKE — dense context contained answer"
@@ -788,44 +781,39 @@ def produce_failure_analysis(
     return analysis
 
 
-def _token_count_static(text: str) -> int:
-    return max(1, int(len(text.split()) * 1.3))
-
-
 def produce_summary(
     combined: dict[str, dict[str, float]],
+    token_counter: TokenCounter,
 ) -> dict[str, Any]:
     """Produce the raw per-arm figures, with no verdict attached.
 
     This used to emit a token-reduction ratio and two pass/fail success flags
     (``meets_5x_criterion``, ``meets_accuracy_criterion``). It was the source
-    of the retracted headline claim. Those are gone, for two reasons that both
-    hold independently:
+    of the retracted headline claim. Those stay gone.
 
-    * The token figures are :class:`TokenCounter` output, which is word count
-      multiplied by 1.3 and not a tokenizer. A ratio between two estimates is
-      not a measurement, and the ratio is largely fixed by the units each arm
-      counts in (documents against triples).
-    * Answers on both arms come from :class:`SpanExtractiveQA`, a lexical
-      span baseline, not a language model. It can produce an exact match,
-      which its predecessor could not, but its accuracy is its own and
-      bounds what either retrieval strategy can show.
+    One of the two objections to that ratio has been removed: the figures are
+    now real token counts from one tokenizer, not a word count multiplied by
+    1.3. The other has not. The arms do not supply the same information, and
+    nothing here holds accuracy constant between them, so a context-size ratio
+    is a statement about how much text each strategy hands over, not about
+    what either is worth. And answers on both arms come from
+    :class:`SpanExtractiveQA`, a lexical span baseline, not a language model,
+    so the accuracy figures are the baseline's own.
 
-    The per-arm numbers stay, named so that no reader mistakes an estimate for
-    a measurement. A verdict belongs with an evaluation harness that can
-    support one.
+    The per-arm numbers stay, each named with the encoding that produced it.
+    A verdict belongs with an evaluation harness that can support one.
     """
     rag = combined.get("rag_k10", {})
     cke = combined.get("cke_n12", {})
 
     return {
-        "prompt_token_figures_are_estimates": True,
-        "prompt_token_estimator": "word count x 1.3 (TokenCounter), not a tokenizer",
+        "prompt_token_counter": token_counter.description,
+        "prompt_token_figures_are_estimates": token_counter.is_estimate,
+        "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
+        "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
         "answers_produced_by": (
             "SpanExtractiveQA — lexical span baseline, no language model"
         ),
-        "rag_k10_median_estimated_tokens": rag.get("median_tokens", 0.0),
-        "cke_n12_median_estimated_tokens": cke.get("median_tokens", 0.0),
         "rag_k10_em": rag.get("em", 0.0),
         "cke_n12_em": cke.get("em", 0.0),
         "rag_k10_f1": rag.get("f1", 0.0),
@@ -860,13 +848,19 @@ def run_retrieval_mode_ablation(
     items: list[dict[str, Any]],
     dataset_name: str,
     limit: int,
+    token_counter: TokenCounter,
     verbose: bool = False,
     strict: bool = True,
 ) -> dict[str, dict[str, float]]:
     """Ablate across retrieval modes: graph_only, dense_only, hybrid."""
-    cke_pipeline = CKELitePipeline(strict=strict)
-    rag_pipeline = RAGPipeline(strict=strict)
-    hybrid_pipeline = HybridPipeline(evidence_threshold=2, dense_top_k=3, strict=strict)
+    cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
+    rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
+    hybrid_pipeline = HybridPipeline(
+        token_counter=token_counter,
+        evidence_threshold=2,
+        dense_top_k=3,
+        strict=strict,
+    )
 
     effective = items[:limit]
     total = len(effective)
@@ -969,6 +963,7 @@ def main() -> None:
 
     print(environment_report().render(), flush=True)
     strict = not args.allow_degraded
+    token_counter = TokenCounter(strict=strict)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1031,7 +1026,12 @@ def main() -> None:
 
     for ds_name, items in datasets.items():
         rows = run_dataset(
-            items, ds_name, limit=args.limit, verbose=args.verbose, strict=strict
+            items,
+            ds_name,
+            limit=args.limit,
+            token_counter=token_counter,
+            verbose=args.verbose,
+            strict=strict,
         )
         metrics = aggregate_metrics(rows)
         per_dataset_metrics[ds_name] = metrics
@@ -1046,7 +1046,9 @@ def main() -> None:
     combined_metrics = aggregate_metrics(all_rows)
 
     # --- Comparison table ---
-    comparison_md = produce_comparison_table(per_dataset_metrics, combined_metrics)
+    comparison_md = produce_comparison_table(
+        per_dataset_metrics, combined_metrics, token_counter
+    )
     (output_dir / "comparison_table.md").write_text(comparison_md, encoding="utf-8")
     print("[output] comparison_table.md")
 
@@ -1066,17 +1068,19 @@ def main() -> None:
     print("[output] ablation.md")
 
     # --- Token distribution ---
-    produce_token_distribution_plot(all_rows, output_dir / "token_distribution.png")
+    produce_token_distribution_plot(
+        all_rows, output_dir / "token_distribution.png", token_counter
+    )
 
     # --- Failure analysis ---
-    failure_samples = produce_failure_analysis(all_rows, n=10)
+    failure_samples = produce_failure_analysis(all_rows, token_counter, n=10)
     (output_dir / "failure_analysis.json").write_text(
         json.dumps(failure_samples, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"[output] failure_analysis.json ({len(failure_samples)} samples)")
 
     # --- Summary ---
-    summary = produce_summary(combined_metrics)
+    summary = produce_summary(combined_metrics, token_counter)
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
@@ -1095,17 +1099,12 @@ def main() -> None:
     c_f1 = cke.get("f1", 0)
     c_tok = cke.get("median_tokens", 0)
     print(
-        f"  RAG k=10  — EM: {r_em:.4f}  "
-        f"F1: {r_f1:.4f}  Median est. tokens: {r_tok:.0f}"
+        f"  RAG k=10  — EM: {r_em:.4f}  " f"F1: {r_f1:.4f}  Median tokens: {r_tok:.0f}"
     )
     print(
-        f"  CKE N=12  — EM: {c_em:.4f}  "
-        f"F1: {c_f1:.4f}  Median est. tokens: {c_tok:.0f}"
+        f"  CKE N=12  — EM: {c_em:.4f}  " f"F1: {c_f1:.4f}  Median tokens: {c_tok:.0f}"
     )
-    print(
-        "  Prompt token figures above are TokenCounter estimates "
-        "(word count x 1.3), not tokenizer output."
-    )
+    print(f"  Prompt tokens counted by {token_counter.description}.")
     print(
         "  Answers on every arm come from SpanExtractiveQA, a lexical span "
         "baseline, not a language model."
@@ -1121,6 +1120,7 @@ def main() -> None:
                 items,
                 ds_name,
                 limit=args.limit,
+                token_counter=token_counter,
                 verbose=args.verbose,
                 strict=strict,
             )

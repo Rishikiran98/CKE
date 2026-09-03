@@ -78,6 +78,7 @@ def _cases(tmp: pathlib.Path):
     from cke.datasets.locomo_loader import LoCoMoDataset
     from cke.entity_resolution.entity_resolver import EntityResolver
     from cke.evaluation.ablation_runner import AblationRunner
+    from cke.evaluation.token_counter import TokenCounter
     from cke.extractor.coreference_resolver import CoreferenceResolver
     from cke.extractor.llm_extractor import LLMExtractor
     from cke.graph.domain_classifier import DomainClassifier
@@ -166,6 +167,13 @@ def _cases(tmp: pathlib.Path):
             "DefaultEvidenceRetriever",
             lambda s: DefaultEvidenceRetriever(_graph(), strict=s),
             lambda o: o.retrieve("nothing at all matches this"),
+        ),
+        (
+            # Driven into degradation by an encoding that cannot resolve,
+            # which needs no network and no uninstall.
+            "TokenCounter",
+            lambda s: TokenCounter(encoding="no_such_encoding_xyz", strict=s),
+            None,
         ),
     ]
 
