@@ -122,3 +122,17 @@ def test_the_loaded_encoding_is_recorded_in_the_environment_report(counter):
 
     loaded = environment_report().loaded_models
     assert any(model.component == "TokenCounter" for model in loaded)
+
+
+def test_a_special_token_literal_in_the_text_is_counted_not_rejected(counter):
+    """Dataset text is text, including text that looks like a control token.
+
+    tiktoken's encode() rejects a literal such as "<|endoftext|>" by default.
+    This counter is only ever asked to measure text, never to build a prompt,
+    so such a literal is a string a document happened to contain — and one
+    document containing it must not abort a whole benchmark run.
+    """
+    plain = "A document mentioning nothing odd in its prose."
+    special = "A document mentioning <|endoftext|> in its prose."
+
+    assert counter.count(special) > counter.count(plain)

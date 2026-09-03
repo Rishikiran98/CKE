@@ -105,4 +105,9 @@ class TokenCounter(DegradationMixin):
             return 0
         if self._encoding is None:
             return max(1, int(len(text.split()) * _WORDS_TO_TOKENS))
-        return len(self._encoding.encode(text))
+        # disallowed_special=() encodes a literal such as "<|endoftext|>" as
+        # ordinary characters. The default raises on it, which would abort a
+        # run over arbitrary dataset text; and this counter is only ever asked
+        # to measure text, never to build a prompt, so a control token here is
+        # a string a document happened to contain and nothing more.
+        return len(self._encoding.encode(text, disallowed_special=()))
