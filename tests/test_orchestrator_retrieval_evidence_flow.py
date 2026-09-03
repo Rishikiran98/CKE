@@ -1,4 +1,4 @@
-"""Sprint 2 integration test for retrieval -> evidence flow."""
+"""Retrieved statements reach the orchestrator as evidence."""
 
 from dataclasses import dataclass
 
@@ -32,7 +32,7 @@ class StubRAGRetriever:
         return self.docs[:k]
 
 
-def test_orchestrator_sprint2_retrieval_evidence_flow():
+def test_retrieval_evidence_flow():
     docs = [
         {
             "doc_id": "doc-us-pres::chunk-0",

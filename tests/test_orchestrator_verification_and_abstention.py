@@ -1,4 +1,6 @@
-"""Sprint 4 integration tests for verification and abstention discipline."""
+"""Verification discipline: a verified answer passes; ungrounded, contradicted or
+missing evidence abstains.
+"""
 
 from dataclasses import dataclass, field
 
@@ -110,7 +112,7 @@ def _build_orchestrator(docs, fact_map) -> QueryOrchestrator:
     )
 
 
-def test_sprint4_verified_success():
+def test_verified_success():
     docs = [
         {
             "doc_id": "d1::c0",
@@ -142,7 +144,7 @@ def test_sprint4_verified_success():
     assert result.verification_summary == "verification_passed"
 
 
-def test_sprint4_not_grounded_failure_returns_abstention():
+def test_not_grounded_failure_returns_abstention():
     docs = [
         {
             "doc_id": "d3::c0",
@@ -165,7 +167,7 @@ def test_sprint4_not_grounded_failure_returns_abstention():
     assert result.verification_summary.startswith("verification_failed")
 
 
-def test_sprint4_contradiction_returns_conflicting_evidence():
+def test_contradiction_returns_conflicting_evidence():
     docs = [
         {
             "doc_id": "d4::c0",
@@ -196,7 +198,7 @@ def test_sprint4_contradiction_returns_conflicting_evidence():
     assert result.failure_mode in {"contradictory_evidence", "verification_failed"}
 
 
-def test_sprint4_missing_evidence_returns_insufficient_evidence():
+def test_missing_evidence_returns_insufficient_evidence():
     docs = []
     facts = {}
     orchestrator = _build_orchestrator(docs, facts)

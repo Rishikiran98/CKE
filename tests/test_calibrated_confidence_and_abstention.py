@@ -1,4 +1,4 @@
-"""Sprint 9 confidence calibration, routing, and abstention tests."""
+"""Calibrated confidence orders answers, gates abstention, and steers routing."""
 
 from dataclasses import dataclass, field
 
@@ -118,7 +118,7 @@ def _build_orchestrator(
     )
 
 
-def test_sprint9_confidence_sanity_ordering():
+def test_confidence_sanity_ordering():
     calibrator = ConfidenceCalibrator()
 
     strong = calibrator.calibrate(
@@ -153,7 +153,7 @@ def test_sprint9_confidence_sanity_ordering():
     assert weak < 0.4
 
 
-def test_sprint9_abstention_threshold_respects_calibrated_confidence():
+def test_abstention_threshold_respects_calibrated_confidence():
     docs = [
         {
             "doc_id": "d1::c0",
@@ -184,7 +184,7 @@ def test_sprint9_abstention_threshold_respects_calibrated_confidence():
     assert result.confidence_signals["evidence_count"] == 1
 
 
-def test_sprint9_verification_override_forces_zero_confidence_and_abstention():
+def test_verification_override_forces_zero_confidence_and_abstention():
     docs = [
         {
             "doc_id": "d2::c0",
@@ -215,7 +215,7 @@ def test_sprint9_verification_override_forces_zero_confidence_and_abstention():
     ]
 
 
-def test_sprint9_router_prefers_operator_and_multihop_routes_with_confidence():
+def test_router_prefers_operator_and_multihop_routes_with_confidence():
     router = QueryRouter(graph_engine=None)
 
     operator_plan = router.route("How many children does Albert Einstein have?")

@@ -1,6 +1,6 @@
 """Coverage has a floor, it measures the library, and it only rises.
 
-CI measured nothing; the first measurement, with test files excluded, was
+CI measured nothing; the first measurement of the library alone was
 82.56% of the package's statements. The floor under [tool.coverage.report]
 started there. This pins it, so lowering it fails a test a reviewer sees; a
 PR that raises it raises the recorded value here alongside.
@@ -33,11 +33,11 @@ def test_the_floor_is_exactly_the_recorded_one():
 
 
 def test_coverage_measures_the_library_not_the_tests():
-    """Test files count as covered lines and inflate the figure by two points."""
-    run = _coverage_config()["run"]
-
-    assert run["source"] == ["cke"]
-    assert "cke/tests/*" in run["omit"]
+    """Test files count as covered lines, and inflated the figure by two
+    points while a suite lived inside the package. The suite lives in tests/
+    now; a second one inside cke/ would count itself again."""
+    assert _coverage_config()["run"]["source"] == ["cke"]
+    assert not (ROOT / "cke" / "tests").exists(), "a test directory is back in cke/"
 
 
 def test_ci_runs_the_suite_under_coverage():

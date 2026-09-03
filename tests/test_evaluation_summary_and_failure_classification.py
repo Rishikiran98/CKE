@@ -1,4 +1,4 @@
-"""Sprint 8 tests for the evaluation harness and failure analytics."""
+"""The evaluation harness summarises cases and classifies their failures."""
 
 from cke.evaluation.diagnostics import extract_stage_diagnostics
 from cke.evaluation.e2e_evaluator import E2EEvaluator
@@ -82,7 +82,7 @@ def _context(
     )
 
 
-def test_sprint8_single_case_evaluation():
+def test_single_case_evaluation():
     query = "What is the nationality of Albert Einstein?"
     result = QueryResult(
         answer="German",
@@ -138,7 +138,7 @@ def test_sprint8_single_case_evaluation():
     assert summary.failed_cases == 0
 
 
-def test_sprint8_mixed_case_evaluation_summary():
+def test_mixed_case_evaluation_summary():
     success_query = "What is the nationality of Albert Einstein?"
     abstain_query = "What is the nationality of Unknown Person?"
     failure_query = "Which film is associated with the character portrayed by Person X?"
@@ -272,7 +272,7 @@ def test_sprint8_mixed_case_evaluation_summary():
     assert summary.stage_failure_breakdown["path_generation"] == 1
 
 
-def test_sprint8_failure_classification_rules():
+def test_failure_classification_rules():
     case = GoldenCase(
         case_id="path-failure",
         query="Which film is associated with the character portrayed by Person X?",

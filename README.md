@@ -79,7 +79,6 @@ These are stated here rather than left for a reader to discover.
   retrieved MS MARCO titles against HotpotQA and LoCoMo relevance hints. That
   is a title-matching proxy, not a judged relevance set, and it needs the MS
   MARCO full-document TSV, HotpotQA and LoCoMo files to run.
-- There are two test directories, `tests/` and `cke/tests/`.
 
 ## Repository layout
 
@@ -89,7 +88,6 @@ cke/            library code (extraction, graph, retrieval, reasoning,
 configs/        YAML configuration for retrieval ranking and trust
 scripts/        dataset download and benchmark drivers
 tests/          pytest suite
-cke/tests/      a second, older pytest suite organised by sprint number
 demo.py         demonstration entry point (currently returns no answer)
 ```
 

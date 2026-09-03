@@ -1,4 +1,6 @@
-"""Sprint 5 integration tests for deterministic operator coverage."""
+"""Deterministic operators: equality, count, existence, temporal comparison, and
+abstention on missing input.
+"""
 
 from dataclasses import dataclass, field
 
@@ -101,7 +103,7 @@ def _build_orchestrator(docs, fact_map) -> QueryOrchestrator:
     )
 
 
-def test_sprint5_equality_operator_yes():
+def test_equality_operator_yes():
     docs = [
         {
             "doc_id": "d1::c0",
@@ -131,7 +133,7 @@ def test_sprint5_equality_operator_yes():
     assert result.verification_summary == "verification_passed"
 
 
-def test_sprint5_count_operator():
+def test_count_operator():
     docs = [
         {"doc_id": "d3::c0", "text": "Person X child A", "score": 0.9, "source": "d3"},
         {"doc_id": "d3::c1", "text": "Person X child B", "score": 0.85, "source": "d3"},
@@ -151,7 +153,7 @@ def test_sprint5_count_operator():
     assert result.verification_summary == "verification_passed"
 
 
-def test_sprint5_existence_operator():
+def test_existence_operator():
     docs = [
         {
             "doc_id": "d4::c0",
@@ -172,7 +174,7 @@ def test_sprint5_existence_operator():
     assert result.verification_summary == "verification_passed"
 
 
-def test_sprint5_temporal_compare_operator():
+def test_temporal_compare_operator():
     docs = [
         {
             "doc_id": "d5::c0",
@@ -200,7 +202,7 @@ def test_sprint5_temporal_compare_operator():
     assert result.verification_summary == "verification_passed"
 
 
-def test_sprint5_missing_input_abstention():
+def test_missing_input_abstention():
     docs = [
         {
             "doc_id": "d6::c0",
