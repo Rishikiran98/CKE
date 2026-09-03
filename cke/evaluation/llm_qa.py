@@ -100,6 +100,12 @@ class LLMAnswerer(DegradationMixin):
             raise ValueError(f"backend must be 'local' or 'api', not {backend!r}")
         self.backend = backend
         self.truncation = TruncationLog()
+        #: Set by every call, so a caller can record which of its items were
+        #: cut. One answerer serves every arm, and the shared totals cannot
+        #: say whether it was the dense arm's prose or the graph arm's
+        #: triples that did not fit.
+        self.last_truncated: bool = False
+        self.last_dropped_tokens: int = 0
         self._tokenizer = None
         self._model = None
         self._window = 0
@@ -185,23 +191,51 @@ class LLMAnswerer(DegradationMixin):
             raise RuntimeError(
                 f"LLMAnswerer has no model to answer with: {self.degraded_reason}"
             )
-        prompt = PROMPT.format(context=context.strip(), question=question.strip())
+        self.last_truncated = False
+        self.last_dropped_tokens = 0
         if self.backend == "local":
-            return self._answer_local(prompt)
-        return self._answer_api(prompt)
+            return self._answer_local(question.strip(), context.strip())
+        return self._answer_api(
+            PROMPT.format(context=context.strip(), question=question.strip())
+        )
 
-    def _answer_local(self, prompt: str) -> str:
+    def _fit_context(self, question: str, context: str) -> str:
+        """Cut the context, never the question, to fit the window.
+
+        The prompt puts the question and the answer cue after the context, so
+        truncating the assembled prompt from the right threw away exactly
+        those: on every dense-arm call that exceeded the window the model was
+        generating from context with no question at all, and answered "Who
+        founded SpaceX?" with a sentence about Redis. The question and the
+        scaffold are reserved first; whatever the window has left is what
+        the context gets, and only its tail is dropped.
+        """
+        scaffold = PROMPT.format(context="", question=question)
+        reserved = int(
+            self._tokenizer(scaffold, return_tensors="pt")["input_ids"].shape[-1]
+        )
+        budget = max(1, self._window - reserved)
+        context_ids = self._tokenizer(context, return_tensors="pt")["input_ids"]
+        length = int(context_ids.shape[-1])
+        self.truncation.calls += 1
+        if length <= budget:
+            return context
+        self.truncation.truncated += 1
+        self.truncation.dropped_tokens.append(length - budget)
+        self.last_truncated = True
+        self.last_dropped_tokens = length - budget
+        kept = self._tokenizer(
+            context, return_tensors="pt", truncation=True, max_length=budget
+        )["input_ids"][0]
+        return self._tokenizer.decode(kept, skip_special_tokens=True)
+
+    def _answer_local(self, question: str, context: str) -> str:
         import torch
 
+        prompt = PROMPT.format(
+            context=self._fit_context(question, context), question=question
+        )
         ids = self._tokenizer(prompt, return_tensors="pt")
-        length = int(ids["input_ids"].shape[-1])
-        self.truncation.calls += 1
-        if length > self._window:
-            self.truncation.truncated += 1
-            self.truncation.dropped_tokens.append(length - self._window)
-            ids = self._tokenizer(
-                prompt, return_tensors="pt", truncation=True, max_length=self._window
-            )
         with torch.no_grad():
             out = self._model.generate(
                 **ids, max_new_tokens=_MAX_NEW_TOKENS, do_sample=False

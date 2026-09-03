@@ -25,8 +25,23 @@ def _clean(monkeypatch):
     clear_runtime_state()
 
 
+class _Ids:
+    """A tokenised text: shape like a tensor, indexable like one."""
+
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.shape = (1, len(tokens))
+
+    def __getitem__(self, index):
+        return self.tokens
+
+
 class _StubTokenizer:
-    """Counts whitespace tokens; a 'window' is enforced by the answerer."""
+    """Counts whitespace tokens; a 'window' is enforced by the answerer.
+
+    Decoding a token list gives the words back, so a truncated context comes
+    back as its kept words; decoding the model's output gives a fixed answer.
+    """
 
     model_max_length = 8
 
@@ -36,15 +51,12 @@ class _StubTokenizer:
             tokens = tokens[:max_length]
         self.last_prompt = text
         self.last_length = len(tokens)
-        return {"input_ids": _Shape(len(tokens))}
+        return {"input_ids": _Ids(tokens)}
 
     def decode(self, ids, skip_special_tokens=True):
+        if isinstance(ids, list) and ids and isinstance(ids[0], str):
+            return " ".join(ids)
         return "  stub answer  "
-
-
-class _Shape:
-    def __init__(self, n):
-        self.shape = (1, n)
 
 
 class _StubModel:
@@ -108,7 +120,8 @@ def test_an_unknown_backend_is_rejected():
 
 
 def test_the_prompt_is_used_verbatim_with_the_context_as_given():
-    answerer = _local_with_stubs()
+    # A window the whole prompt fits in: truncation is tested separately.
+    answerer = _local_with_stubs(window=_scaffold_words("Who founded SpaceX?") + 100)
     answerer.answer("Who founded SpaceX?", "SpaceX uses RESP\nRedis uses RESP")
 
     expected = PROMPT.format(
@@ -144,15 +157,50 @@ def test_a_prompt_within_the_window_is_not_counted_as_truncated():
     assert answerer.truncation.truncated == 0
 
 
-def test_a_prompt_beyond_the_window_is_truncated_and_counted():
-    answerer = _local_with_stubs(window=8)
+def _scaffold_words(question="q"):
+    return len(PROMPT.format(context="", question=question).split())
+
+
+def test_a_context_beyond_the_window_is_truncated_and_counted():
+    window = _scaffold_words() + 10
+    answerer = _local_with_stubs(window=window)
     answerer.answer("q", " ".join(["word"] * 40))
 
     assert answerer.truncation.calls == 1
     assert answerer.truncation.truncated == 1
-    assert answerer.truncation.dropped_tokens[0] > 0
-    assert answerer._tokenizer.last_length == 8
+    assert answerer.truncation.dropped_tokens == [30]
     assert answerer.truncation.rate == 1.0
+    assert answerer.last_truncated is True
+    assert answerer.last_dropped_tokens == 30
+
+
+def test_truncation_cuts_the_context_and_never_the_question():
+    """The defect: the prompt puts the question after the context, and
+    right-side truncation of the assembled prompt threw the question away.
+    The model then answered "Who founded SpaceX?" with a sentence about Redis,
+    because it had been shown no question at all.
+    """
+    window = _scaffold_words("Who founded SpaceX?") + 10
+    answerer = _local_with_stubs(window=window)
+    context = " ".join(f"w{i}" for i in range(40))
+    answerer.answer("Who founded SpaceX?", context)
+
+    prompt = answerer._tokenizer.last_prompt
+    assert "Question: Who founded SpaceX?" in prompt
+    assert prompt.rstrip().endswith("Answer:")
+    # Only the context's tail is gone: the first ten words survive, none after.
+    assert "w9" in prompt and "w10" not in prompt
+    assert len(prompt.split()) <= window
+
+
+def test_last_truncation_is_reset_on_a_call_that_fits():
+    window = _scaffold_words() + 10
+    answerer = _local_with_stubs(window=window)
+    answerer.answer("q", " ".join(["word"] * 40))
+    answerer.answer("q", "short")
+
+    assert answerer.last_truncated is False
+    assert answerer.last_dropped_tokens == 0
 
 
 def _patch_loaders(monkeypatch):

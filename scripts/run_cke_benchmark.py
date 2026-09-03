@@ -128,10 +128,14 @@ class RAGPipeline:
         context = "\n".join(retrieved_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        truncated = bool(getattr(self._qa, "last_truncated", False))
+        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "answer": answer,
+            "answer_truncated": truncated,
+            "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "latency_ms": latency_ms,
             "retrieved_texts": retrieved_texts,
@@ -212,10 +216,14 @@ class CKELitePipeline:
         context = "\n".join(stmt_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        truncated = bool(getattr(self._qa, "last_truncated", False))
+        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "answer": answer,
+            "answer_truncated": truncated,
+            "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "latency_ms": latency_ms,
             "n_statements": len(evidence),
@@ -315,10 +323,14 @@ class HybridPipeline:
         context = "\n".join(all_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        truncated = bool(getattr(self._qa, "last_truncated", False))
+        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "answer": answer,
+            "answer_truncated": truncated,
+            "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "latency_ms": latency_ms,
             "n_statements": n_statements,
@@ -463,7 +475,8 @@ CONFIGS = ["rag_k5", "rag_k10", "cke_n8", "cke_n12", "cke_n20", "hybrid_n12"]
 def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     """Compute mean EM, mean F1, median tokens, median latency per config."""
     agg: dict[str, dict[str, list[float]]] = {
-        c: {"em": [], "f1": [], "tokens": [], "latency_ms": []} for c in CONFIGS
+        c: {"em": [], "f1": [], "tokens": [], "latency_ms": [], "truncated": []}
+        for c in CONFIGS
     }
 
     for row in rows:
@@ -472,6 +485,7 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
                 continue
             d = row[cfg]
             agg[cfg]["em"].append(d.get("em", 0.0))
+            agg[cfg]["truncated"].append(bool(d.get("answer_truncated", False)))
             agg[cfg]["f1"].append(d.get("f1", 0.0))
             agg[cfg]["tokens"].append(d.get("prompt_tokens", 0))
             agg[cfg]["latency_ms"].append(d.get("latency_ms", 0.0))
@@ -486,6 +500,10 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             "median_tokens": round(statistics.median(lists["tokens"]), 1),
             "median_latency_ms": round(statistics.median(lists["latency_ms"]), 2),
             "n": len(lists["em"]),
+            # Which arm the answerer's window cut. One answerer serves every
+            # arm, so its shared totals cannot say; this can.
+            "truncated_items": sum(lists["truncated"]),
+            "truncation_rate": round(sum(lists["truncated"]) / len(lists["em"]), 4),
         }
     return result
 
@@ -535,6 +553,10 @@ def produce_comparison_table(
         lines.append(row("Answer F1", "f1"))
         lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
         lines.append(row("Median latency (ms)", "median_latency_ms", "{:.1f}"))
+        if hasattr(answerer, "truncation"):
+            lines.append(
+                row("Items with context truncated", "truncated_items", "{:.0f}")
+            )
         lines.append("")
         # The ratio row that used to sit here was the source of the retracted
         # headline figure. It divided one word-count estimate by another, and
@@ -777,6 +799,25 @@ def produce_summary(
                 "calls": answerer.truncation.calls,
                 "truncated": answerer.truncation.truncated,
                 "rate": round(answerer.truncation.rate, 4),
+                # Per arm, because the shared total cannot say which arm was
+                # cut, and that is the whole question about a context window.
+                "by_arm": {
+                    cfg: {
+                        "truncated_items": combined.get(cfg, {}).get(
+                            "truncated_items", 0
+                        ),
+                        "rate": combined.get(cfg, {}).get("truncation_rate", 0.0),
+                    }
+                    for cfg in (
+                        "rag_k5",
+                        "rag_k10",
+                        "cke_n8",
+                        "cke_n12",
+                        "cke_n20",
+                        "hybrid_n12",
+                    )
+                    if cfg in combined
+                },
             }
             if hasattr(answerer, "truncation")
             else None

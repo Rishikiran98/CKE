@@ -73,3 +73,47 @@ def test_the_summary_names_the_counter_that_produced_its_figures():
 
     assert summary["prompt_token_counter"] == counter.description
     assert summary["prompt_token_figures_are_estimates"] is False
+
+
+def test_truncation_is_aggregated_per_arm():
+    """One answerer serves every arm; its shared total cannot say which arm
+    was cut. The per-item flag each pipeline records can."""
+    rows = [
+        {
+            "rag_k10": {
+                "em": 0,
+                "f1": 0,
+                "prompt_tokens": 1200,
+                "latency_ms": 1,
+                "answer_truncated": True,
+            },
+            "cke_n12": {
+                "em": 0,
+                "f1": 0,
+                "prompt_tokens": 40,
+                "latency_ms": 1,
+                "answer_truncated": False,
+            },
+        },
+        {
+            "rag_k10": {
+                "em": 0,
+                "f1": 0,
+                "prompt_tokens": 900,
+                "latency_ms": 1,
+                "answer_truncated": True,
+            },
+            "cke_n12": {
+                "em": 0,
+                "f1": 0,
+                "prompt_tokens": 50,
+                "latency_ms": 1,
+                "answer_truncated": False,
+            },
+        },
+    ]
+    agg = bench.aggregate_metrics(rows)
+
+    assert agg["rag_k10"]["truncated_items"] == 2
+    assert agg["rag_k10"]["truncation_rate"] == 1.0
+    assert agg["cke_n12"]["truncated_items"] == 0
