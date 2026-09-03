@@ -41,11 +41,16 @@ inspectable `degraded` flag with a `degraded_reason`, and raises
 `DegradedComponentError` instead of degrading when constructed with
 `strict=True`.
 
-Every benchmark, evaluation and experiment entry point prints the environment
-report first and constructs its components with `strict=True`. In an
-environment without `sentence-transformers`, running one exits non-zero and
-says so, rather than reporting a number produced by a hash function. Pass
+Every benchmark, evaluation and experiment entry point constructs its
+components with `strict=True`, prints the environment report before it starts,
+and prints a degradation summary when it finishes. In an environment without
+`sentence-transformers`, running one exits non-zero and names the missing
+component rather than reporting a number produced by a hash function. Pass
 `--allow-degraded` to opt out deliberately.
+
+Three entry points are deliberately outside this: `demo.py`, `cke.api.server`,
+and the deprecation shim in `cke.router.entity_linker`. None of them reports a
+measurement.
 
 ## Known limitations
 

@@ -16,6 +16,7 @@ from cke.diagnostics import (
     DegradedComponentError,
     clear_runtime_state,
     declare_degradation,
+    degradation_summary,
     environment_report,
     record_loaded_model,
 )
@@ -118,16 +119,32 @@ def test_report_lists_dependency_status():
 
 
 def test_report_distinguishes_a_broken_install_from_an_absent_one(monkeypatch):
-    """A package that raises on import is not the same as one that is missing."""
+    """A package that raises on import is not the same as one that is missing.
+
+    The probe locates the package first, so a failure after that point is a
+    broken installation, including a transitive ModuleNotFoundError raised by
+    one of the package's own dependencies.
+    """
 
     def _explode(name):
-        raise RuntimeError("torch blew up")
+        raise ModuleNotFoundError("No module named 'torch'")
 
     monkeypatch.setattr(diagnostics.importlib, "import_module", _explode)
-    report = environment_report(dependencies=[("anything", "anything", "test")])
+    # "json" exists, so find_spec succeeds and the import failure is reached.
+    report = environment_report(dependencies=[("json", "json-stdlib", "test")])
 
     assert report.dependencies[0].available is False
-    assert "RuntimeError during import" in report.dependencies[0].error
+    assert "ModuleNotFoundError during import" in report.dependencies[0].error
+
+
+def test_report_calls_an_absent_package_absent(monkeypatch):
+    report = environment_report(
+        dependencies=[("no_such_module_xyz", "nonexistent", "test")]
+    )
+
+    assert report.dependencies[0].available is False
+    assert "No module named" in report.dependencies[0].error
+    assert "during import" not in report.dependencies[0].error
 
 
 def test_report_records_loaded_models():
@@ -157,3 +174,111 @@ def test_report_is_json_serialisable():
     assert (
         json.loads(json.dumps(payload))["degradations"][0]["component"] == "Component"
     )
+
+
+def test_a_repeated_reason_is_recorded_once(caplog):
+    """A degradation reached from inside a loop must not repeat.
+
+    _fuzzy_score ran once per candidate entity, so an identical reason was
+    logged per iteration and appended to degraded_reason each time, growing it
+    quadratically.
+    """
+
+    class Looping(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+
+        def work(self, n):
+            for _ in range(n):
+                self._degrade("the same cause every time")
+
+    with caplog.at_level(logging.WARNING):
+        component = Looping()
+        component.work(50)
+
+    assert component.degraded_reason == "the same cause every time"
+    assert len(caplog.records) == 1
+    assert len(environment_report().degradations) == 1
+
+
+def test_distinct_reasons_are_still_all_kept():
+    class Varied(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+            self._degrade("first")
+            self._degrade("second")
+            self._degrade("first")
+
+    assert Varied().degraded_reason == "first; second"
+
+
+def test_degradation_summary_reports_what_degraded():
+    """The report printed before a run cannot list degradations.
+
+    Nothing is constructed yet at that point, so its degradation section
+    always read "none". This is the other half, printed once work is done.
+    """
+    assert "No component degraded" in degradation_summary()
+
+    Component(reason="the embedder is hashing")
+    summary = degradation_summary()
+
+    assert "DEGRADED COMPONENTS" in summary
+    assert "not valid" in summary
+    assert "the embedder is hashing" in summary
+
+
+def test_a_reason_containing_the_separator_is_still_deduplicated():
+    """Reasons were recovered by splitting degraded_reason on "; ".
+
+    CoreferenceResolver joins its model failures with that separator, so an
+    identical compound reason failed the membership check and was appended
+    every time it recurred.
+    """
+
+    class Compound(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+
+    component = Compound()
+    reason = "models failed: a: boom; b: bang"
+    for _ in range(3):
+        component._degrade(reason)
+
+    assert component.degraded_reason == reason
+
+
+def test_a_distinct_reason_matching_a_fragment_is_not_suppressed():
+    class Compound(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+
+    component = Compound()
+    component._degrade("alpha; beta")
+    component._degrade("beta")
+
+    assert component.degraded_reason == "alpha; beta; beta"
+
+
+def test_require_strict_component_refuses_a_degraded_injection():
+    from cke.diagnostics import require_strict_component
+
+    class Degraded:
+        degraded = True
+        degraded_reason = "its model is missing"
+        strict = False
+
+    class Strict:
+        degraded = False
+        strict = True
+
+    with pytest.raises(DegradedComponentError, match="already degraded"):
+        require_strict_component("Pipeline", Degraded(), "reasoner", True)
+
+    with pytest.raises(DegradedComponentError, match="does not declare"):
+        require_strict_component("Pipeline", object(), "reasoner", True)
+
+    # Healthy and strict is accepted, and a non-strict caller accepts anything.
+    require_strict_component("Pipeline", Strict(), "reasoner", True)
+    require_strict_component("Pipeline", Degraded(), "reasoner", False)
+    require_strict_component("Pipeline", None, "reasoner", True)

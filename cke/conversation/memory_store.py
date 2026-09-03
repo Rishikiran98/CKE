@@ -23,9 +23,11 @@ class ConversationMemoryStore:
         *,
         graph_engine: KnowledgeGraphEngine | None = None,
         config: ConversationConfig | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.config = config or ConversationConfig()
-        self.graph_engine = graph_engine or KnowledgeGraphEngine()
+        self.graph_engine = graph_engine or KnowledgeGraphEngine(strict=strict)
         self._events_by_conversation: dict[str, list[ConversationEvent]] = defaultdict(
             list
         )

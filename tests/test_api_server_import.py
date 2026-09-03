@@ -73,3 +73,62 @@ def test_import_survives_fastapi_being_absent(monkeypatch):
     assert module.FastAPI is None
     with pytest.raises(module.MissingDependencyError):
         module.create_app()
+
+
+def test_the_app_is_built_once_and_cached(monkeypatch):
+    """Repeated access must return the same object, as the eager module did.
+
+    Routes, middleware or state registered on one access have to still be
+    there on the next.
+    """
+
+    class FakeFastAPI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def get(self, path):
+            return lambda fn: fn
+
+        def post(self, path):
+            return lambda fn: fn
+
+    monkeypatch.setattr(server, "FastAPI", FakeFastAPI)
+    server.reset_app()
+    try:
+        assert server.app is server.app
+        assert cke.api.app is server.app
+    finally:
+        server.reset_app()
+
+
+def test_reset_app_forces_a_rebuild(monkeypatch):
+    class FakeFastAPI:
+        def __init__(self, **kwargs):
+            pass
+
+        def get(self, path):
+            return lambda fn: fn
+
+        def post(self, path):
+            return lambda fn: fn
+
+    monkeypatch.setattr(server, "FastAPI", FakeFastAPI)
+    server.reset_app()
+    try:
+        first = server.app
+        server.reset_app()
+        assert server.app is not first
+    finally:
+        server.reset_app()
+
+
+def test_star_import_does_not_build_the_app():
+    """ "app" in __all__ made `from cke.api import *` build the application,
+    which defeats the point of the module being importable without fastapi."""
+    assert "app" not in cke.api.__all__
+
+    namespace: dict = {}
+    exec("from cke.api import *", namespace)  # noqa: S102
+
+    assert "create_app" in namespace
+    assert "app" not in namespace

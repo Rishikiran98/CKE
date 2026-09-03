@@ -19,9 +19,11 @@ class CandidateGenerator:
         memory_store: ConversationMemoryStore,
         embedding_model: EmbeddingModel | None = None,
         config: RetrievalConfig | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.memory_store = memory_store
-        self.embedding_model = embedding_model or EmbeddingModel()
+        self.embedding_model = embedding_model or EmbeddingModel(strict=strict)
         self.config = config or RetrievalConfig()
         self._vector_cache: dict[str, tuple[str, object]] = {}
 

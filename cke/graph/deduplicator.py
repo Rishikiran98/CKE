@@ -12,8 +12,11 @@ from cke.graph.trust_engine import TrustEngine
 class AssertionDeduplicator:
     """Merge duplicate assertions by identity + qualifier bucket."""
 
-    def __init__(self, trust_engine: TrustEngine | None = None) -> None:
-        self.trust_engine = trust_engine or TrustEngine()
+    def __init__(
+        self, trust_engine: TrustEngine | None = None, strict: bool = False
+    ) -> None:
+        self.strict = bool(strict)
+        self.trust_engine = trust_engine or TrustEngine(strict=strict)
 
     @staticmethod
     def _qualifier_bucket(qualifiers: dict) -> str:

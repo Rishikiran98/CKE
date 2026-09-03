@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import logging
 import platform
 import sys
@@ -40,9 +41,11 @@ __all__ = [
     "OPTIONAL_DEPENDENCIES",
     "clear_runtime_state",
     "declare_degradation",
+    "degradation_summary",
     "environment_report",
     "record_degradation",
     "record_loaded_model",
+    "require_strict_component",
 ]
 
 logger = logging.getLogger(__name__)
@@ -143,6 +146,36 @@ def declare_degradation(component: str, reason: str, strict: bool = False) -> No
     record_degradation(component, reason)
 
 
+def require_strict_component(
+    component: str, supplied: object, label: str, strict: bool
+) -> None:
+    """Refuse a caller-supplied component that is degraded or not strict.
+
+    A strict run cannot verify an arbitrary injected object, so it requires
+    that object to declare itself strict. Without this, passing a prebuilt
+    non-strict component silently exempts it from the contract while the
+    caller still reports itself strict.
+    """
+    if not strict or supplied is None:
+        return
+
+    if getattr(supplied, "degraded", False):
+        raise DegradedComponentError(
+            f"{component} was given a {label} that has already degraded "
+            f"({getattr(supplied, 'degraded_reason', 'unknown reason')}), and "
+            f"{component} was constructed with strict=True, which forbids that."
+        )
+
+    if not getattr(supplied, "strict", False):
+        raise DegradedComponentError(
+            f"{component} was constructed with strict=True but given a "
+            f"{label} ({type(supplied).__name__}) that does not declare "
+            f"itself strict, so its own fallbacks would not be refused. "
+            f"Construct it with strict=True, or construct {component} with "
+            f"strict=False."
+        )
+
+
 class DegradationMixin:
     """Give a component the three-part degradation contract.
 
@@ -159,6 +192,9 @@ class DegradationMixin:
         self.strict = bool(strict)
         self.degraded = False
         self.degraded_reason = ""
+        # The reasons are kept as a list, not recovered by splitting
+        # degraded_reason: a reason may itself contain the separator.
+        self._degradation_reasons: list[str] = []
 
     def _degrade(self, reason: str) -> None:
         """Declare that this component is running with reduced capability.
@@ -174,29 +210,67 @@ class DegradationMixin:
                 f"with strict=False to accept degraded behaviour."
             )
 
+        # Keep every distinct reason, but never repeat one. A degradation
+        # reached from inside a loop would otherwise emit a warning per
+        # iteration and grow degraded_reason quadratically.
+        reasons = getattr(self, "_degradation_reasons", None)
+        if reasons is None:
+            reasons = self._degradation_reasons = []
+        if reason in reasons:
+            return
+
         self.degraded = True
-        # Keep every reason, not just the last one.
-        existing = getattr(self, "degraded_reason", "")
-        self.degraded_reason = f"{existing}; {reason}" if existing else reason
+        reasons.append(reason)
+        self.degraded_reason = "; ".join(reasons)
         logger.warning("%s is running degraded: %s", component, reason)
         record_degradation(component, reason)
 
 
+def degradation_summary() -> str:
+    """Render what has degraded so far, for printing at the end of a run.
+
+    The report printed before a run cannot list degradations, because nothing
+    has been constructed yet. This is the other half: call it once the work is
+    done, so a completed run states plainly whether its numbers are valid.
+    """
+    if not _DEGRADATIONS:
+        return "=" * 72 + "\nNo component degraded during this run.\n" + "=" * 72
+
+    lines = ["=" * 72]
+    lines.append("DEGRADED COMPONENTS — results from this run are not valid:")
+    for record in _DEGRADATIONS:
+        lines.append(f"  [DEGRADED] {record.component}: {record.reason}")
+    lines.append("=" * 72)
+    return "\n".join(lines)
+
+
 def _probe(import_name: str, distribution: str, purpose: str) -> DependencyStatus:
-    """Import one optional dependency and report what happened."""
+    """Import one optional dependency and report what happened.
+
+    Distinguishes a package that is absent from one that is installed and
+    raises on import. Reporting the second as the first would name the wrong
+    cause, which fails the contract while looking compliant.
+    """
+    if importlib.util.find_spec is not None:
+        try:
+            spec = importlib.util.find_spec(import_name)
+        except (ImportError, ValueError):
+            spec = None
+        if spec is None:
+            return DependencyStatus(
+                import_name=import_name,
+                distribution=distribution,
+                purpose=purpose,
+                available=False,
+                error=f"No module named {import_name!r}",
+            )
+
     try:
         importlib.import_module(import_name)
-    except ImportError as exc:
-        return DependencyStatus(
-            import_name=import_name,
-            distribution=distribution,
-            purpose=purpose,
-            available=False,
-            error=str(exc),
-        )
     except Exception as exc:  # noqa: BLE001 - a broken install is not an absence
-        # The package exists but blew up on import. That is a different
-        # problem from it being missing, and the report must not conflate them.
+        # find_spec located the package, so it exists. Whatever went wrong here
+        # is a broken or incomplete installation, including a transitive
+        # ModuleNotFoundError for one of its own dependencies.
         return DependencyStatus(
             import_name=import_name,
             distribution=distribution,

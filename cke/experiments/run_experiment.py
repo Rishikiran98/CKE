@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
-from cke.diagnostics import declare_degradation, environment_report
+from cke.diagnostics import (
+    declare_degradation,
+    degradation_summary,
+    environment_report,
+)
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -168,6 +172,8 @@ def main() -> None:
     print("Experiment results:")
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+
+    print(degradation_summary(), flush=True)
 
 
 if __name__ == "__main__":

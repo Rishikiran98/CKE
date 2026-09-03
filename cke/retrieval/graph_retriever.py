@@ -29,9 +29,11 @@ class GraphRetriever:
         entity_resolver: EntityResolver | None = None,
         monitor: SystemMonitor | None = None,
         path_ranker: PathRankingModel | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.graph_engine = graph_engine
-        self.entity_resolver = entity_resolver or EntityResolver()
+        self.entity_resolver = entity_resolver or EntityResolver(strict=strict)
         self.monitor = monitor
         self.path_ranker = path_ranker or PathRankingModel()
         for entity in self.graph_engine.all_entities():

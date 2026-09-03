@@ -66,7 +66,7 @@ class LLMReasoner(DegradationMixin):
             model=os.getenv("CKE_LLM_MODEL", "gpt-4o-mini"),
             api_key=os.getenv("CKE_LLM_API_KEY"),
         )
-        self.fallback = fallback or PathReasoner()
+        self.fallback = fallback or PathReasoner(strict=strict)
         self.last_evidence_ids: list[str] = []
         self.last_trace: str = ""
 
@@ -88,6 +88,10 @@ class LLMReasoner(DegradationMixin):
             return self.fallback.answer(question, selected_context)
 
         if not selected_context:
+            self._degrade(
+                "no evidence was selected for this question, so the answer "
+                f"came from {type(self.fallback).__name__} rather than an LLM"
+            )
             return self.fallback.answer(question, selected_context)
 
         try:

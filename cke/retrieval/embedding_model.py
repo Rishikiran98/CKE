@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 _GLOBAL_MODEL_CACHE: dict[str, object] = {}
 
+#: Why a model failed to load, by model name. A failed load is never cached as
+#: a usable model, but it is remembered so that constructing many instances
+#: does not re-attempt a download per instance. The recorded cause is reused,
+#: so a later strict construction still raises for the original reason.
+_FAILED_MODEL_LOADS: dict[str, str] = {}
+
 #: Width of the hashed fallback vector. Not a semantic embedding dimension.
 FALLBACK_DIM = 128
 
@@ -47,6 +53,7 @@ class EmbeddingModel(DegradationMixin):
     ) -> None:
         self._init_degradation(strict)
         self.model_name = model_name
+        self._measured_dimension: int | None = None
         self.model = self._load_model(model_name)
 
     @property
@@ -54,11 +61,23 @@ class EmbeddingModel(DegradationMixin):
         """Width of the vectors this instance produces."""
         if self.model is None:
             return FALLBACK_DIM
+
         try:
             dim = self.model.get_sentence_embedding_dimension()
         except AttributeError:  # pragma: no cover - non-standard model object
-            return FALLBACK_DIM
-        return int(dim) if dim else FALLBACK_DIM
+            dim = None
+
+        if dim:
+            return int(dim)
+
+        # The model is real but does not report a dimension. Measure it rather
+        # than reporting the hashed fallback's width for a healthy model.
+        if self._measured_dimension is None:
+            probe = self.model.encode(
+                [""], convert_to_numpy=True, show_progress_bar=False
+            )
+            self._measured_dimension = int(np.asarray(probe).shape[-1])
+        return self._measured_dimension
 
     def embed_text(self, text: str) -> np.ndarray:
         """Embed a single text and return a float32 vector."""
@@ -90,6 +109,11 @@ class EmbeddingModel(DegradationMixin):
         if cached is not None:
             return cached
 
+        previous_failure = _FAILED_MODEL_LOADS.get(model_name)
+        if previous_failure is not None:
+            self._degrade(previous_failure)
+            return None
+
         if SentenceTransformer is None:
             self._degrade(
                 "sentence-transformers is not installed, so text is embedded by "
@@ -103,15 +127,18 @@ class EmbeddingModel(DegradationMixin):
         try:
             model = SentenceTransformer(model_name)
         except Exception as exc:  # noqa: BLE001 - download/runtime failures vary
-            # Only cache successes: a transient load failure must not pin this
-            # process to the fallback, and must not hide the cause from a later
-            # strict construction.
-            self._degrade(
+            # A failed load is never cached as a usable model. Its cause is
+            # remembered instead, so a caller that builds one instance per
+            # item does not re-attempt the load every time, while a later
+            # strict construction still raises naming the original failure.
+            reason = (
                 f"sentence-transformers could not load {model_name!r} "
                 f"({type(exc).__name__}: {exc}), so text is embedded by hashing "
                 f"tokens into a {FALLBACK_DIM}-dimension sparse vector instead "
                 "of being embedded semantically"
             )
+            _FAILED_MODEL_LOADS[model_name] = reason
+            self._degrade(reason)
             return None
 
         _GLOBAL_MODEL_CACHE[model_name] = model

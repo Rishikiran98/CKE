@@ -54,10 +54,17 @@ class TrustEngine(DegradationMixin):
             "docs": 1.1,
             "unknown": 0.7,
         }
+        if calibrator is not None:
+            # The supplied calibrator carries its own configuration, so
+            # loading one here would only be able to fail over a file whose
+            # values are never used.
+            self.calibrator = calibrator
+            return
+
         calibration = self._load_config(config_path)
         if tau is not None:
             calibration.tau = tau
-        self.calibrator = calibrator or TrustCalibrator(config=calibration)
+        self.calibrator = TrustCalibrator(config=calibration)
 
     def _load_config(self, config_path: str | Path | None) -> TrustCalibrationConfig:
         """Load calibration weights from YAML.

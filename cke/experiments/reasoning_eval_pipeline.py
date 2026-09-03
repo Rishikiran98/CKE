@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cke.diagnostics import environment_report
+from cke.diagnostics import (
+    degradation_summary,
+    environment_report,
+    require_strict_component,
+)
 from cke.datasets.registry import DATASET_REGISTRY
 from cke.models import Statement
 from cke.reasoning.path_reasoner import PathReasoner
@@ -28,8 +32,12 @@ class DatasetMetrics:
 class ReasoningEvalPipeline:
     """Evaluates path reasoning quality and runtime behavior across datasets."""
 
-    def __init__(self, reasoner: PathReasoner | None = None) -> None:
-        self.reasoner = reasoner or PathReasoner()
+    def __init__(
+        self, reasoner: PathReasoner | None = None, strict: bool = True
+    ) -> None:
+        self.strict = bool(strict)
+        require_strict_component(type(self).__name__, reasoner, "reasoner", self.strict)
+        self.reasoner = reasoner or PathReasoner(strict=strict)
 
     def evaluate_dataset(
         self,
@@ -151,11 +159,19 @@ def main() -> None:
     parser.add_argument("--locomo", required=True, help="Path to LoCoMo JSON")
     parser.add_argument("--max-samples", type=int, default=100)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit components to run degraded. Off by default: a reasoning "
+            "benchmark on a hashed embedder is not a measurement."
+        ),
+    )
     args = parser.parse_args()
 
     print(environment_report().render(), flush=True)
 
-    pipeline = ReasoningEvalPipeline()
+    pipeline = ReasoningEvalPipeline(strict=not args.allow_degraded)
     metrics = pipeline.evaluate(
         hotpot_path=args.hotpot,
         msmarco_path=args.msmarco,
@@ -178,6 +194,8 @@ def main() -> None:
     print(report)
     if args.out:
         args.out.write_text(report + "\n", encoding="utf-8")
+
+    print(degradation_summary(), flush=True)
 
 
 if __name__ == "__main__":
