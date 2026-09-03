@@ -103,4 +103,7 @@ def test_demo_supports_db_path_end_to_end(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     assert db_path.exists()
     assert f"DB path: {db_path}" in result.stdout
-    assert "Answer:" in result.stdout
+    # The answer itself, and the two-hop rule that produced it. "Answer:"
+    # alone was satisfied by "I don't have enough graph context".
+    assert "Answer: Turkey" in result.stdout.splitlines()
+    assert "Rule applied located_in_transitivity" in result.stdout

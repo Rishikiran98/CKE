@@ -53,10 +53,11 @@ and prints a degradation summary when it finishes. In an environment without
 component rather than reporting a number produced by a hash function. Pass
 `--allow-degraded` to opt out deliberately.
 
-Three entry points are deliberately outside this: `demo.py`, `cke.api.server`,
-and the deprecation shim in `cke.router.entity_linker`. None of them reports a
-measurement. Where those substitute a value anyway, the constant is named and
-documented at its definition rather than written inline.
+Two entry points are deliberately outside this: `cke.api.server` and the
+deprecation shim in `cke.router.entity_linker`. Neither reports a measurement.
+Where those substitute a value anyway, the constant is named and documented at
+its definition rather than written inline. `demo.py` constructs its components
+strict as well.
 
 ## Known limitations
 
@@ -64,8 +65,6 @@ These are stated here rather than left for a reader to discover.
 
 - `cke.sdk.client` is a client for `cke.api.server`, which has no
   authentication and does not use the main query pipeline (next bullet).
-- `python demo.py` produces no answer. The demo corpus does not match the
-  patterns the rule-based extractor recognises.
 - `cke.api.server` has no authentication and does not use the main query
   pipeline. It is importable without FastAPI, but `create_app()` needs it.
 - Dependencies in `requirements.txt` are unpinned.
@@ -88,7 +87,7 @@ cke/            library code (extraction, graph, retrieval, reasoning,
 configs/        YAML configuration for retrieval ranking and trust
 scripts/        dataset download and benchmark drivers
 tests/          pytest suite
-demo.py         demonstration entry point (currently returns no answer)
+demo.py         extract five sentences, retrieve, and answer one question
 ```
 
 ## Installation
@@ -107,6 +106,22 @@ in-package entry points: `cke-eval`,
 under `scripts/` and `demo.py` are run as files from the repository root.
 Components that read `configs/*.yaml` look for that directory relative to the
 working directory, so run them from the repository root too.
+
+## Running the demo
+
+```bash
+python demo.py
+```
+
+It extracts five sentences with the rule extractor, builds a graph, retrieves
+around the entity the question names, and answers "Which country is Hagia
+Sophia located in?" by a two-hop `located_in` chain, printing the reasoning
+trace above the answer. Every component runs strict, so it needs
+`sentence-transformers` and downloads the MiniLM embedding model on first
+use. It is a demonstration of the pipeline's shape, not of general question
+answering: the reasoner resolves a target relation only from "located in",
+"nationality", or a relation named as the question's last word. CI runs the
+demo and fails if the answer or the rule application changes.
 
 ## Running the tests
 
