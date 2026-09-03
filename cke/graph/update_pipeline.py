@@ -23,10 +23,12 @@ class GraphUpdatePipeline:
         trust_engine: TrustEngine | None = None,
         conflict_engine: ConflictEngine | None = None,
         deduplicator: AssertionDeduplicator | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.graph = graph
-        self.resolver = resolver or EntityResolver()
-        self.trust_engine = trust_engine or TrustEngine()
+        self.resolver = resolver or EntityResolver(strict=strict)
+        self.trust_engine = trust_engine or TrustEngine(strict=strict)
         self.conflict_engine = conflict_engine or ConflictEngine()
         self.deduplicator = deduplicator or AssertionDeduplicator(self.trust_engine)
         self.conflict_metadata: dict[str, list[dict[str, Any]]] = defaultdict(list)

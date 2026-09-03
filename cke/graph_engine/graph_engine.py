@@ -539,7 +539,9 @@ def GraphEngine(
 ) -> KnowledgeGraphEngine:  # noqa: A002
     """Factory for memory or neo4j graph engines."""
     if type == "memory":
-        return KnowledgeGraphEngine(db_path=kwargs.get("db_path"))
+        return KnowledgeGraphEngine(
+            db_path=kwargs.get("db_path"), strict=kwargs.get("strict", False)
+        )
     if type == "neo4j":
         from cke.graph.neo4j_backend import Neo4jBackend  # noqa: PLC0415
 
@@ -549,5 +551,5 @@ def GraphEngine(
             user=kwargs.get("user") or os.getenv("CKE_NEO4J_USER", "neo4j"),
             password=kwargs.get("password") or os.getenv("CKE_NEO4J_PASSWORD", "neo4j"),
         )
-        return KnowledgeGraphEngine(backend=backend)
+        return KnowledgeGraphEngine(backend=backend, strict=kwargs.get("strict", False))
     raise ValueError(f"Unknown graph engine type: {type}")

@@ -23,9 +23,11 @@ class QueryRouter:
         graph_engine: KnowledgeGraphEngine | None = None,
         domain_classifier: DomainClassifier | None = None,
         domain_registry: DomainRegistry | None = None,
+        strict: bool = False,
     ):
+        self.strict = bool(strict)
         self.graph_engine = graph_engine
-        self.entity_resolver = EntityResolver(graph_engine=graph_engine)
+        self.entity_resolver = EntityResolver(graph_engine=graph_engine, strict=strict)
         self.intent_classifier = IntentClassifier()
         self.domain_classifier = domain_classifier or DomainClassifier()
         self.domain_registry = domain_registry

@@ -598,3 +598,52 @@ def test_trust_engine_does_not_load_a_config_it_will_discard(tmp_path):
 
     assert engine.calibrator is calibrator
     assert engine.degraded is False
+
+
+# ---------------------------------------------------------------------------
+# The contract must stay complete
+# ---------------------------------------------------------------------------
+
+
+def test_every_component_in_the_contract_accepts_strict():
+    """A class that can degrade but cannot be made strict is a hole.
+
+    Threading a cross-cutting concern is easy to leave half-done, so this
+    walks the package rather than trusting a hand-kept list.
+    """
+    import ast
+    import pathlib
+
+    from cke.diagnostics import DegradationMixin
+
+    root = pathlib.Path(DegradationMixin.__module__.split(".")[0])
+    if not root.exists():  # pragma: no cover - depends on the working directory
+        root = pathlib.Path(__file__).resolve().parents[1] / "cke"
+
+    missing = []
+    for path in sorted(root.rglob("*.py")):
+        if "tests" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if "DegradationMixin" not in [ast.unparse(b) for b in node.bases]:
+                continue
+            init = next(
+                (
+                    n
+                    for n in node.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "__init__"
+                ),
+                None,
+            )
+            if init is None:
+                continue
+            names = [a.arg for a in init.args.args + init.args.kwonlyargs]
+            if "strict" not in names:
+                missing.append(f"{path}:{node.lineno} {node.name}")
+
+    assert not missing, "components that can degrade but take no strict: " + ", ".join(
+        missing
+    )
