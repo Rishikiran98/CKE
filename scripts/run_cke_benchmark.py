@@ -190,7 +190,7 @@ class CKELitePipeline:
         evidence: list[dict[str, Any]] = []
         if total_statements > 0:
             try:
-                retriever = GraphRetriever(engine)
+                retriever = GraphRetriever(engine, strict=self._strict)
                 result = retriever.retrieve(plan, mode="bfs")
                 evidence = result.get("evidence", [])[:n]
             except Exception as exc:  # noqa: BLE001 - retriever raises varied errors
@@ -275,7 +275,7 @@ class HybridPipeline:
                 total_statements += 1
 
         # 2. Build RetrievalRouter with graph + dense retrievers
-        graph_retriever = SimpleGraphRetriever(engine)
+        graph_retriever = SimpleGraphRetriever(engine, strict=self._strict)
         dense_retriever = RAGRetriever(strict=self._strict)
         if docs:
             try:

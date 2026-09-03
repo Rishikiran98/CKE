@@ -17,9 +17,11 @@ class GraphRetriever:
         self,
         graph_engine: KnowledgeGraphEngine,
         router: QueryRouter | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.graph_engine = graph_engine
-        self.router = router or QueryRouter()
+        self.router = router or QueryRouter(strict=strict)
 
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
         policy = self.router.routing_policy_for_query(query)
