@@ -22,13 +22,17 @@ class ExtractionPipeline:
         extractor=None,
         window_size: int = 3,
         conflict_engine: ConflictEngine | None = None,
+        strict: bool = False,
     ) -> None:
         self.graph_engine = graph_engine
-        self.coref = CoreferenceResolver()
+        self.strict = bool(strict)
+        self.coref = CoreferenceResolver(strict=strict)
         self.paragraph_extractor = ParagraphExtractor(window_size=window_size)
-        self.extractor = extractor or LLMExtractor(fallback=RuleExtractor())
-        self.entity_resolver = EntityResolver(graph_engine=graph_engine)
-        self.relation_mapper = RelationMapper()
+        self.extractor = extractor or LLMExtractor(
+            fallback=RuleExtractor(), strict=strict
+        )
+        self.entity_resolver = EntityResolver(graph_engine=graph_engine, strict=strict)
+        self.relation_mapper = RelationMapper(strict=strict)
         self.confidence_model = ConfidenceModel()
         self.conflict_engine = conflict_engine or ConflictEngine()
 

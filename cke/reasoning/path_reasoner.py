@@ -60,7 +60,9 @@ class PathReasoner:
         verifier: ReasoningVerifier | None = None,
         pattern_memory: PatternMemory | None = None,
         embedding_model: EmbeddingModel | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.rules = rules or [
             InferenceRule(
                 name="located_in_transitivity",
@@ -73,7 +75,7 @@ class PathReasoner:
         self._trace_logger = ReasoningTraceLogger()
         self._verifier = verifier or ReasoningVerifier()
         self._pattern_memory = pattern_memory or PatternMemory()
-        self._embedding_model = embedding_model or EmbeddingModel()
+        self._embedding_model = embedding_model or EmbeddingModel(strict=strict)
         self._advanced_reasoner = TemplateReasoner()
 
     def answer(self, query: str, context: Iterable[Statement]) -> str:

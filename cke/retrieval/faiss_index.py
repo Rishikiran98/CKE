@@ -1,4 +1,11 @@
-"""FAISS-backed document index with fallback search."""
+"""FAISS-backed document index with an unaccelerated fallback search.
+
+Without faiss this class still searches exactly, by scanning every vector with
+numpy, so ranking is unchanged. What changes is cost: search becomes linear in
+corpus size, and any latency measured on this path describes the numpy scan
+rather than a vector index. Because latency is a reported metric, that counts
+as a degradation and is declared rather than hidden.
+"""
 
 from __future__ import annotations
 
@@ -8,20 +15,38 @@ from typing import Any
 
 import numpy as np
 
+from cke.diagnostics import DegradationMixin
+
 try:
     import faiss
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     faiss = None
 
 
-class FaissIndex:
-    """Build/search a dense vector index mapped to source documents."""
+class FaissIndex(DegradationMixin):
+    """Build/search a dense vector index mapped to source documents.
 
-    def __init__(self, dimension: int | None = None) -> None:
+    Args:
+        dimension: vector width; inferred from the first batch when omitted.
+        strict: when True, raise rather than fall back to the numpy scan.
+            Every evaluation and benchmark path must pass ``strict=True``.
+    """
+
+    def __init__(self, dimension: int | None = None, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self.dimension = dimension
         self.index = None
         self.documents: list[dict[str, Any]] = []
         self._vectors: np.ndarray | None = None
+
+        if faiss is None:
+            self._degrade(
+                "faiss is not installed, so vector search scans every document "
+                "with numpy. Results are still exact, but search cost is linear "
+                "in corpus size and any latency measured here describes the "
+                "scan rather than a vector index. Install it with "
+                "`pip install faiss-cpu`"
+            )
 
     def build_index(self, docs: list[dict[str, Any]]) -> None:
         """Create a new index from embedded docs."""

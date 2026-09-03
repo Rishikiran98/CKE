@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from cke.diagnostics import declare_degradation
 from cke.observability.system_monitor import SystemMonitor
 
 from cke.conversation.config import ConversationConfig
@@ -22,6 +24,8 @@ from cke.conversation.types import (
 )
 from cke.conversation.validation import CandidateMemoryValidator
 
+logger = logging.getLogger(__name__)
+
 
 class ConversationIngestionPipeline:
     """Deterministic ingestion pipeline for event storage and memory promotion."""
@@ -35,8 +39,10 @@ class ConversationIngestionPipeline:
         consolidator: MemoryConsolidator | None = None,
         config: ConversationConfig | None = None,
         monitor: SystemMonitor | None = None,
+        strict: bool = False,
     ) -> None:
         self.memory_store = memory_store
+        self.strict = bool(strict)
         self.monitor = monitor
         self.config = config or memory_store.config
         self.extractors = extractors or [
@@ -83,7 +89,25 @@ class ConversationIngestionPipeline:
                 if self.monitor:
                     for cand in extracted:
                         self.monitor.record_candidate(cand.kind.value)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - extractors vary widely
+                # One extractor failing must not lose the turn, but dropping
+                # its entire output silently would make the memory look
+                # complete when it is not.
+                logger.warning(
+                    "Extractor %s failed on turn %s (%s: %s); its candidates "
+                    "for this turn are lost",
+                    type(extractor).__name__,
+                    getattr(event, "event_id", "<unknown>"),
+                    type(exc).__name__,
+                    exc,
+                )
+                declare_degradation(
+                    type(self).__name__,
+                    f"extractor {type(extractor).__name__} raised "
+                    f"{type(exc).__name__} on a conversation turn; its "
+                    "candidates were dropped",
+                    strict=getattr(self, "strict", False),
+                )
                 if self.monitor:
                     self.monitor.record_extractor_exception()
         if self.monitor:

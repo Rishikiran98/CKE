@@ -1,23 +1,42 @@
-"""Coreference resolution for document-level extraction."""
+"""Coreference resolution for document-level extraction.
+
+Without a spaCy model this falls back to a regular expression that rewrites
+every pronoun to the most recently seen capitalised name. That is a different
+algorithm with a different error profile, not a slightly worse version of the
+same one, so the fallback is declared.
+"""
 
 from __future__ import annotations
 
+import logging
 import re
+
+from cke.diagnostics import DegradationMixin
 
 try:
     import spacy
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     spacy = None
 
 
-class CoreferenceResolver:
-    """Resolve pronoun references to the latest salient named entity."""
+logger = logging.getLogger(__name__)
+
+_SPACY_MODELS = ("en_coreference_web_trf", "en_core_web_sm")
+
+
+class CoreferenceResolver(DegradationMixin):
+    """Resolve pronoun references to the latest salient named entity.
+
+    Args:
+        strict: when True, raise rather than fall back to the regex heuristic.
+    """
 
     PRONOUNS = {"he", "she", "they", "it", "him", "her", "them", "his", "its", "their"}
     _PERSON_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b")
     _NAME_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b")
 
-    def __init__(self) -> None:
+    def __init__(self, strict: bool = False) -> None:
+        self._init_degradation(strict)
         self._nlp = self._load_spacy()
 
     def resolve(self, document: str) -> str:
@@ -30,19 +49,38 @@ class CoreferenceResolver:
 
     def _load_spacy(self):
         if spacy is None:
+            self._degrade(
+                "spacy is not installed, so coreference resolution falls back "
+                "to a regular expression that rewrites every pronoun to the "
+                "most recently seen capitalised name. Install it with "
+                "`pip install spacy`"
+            )
             return None
-        for model_name in ("en_coreference_web_trf", "en_core_web_sm"):
-            model = self._try_load_spacy_model(model_name)
+
+        failures: list[str] = []
+        for model_name in _SPACY_MODELS:
+            model = self._try_load_spacy_model(model_name, failures)
             if model is not None:
                 return model
+
+        self._degrade(
+            "spacy is installed but none of its coreference models loaded "
+            f"({'; '.join(failures)}), so coreference resolution falls back to "
+            "a regular expression that rewrites every pronoun to the most "
+            "recently seen capitalised name. Install one with "
+            f"`python -m spacy download {_SPACY_MODELS[-1]}`"
+        )
         return None
 
     @staticmethod
-    def _try_load_spacy_model(model_name: str):
+    def _try_load_spacy_model(model_name: str, failures: list[str] | None = None):
         try:
             return spacy.load(model_name)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - spacy raises varied load errors
             # Model not present or incompatible in current runtime.
+            if failures is not None:
+                failures.append(f"{model_name}: {type(exc).__name__}: {exc}")
+            logger.debug("spaCy model %s did not load: %s", model_name, exc)
             return None
 
     def _resolve_with_spacy(self, document: str) -> str | None:

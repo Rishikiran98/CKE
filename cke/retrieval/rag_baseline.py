@@ -1,20 +1,52 @@
-"""Baseline RAG retriever built on sentence-transformers and FAISS."""
+"""Baseline RAG retriever built on sentence-transformers and FAISS.
+
+This is the dense baseline CKE is measured against. If its embedder or its
+index has degraded, the comparison is not against dense retrieval at all, so
+``strict=True`` propagates to both and the retriever reports their state.
+"""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 
+from cke.diagnostics import DegradationMixin
 from cke.retrieval.embedding_model import EmbeddingModel
 from cke.retrieval.faiss_index import FaissIndex
 
 
-class RAGRetriever:
-    """Embed query and retrieve top-k documents from a FAISS index."""
+class RAGRetriever(DegradationMixin):
+    """Embed query and retrieve top-k documents from a FAISS index.
 
-    def __init__(self, embedding_model: EmbeddingModel | None = None) -> None:
-        self.embedding_model = embedding_model or EmbeddingModel()
-        self.index = FaissIndex()
+    Args:
+        embedding_model: an embedder to reuse. When supplied under
+            ``strict=True`` it must not already be degraded.
+        strict: when True, this retriever and the components it builds raise
+            rather than degrade. Every evaluation and benchmark path must pass
+            ``strict=True``.
+    """
+
+    def __init__(
+        self,
+        embedding_model: EmbeddingModel | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._init_degradation(strict)
+        self.embedding_model = embedding_model or EmbeddingModel(strict=strict)
+        self.index = FaissIndex(strict=strict)
+
+        # An embedder passed in by the caller may already have degraded before
+        # it reached us; inherit that rather than reporting a healthy baseline.
+        # A caller-supplied embedder need not implement the degradation
+        # contract, in which case there is nothing to inherit.
+        if getattr(self.embedding_model, "degraded", False):
+            self._degrade(
+                "its embedding model is degraded, so this is not a dense "
+                "retrieval baseline: "
+                f"{getattr(self.embedding_model, 'degraded_reason', 'unknown')}"
+            )
+        if self.index.degraded:
+            self._degrade(f"its vector index is degraded: {self.index.degraded_reason}")
 
     def build_index(self, docs: list[dict[str, str]] | list[str]) -> None:
         prepared: list[dict[str, str]] = []

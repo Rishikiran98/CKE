@@ -17,13 +17,15 @@ from typing import Any, Dict, List, Optional
 
 from cke.models import Statement
 
+from cke.diagnostics import DegradationMixin
+
 try:
     import networkx as nx
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     nx = None
 
 
-class KnowledgeGraphEngine:
+class KnowledgeGraphEngine(DegradationMixin):
     """Manages entity-relation graph operations.
 
     Parameters
@@ -33,6 +35,9 @@ class KnowledgeGraphEngine:
         ``add_statement`` call is also persisted to disk and the in-memory
         graph is pre-loaded from the store on initialisation.  Omit (or
         pass ``None``) to use the original pure in-memory behaviour.
+    strict:
+        When True, raise rather than substitute the hand-rolled graph
+        implementation used when networkx is unavailable.
     """
 
     def __init__(
@@ -41,7 +46,9 @@ class KnowledgeGraphEngine:
         backend: Any | None = None,
         shard_count: int = 8,
         shard_strategy: str = "entity_hashing",
+        strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
         self._backend = backend
         self._shard_count = max(1, int(shard_count))
         self._shard_strategy = shard_strategy
@@ -60,6 +67,14 @@ class KnowledgeGraphEngine:
 
         # --- in-memory graph (always maintained for fast traversal) ---
         self._use_nx = nx is not None
+        if not self._use_nx:
+            self._degrade(
+                "networkx is not installed, so graph topology uses a "
+                "hand-rolled dict-of-lists with its own traversal "
+                "implementation rather than the library the rest of the "
+                "system was developed against. Install it with "
+                "`pip install networkx`"
+            )
         if self._use_nx:
             self.graph = nx.MultiDiGraph()
             self._adjacency_index: dict[str, list[tuple[str, dict[str, Any]]]] = (

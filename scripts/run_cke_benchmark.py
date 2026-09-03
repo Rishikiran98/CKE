@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
+from cke.diagnostics import environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
@@ -44,12 +45,25 @@ from cke.router.query_plan import QueryPlan  # noqa: E402
 
 
 class TokenCounter:
-    """Approximate BPE token count via word count × 1.3."""
+    """Word count x 1.3. An ESTIMATE, not a tokenizer.
+
+    Every "prompt tokens" figure this script reports comes from here, so those
+    figures are not measurements. A real comparison needs the tokenizer of the
+    model actually being prompted. Callers must label output from this class as
+    estimated.
+    """
+
+    #: Multiplier applied to whitespace-delimited word counts.
+    WORDS_TO_TOKENS = 1.3
+
+    #: Set on every row this class contributes to, so a reader of the results
+    #: file cannot mistake the figure for a tokenizer measurement.
+    IS_ESTIMATE = True
 
     @staticmethod
     def count(text: str) -> int:
         words = len(text.split())
-        return max(1, int(words * 1.3))
+        return max(1, int(words * TokenCounter.WORDS_TO_TOKENS))
 
 
 class SeedEntityExtractor:
@@ -126,7 +140,8 @@ def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
 
 
 class RAGPipeline:
-    def __init__(self) -> None:
+    def __init__(self, strict: bool = True) -> None:
+        self._strict = strict
         self._qa = SimpleExtractiveQA()
         self._counter = TokenCounter()
 
@@ -144,12 +159,17 @@ class RAGPipeline:
                 "k": k,
             }
 
-        retriever = RAGRetriever()
+        retriever = RAGRetriever(strict=self._strict)
         try:
             retriever.build_index(docs)
             results = retriever.retrieve(question, k=k)
-        except Exception:
-            results = []
+        except Exception as exc:  # noqa: BLE001 - index/backends raise varied errors
+            # Scoring an empty context as if it were a retrieval result turns a
+            # broken arm into a low score rather than an error.
+            raise RuntimeError(
+                f"dense retrieval failed for question {question!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
         retrieved_texts = [str(r.get("text", "")) for r in results]
         context = "\n".join(retrieved_texts)
@@ -272,8 +292,11 @@ class CKELitePipeline:
                 retriever = GraphRetriever(engine)
                 result = retriever.retrieve(plan, mode="bfs")
                 evidence = result.get("evidence", [])[:n]
-            except Exception:
-                evidence = []
+            except Exception as exc:  # noqa: BLE001 - retriever raises varied errors
+                raise RuntimeError(
+                    f"graph retrieval failed for question {question!r}: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
 
         # 4. Build context from statements
         stmt_texts = [
@@ -304,7 +327,13 @@ class CKELitePipeline:
 class HybridPipeline:
     """Graph-first retrieval with dense fallback via RetrievalRouter."""
 
-    def __init__(self, evidence_threshold: int = 2, dense_top_k: int = 3) -> None:
+    def __init__(
+        self,
+        evidence_threshold: int = 2,
+        dense_top_k: int = 3,
+        strict: bool = True,
+    ) -> None:
+        self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
         self._qa = SimpleExtractiveQA()
@@ -344,12 +373,18 @@ class HybridPipeline:
 
         # 2. Build RetrievalRouter with graph + dense retrievers
         graph_retriever = SimpleGraphRetriever(engine)
-        dense_retriever = RAGRetriever()
+        dense_retriever = RAGRetriever(strict=self._strict)
         if docs:
             try:
                 dense_retriever.build_index(docs)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - index raises varied errors
+                # Swallowing this left the hybrid arm running graph-only while
+                # still being labelled "hybrid" in every output table.
+                raise RuntimeError(
+                    "hybrid arm could not build its dense index, so it would "
+                    f"have run graph-only while still being reported as "
+                    f"hybrid: {type(exc).__name__}: {exc}"
+                ) from exc
 
         router = RetrievalRouter(
             graph_retriever=graph_retriever,
@@ -401,12 +436,13 @@ def run_dataset(
     dataset_name: str,
     limit: int,
     verbose: bool = False,
+    strict: bool = True,
 ) -> list[dict[str, Any]]:
     """Run all pipeline configurations for each item and return per-item results."""
 
-    rag_pipeline = RAGPipeline()
+    rag_pipeline = RAGPipeline(strict=strict)
     cke_pipeline = CKELitePipeline()
-    hybrid_pipeline = HybridPipeline()
+    hybrid_pipeline = HybridPipeline(strict=strict)
     results: list[dict[str, Any]] = []
 
     effective = items[:limit]
@@ -841,11 +877,12 @@ def run_retrieval_mode_ablation(
     dataset_name: str,
     limit: int,
     verbose: bool = False,
+    strict: bool = True,
 ) -> dict[str, dict[str, float]]:
     """Ablate across retrieval modes: graph_only, dense_only, hybrid."""
     cke_pipeline = CKELitePipeline()
-    rag_pipeline = RAGPipeline()
-    hybrid_pipeline = HybridPipeline(evidence_threshold=2, dense_top_k=3)
+    rag_pipeline = RAGPipeline(strict=strict)
+    hybrid_pipeline = HybridPipeline(evidence_threshold=2, dense_top_k=3, strict=strict)
 
     effective = items[:limit]
     total = len(effective)
@@ -926,6 +963,14 @@ def main() -> None:
     parser.add_argument("--hotpot-path", default=None)
     parser.add_argument("--wiki2-path", default=None)
     parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit components to run degraded. Off by default: a benchmark "
+            "whose embedder fell back to hashing is not a benchmark."
+        ),
+    )
+    parser.add_argument(
         "--skip-download",
         action="store_true",
         help="Skip dataset download (use existing files)",
@@ -937,6 +982,9 @@ def main() -> None:
         help="Run retrieval mode ablation (graph_only vs dense_only vs hybrid)",
     )
     args = parser.parse_args()
+
+    print(environment_report().render(), flush=True)
+    strict = not args.allow_degraded
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -967,8 +1015,13 @@ def main() -> None:
         try:
             datasets["hotpotqa"] = _load_hotpotqa(hotpot_path, args.limit)
             print(f"[load] HotpotQA: {len(datasets['hotpotqa'])} items")
-        except Exception as exc:
-            print(f"[load] HotpotQA failed: {exc}")
+        except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
+            # Continuing here computed the report over whichever datasets
+            # happened to load, with no note of the one that did not.
+            raise RuntimeError(
+                f"HotpotQA failed to load from {hotpot_path}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
     else:
         print(f"[load] HotpotQA not found at {hotpot_path}")
 
@@ -976,8 +1029,11 @@ def main() -> None:
         try:
             datasets["wiki2"] = _load_wiki2(wiki2_path, args.limit)
             print(f"[load] 2WikiMultiHopQA: {len(datasets['wiki2'])} items")
-        except Exception as exc:
-            print(f"[load] 2WikiMultiHopQA failed: {exc}")
+        except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
+            raise RuntimeError(
+                f"2WikiMultiHopQA failed to load from {wiki2_path}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
     else:
         print(f"[load] 2WikiMultiHopQA not found at {wiki2_path}")
 
@@ -990,7 +1046,9 @@ def main() -> None:
     per_dataset_metrics: dict[str, dict[str, dict[str, float]]] = {}
 
     for ds_name, items in datasets.items():
-        rows = run_dataset(items, ds_name, limit=args.limit, verbose=args.verbose)
+        rows = run_dataset(
+            items, ds_name, limit=args.limit, verbose=args.verbose, strict=strict
+        )
         metrics = aggregate_metrics(rows)
         per_dataset_metrics[ds_name] = metrics
         all_rows.extend(rows)
@@ -1075,6 +1133,7 @@ def main() -> None:
                 ds_name,
                 limit=args.limit,
                 verbose=args.verbose,
+                strict=strict,
             )
         (output_dir / "retrieval_ablation.json").write_text(
             json.dumps(retrieval_ablation, indent=2),

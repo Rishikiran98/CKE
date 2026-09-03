@@ -6,6 +6,7 @@ import argparse
 import importlib
 from dataclasses import dataclass, field
 
+from cke.diagnostics import declare_degradation, environment_report
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.evaluation.default_golden_set import get_default_golden_set
 from cke.evaluation.e2e_evaluator import E2EEvaluator
@@ -110,11 +111,18 @@ class DemoRouter:
 
 
 class DemoRAGRetriever:
+    """Returns the first k documents regardless of the query.
+
+    This is a wiring stub, not a retriever. It exists so the orchestrator can
+    be exercised end to end; any accuracy computed over it measures the
+    hand-written document list, not retrieval.
+    """
+
     def __init__(self, docs: list[dict[str, str | float]]) -> None:
         self.docs = docs
 
     def retrieve(self, query: str, k: int = 5) -> list[dict[str, str | float]]:
-        del query
+        del query  # deliberately ignored; see the class docstring
         return self.docs[:k]
 
 
@@ -206,7 +214,26 @@ class DemoReasoner:
         )
 
 
-def build_demo_orchestrator() -> QueryOrchestrator:
+def build_demo_orchestrator(strict: bool = False) -> QueryOrchestrator:
+    """Build an orchestrator over hand-written stub components.
+
+    Every part of this is authored: the documents, the retriever that ignores
+    the query, and the reasoner. It is a wiring smoke test. Scores produced
+    from it describe the fixtures, so it declares itself as a degradation and
+    refuses under strict.
+    """
+    declare_degradation(
+        "build_demo_orchestrator",
+        "this factory wires hand-written stub documents to a retriever that "
+        "ignores the query. Any accuracy or calibration figure computed from "
+        "it describes the fixtures, not the system. Pass --factory pointing "
+        "at a real orchestrator to measure anything",
+        strict=strict,
+    )
+    return _build_demo_orchestrator()
+
+
+def _build_demo_orchestrator() -> QueryOrchestrator:
     docs = [
         {
             "doc_id": "d1::c0",
@@ -357,10 +384,25 @@ def main() -> int:
     )
     parser.add_argument("--output-json", default=None)
     parser.add_argument("--output-csv", default=None)
+    parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit degraded components, including the demo factory's "
+            "hand-written stubs. Off by default."
+        ),
+    )
     args = parser.parse_args()
 
+    print(environment_report().render(), flush=True)
+    strict = not args.allow_degraded
+
     factory = _load_factory(args.factory)
-    orchestrator = factory()
+    try:
+        orchestrator = factory(strict=strict)
+    except TypeError:
+        # A user-supplied factory need not accept the keyword.
+        orchestrator = factory()
     cases = get_default_golden_set()
     evaluator = E2EEvaluator(orchestrator)
     results, summary = evaluator.evaluate_cases(cases)

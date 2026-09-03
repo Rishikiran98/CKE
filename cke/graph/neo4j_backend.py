@@ -8,14 +8,21 @@ from cke.models import Statement
 
 try:
     from neo4j import GraphDatabase
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     GraphDatabase = None
+
+
+class MissingDependencyError(RuntimeError):
+    """Raised when an optional dependency needed for this backend is absent."""
 
 
 class Neo4jBackend:
     def __init__(self, uri: str, user: str, password: str) -> None:
         if GraphDatabase is None:
-            raise RuntimeError("neo4j package is not installed")
+            raise MissingDependencyError(
+                "the neo4j package is required for the Neo4j backend. "
+                "Install it with `pip install neo4j`."
+            )
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
     def close(self) -> None:

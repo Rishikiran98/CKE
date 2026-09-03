@@ -8,14 +8,32 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
+#: Errors a metric recorder can plausibly raise on malformed input. Anything
+#: else is a real defect and must not be absorbed by telemetry code.
+_METRIC_ERRORS = (TypeError, ValueError, AttributeError, KeyError, ZeroDivisionError)
+
+
 def _safe_metric(func):
-    """Decorator to guarantee metrics emission never throws an exception."""
+    """Ensure a metric recorder never takes down the caller.
+
+    Narrow by design: a bad value passed to a counter should not break a
+    query, but a NameError or an ImportError in this module is a defect and
+    propagates. A swallowed metric is logged at WARNING, not DEBUG, because a
+    metric that silently stopped recording reads downstream as a measured zero.
+    """
 
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
-        except Exception as e:
-            logger.debug(f"Monitor exception swallowed: {e}")
+        except _METRIC_ERRORS as exc:
+            logger.warning(
+                "Metric %s was not recorded (%s: %s); any figure derived from "
+                "it undercounts",
+                getattr(func, "__name__", "<unknown>"),
+                type(exc).__name__,
+                exc,
+            )
+            return None
 
     return wrapper
 

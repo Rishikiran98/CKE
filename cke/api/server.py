@@ -10,8 +10,12 @@ from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 
 try:
     from fastapi import FastAPI
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover - optional runtime dependency
     FastAPI = None
+
+
+class MissingDependencyError(RuntimeError):
+    """Raised when an optional dependency needed for this feature is absent."""
 
 
 class QueryRequest(BaseModel):
@@ -24,8 +28,17 @@ class IngestRequest(BaseModel):
 
 
 def create_app(graph_engine: KnowledgeGraphEngine | None = None):
+    """Build the FastAPI application.
+
+    Raises if fastapi is not installed. Importing this module does not build
+    the app, so ``cke.api.server`` can be imported and inspected in an
+    environment without fastapi.
+    """
     if FastAPI is None:
-        raise RuntimeError("fastapi is not installed")
+        raise MissingDependencyError(
+            "fastapi is required to build the CKE API application. "
+            "Install it with `pip install fastapi` (and `uvicorn` to serve)."
+        )
 
     app = FastAPI(title="CKE API", version="0.1.0")
     engine = graph_engine or KnowledgeGraphEngine()
@@ -75,4 +88,15 @@ def create_app(graph_engine: KnowledgeGraphEngine | None = None):
     return app
 
 
-app = create_app()
+def __getattr__(name: str):
+    """Build the ASGI app on first attribute access, not at import time.
+
+    Keeps ``uvicorn cke.api.server:app`` working while leaving the module
+    importable without fastapi installed (PEP 562).
+    """
+    if name == "app":
+        return create_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ["QueryRequest", "IngestRequest", "MissingDependencyError", "create_app"]

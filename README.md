@@ -28,6 +28,24 @@ known accuracy, token cost, or latency characteristics.
   conversational retrieval, reference resolution, and grounded answering.
 - **Trust and observability** (`cke.trust`, `cke.observability`): confidence
   calibration over assertions and drift monitoring.
+- **Diagnostics** (`cke.diagnostics`): the degradation contract described
+  below, and `environment_report()`, which reports which optional dependencies
+  resolved, which models loaded, and which components are degraded.
+
+## Degradation is never silent
+
+Several components can run with reduced capability when an optional dependency,
+a model, an API key, or a config file is missing. None of them does so quietly.
+Any such component warns at `WARNING` naming the specific cause, sets an
+inspectable `degraded` flag with a `degraded_reason`, and raises
+`DegradedComponentError` instead of degrading when constructed with
+`strict=True`.
+
+Every benchmark, evaluation and experiment entry point prints the environment
+report first and constructs its components with `strict=True`. In an
+environment without `sentence-transformers`, running one exits non-zero and
+says so, rather than reporting a number produced by a hash function. Pass
+`--allow-degraded` to opt out deliberately.
 
 ## Known limitations
 
@@ -38,14 +56,18 @@ These are stated here rather than left for a reader to discover.
   package to talk to.
 - `python demo.py` produces no answer. The demo corpus does not match the
   patterns the rule-based extractor recognises.
-- Several components degrade silently when a dependency or API key is missing.
-  The embedding model falls back to hashed bag-of-words vectors and the LLM
-  extractor falls back to regexes, in both cases without an error.
-- `cke.api.server` cannot be imported without FastAPI installed, has no
-  authentication, and does not use the main query pipeline.
+- `cke.api.server` has no authentication and does not use the main query
+  pipeline. It is importable without FastAPI, but `create_app()` needs it.
 - Dependencies in `requirements.txt` are unpinned.
 - There is no evaluation harness that can produce a trustworthy number. Building
-  one is prerequisite work before any result is reported here.
+  one is prerequisite work before any result is reported here. In particular
+  several figures the code computes are not measurements: prompt-token counts
+  in `scripts/run_cke_benchmark.py` are word counts multiplied by 1.3 rather
+  than tokenizer output, and confidence values are in places substituted
+  constants rather than scores.
+- `cke/experiments/retrieval_eval_pipeline.py` cannot be imported at all: it
+  hard-imports `faiss`, `pandas` and `sentence_transformers`.
+- There are two test directories, `tests/` and `cke/tests/`.
 
 ## Repository layout
 

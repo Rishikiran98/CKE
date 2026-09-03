@@ -1,11 +1,21 @@
-"""Config helpers for transparent retrieval and ranking heuristics."""
+"""Config helpers for transparent retrieval and ranking heuristics.
+
+Ranking weights come from a YAML file. Silently substituting built-in defaults
+would mean every ranking score was produced by weights nobody selected, so a
+missing or unreadable config is declared instead.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from cke.diagnostics import declare_degradation
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - optional runtime dependency
+    yaml = None
 
 
 @dataclass(slots=True)
@@ -49,16 +59,80 @@ class RetrievalRankingConfig:
 
 def load_ranking_config(
     config_path: str | Path | None = "configs/retrieval_ranking.yaml",
+    strict: bool = False,
 ) -> RetrievalRankingConfig:
-    """Load heuristic ranking weights from YAML, falling back to sane defaults."""
+    """Load heuristic ranking weights from YAML.
+
+    Passing ``config_path=None`` deliberately selects the built-in defaults and
+    is not a degradation. A path that cannot be read is.
+
+    Args:
+        config_path: YAML file of ranking weights, or None for defaults.
+        strict: when True, raise rather than substitute defaults.
+    """
     config = RetrievalRankingConfig()
     if config_path is None:
         return config
-    path = Path(config_path)
-    if not path.exists():
+
+    if yaml is None:
+        declare_degradation(
+            "load_ranking_config",
+            "PyYAML is not installed, so ranking weights cannot be read from "
+            "configuration and built-in defaults are used. Install it with "
+            "`pip install PyYAML`",
+            strict=strict,
+        )
         return config
 
-    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    path = Path(config_path)
+    if not path.exists():
+        declare_degradation(
+            "load_ranking_config",
+            f"ranking config {path} does not exist (resolved from "
+            f"{Path.cwd()}), so built-in default ranking weights are used and "
+            "every retrieval score reflects defaults rather than configuration",
+            strict=strict,
+        )
+        return config
+
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        declare_degradation(
+            "load_ranking_config",
+            f"ranking config {path} could not be parsed ({type(exc).__name__}: "
+            f"{exc}), so built-in default ranking weights are used",
+            strict=strict,
+        )
+        return config
+    if not isinstance(payload, dict):
+        declare_degradation(
+            "load_ranking_config",
+            f"ranking config {path} is not a mapping, so built-in default "
+            "ranking weights are used",
+            strict=strict,
+        )
+        return config
+
+    known_sections = {"chunk", "fact", "path"}
+    present = set(payload) & known_sections
+    if not present:
+        declare_degradation(
+            "load_ranking_config",
+            f"ranking config {path} contains none of the expected sections "
+            f"({', '.join(sorted(known_sections))}), so every ranking weight "
+            "falls back to its built-in default",
+            strict=strict,
+        )
+    unknown = sorted(set(payload) - known_sections)
+    if unknown:
+        declare_degradation(
+            "load_ranking_config",
+            f"ranking config {path} contains sections this version does not "
+            f"understand ({', '.join(unknown)}); they are ignored",
+            strict=strict,
+        )
+
     chunk = payload.get("chunk", {}) or {}
     fact = payload.get("fact", {}) or {}
     path_cfg = payload.get("path", {}) or {}

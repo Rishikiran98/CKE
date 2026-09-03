@@ -574,7 +574,10 @@ class QueryOrchestrator:
             )
             if isinstance(outcome, ReasonerOutcome):
                 return outcome
-        except Exception:
+        except Exception:  # noqa: BLE001 - reasoners are pluggable
+            # Deliberately broad: any reasoner implementation may be plugged
+            # in here. The failure is logged with its traceback and turned
+            # into an explicit abstention, never a quiet empty answer.
             logger.exception("Reasoner execution failed")
             return None
 

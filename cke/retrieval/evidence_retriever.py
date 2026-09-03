@@ -21,10 +21,13 @@ class EvidenceRetriever:
         chunk_fact_store: ChunkFactStore,
         ranking_config: RetrievalRankingConfig | None = None,
         config_path: str = "configs/retrieval_ranking.yaml",
+        strict: bool = False,
     ) -> None:
         self.rag_retriever = rag_retriever
         self.chunk_fact_store = chunk_fact_store
-        self.ranking_config = ranking_config or load_ranking_config(config_path)
+        self.ranking_config = ranking_config or load_ranking_config(
+            config_path, strict=strict
+        )
 
     def retrieve(
         self,
