@@ -1,4 +1,6 @@
-"""Sprint 7 integration tests for local subgraph and candidate path assembly."""
+"""Local subgraph assembly and candidate path generation, with deduplication and
+abstention on a missing bridge.
+"""
 
 from dataclasses import dataclass, field
 import re
@@ -184,7 +186,7 @@ def _build_orchestrator(
     return orchestrator, reasoner
 
 
-def test_sprint7_direct_path_generation():
+def test_direct_path_generation():
     docs = [
         {"doc_id": "d1::c0", "text": "A located_in B", "score": 0.95, "source": "d1"},
         {"doc_id": "d1::c1", "text": "B located_in C", "score": 0.9, "source": "d1"},
@@ -208,7 +210,7 @@ def test_sprint7_direct_path_generation():
     assert result.answer == "C"
 
 
-def test_sprint7_simple_bridge_query_builds_connected_path():
+def test_simple_bridge_query_builds_connected_path():
     docs = [
         {
             "doc_id": "d2::c0",
@@ -244,7 +246,7 @@ def test_sprint7_simple_bridge_query_builds_connected_path():
     assert result.answer == "Film Z"
 
 
-def test_sprint7_dual_entity_connection_preserves_both_sides():
+def test_dual_entity_connection_preserves_both_sides():
     docs = [
         {
             "doc_id": "d3::c0",
@@ -274,7 +276,7 @@ def test_sprint7_dual_entity_connection_preserves_both_sides():
     assert result.answer in {"yes", "INSUFFICIENT_EVIDENCE"}
 
 
-def test_sprint7_missing_bridge_abstains_without_hallucinating():
+def test_missing_bridge_abstains_without_hallucinating():
     docs = [
         {
             "doc_id": "d4::c0",
@@ -306,7 +308,7 @@ def test_sprint7_missing_bridge_abstains_without_hallucinating():
     }
 
 
-def test_sprint7_path_deduplication_removes_duplicate_two_hop_paths():
+def test_path_deduplication_removes_duplicate_two_hop_paths():
     docs = [
         {
             "doc_id": "d5::c0",

@@ -1,4 +1,4 @@
-"""Sprint 1 integration test for query orchestrator skeleton."""
+"""The query orchestrator runs end to end on a minimal graph."""
 
 from dataclasses import dataclass
 
@@ -19,7 +19,7 @@ class StubRouter:
         return ["Albert Einstein"]
 
 
-def test_orchestrator_sprint1_pipeline_skeleton_runs():
+def test_pipeline_skeleton_runs():
     orchestrator = QueryOrchestrator(graph_engine=None, router=StubRouter())
 
     result = orchestrator.answer("What is the nationality of Albert Einstein?")

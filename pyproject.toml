@@ -39,9 +39,8 @@ dev = { file = ["requirements-dev.txt"] }
 
 [tool.setuptools.packages.find]
 include = ["cke*"]
-# The in-package test suite is not part of the library, and cke/logs is a
-# runtime output directory that has no business in a wheel.
-exclude = ["cke.tests*", "cke.logs*"]
+# cke/logs is a runtime output directory that has no business in a wheel.
+exclude = ["cke.logs*"]
 
 [tool.setuptools.package-data]
 # relations.yaml is read from beside its module at runtime.
@@ -68,11 +67,7 @@ files = [
 ]
 
 [tool.coverage.run]
-# The library, not the test code: counting test files as covered lines
-# raised the figure by two points without a line of the package being
-# exercised more.
 source = ["cke"]
-omit = ["cke/tests/*"]
 
 [tool.coverage.report]
 # The floor. It is the value measured when coverage was first enforced,
@@ -103,6 +98,6 @@ extend-exclude = '''
 '''
 
 [tool.bandit]
-exclude_dirs = ["cke/tests", "tests"]
+exclude_dirs = ["tests"]
 skips = ["B101"]
 

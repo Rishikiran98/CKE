@@ -94,7 +94,7 @@ def test_demo_supports_db_path_end_to_end(tmp_path: Path):
     db_path = tmp_path / "demo.db"
     result = subprocess.run(
         [sys.executable, "demo.py", "--db-path", str(db_path)],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
         check=False,

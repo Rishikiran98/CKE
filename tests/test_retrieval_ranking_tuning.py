@@ -1,4 +1,6 @@
-"""Sprint 10 retrieval tuning coverage."""
+"""Retrieval ranking: relation priority, operator support, multi-hop path
+preference, and hybrid chunk scoring.
+"""
 
 from __future__ import annotations
 

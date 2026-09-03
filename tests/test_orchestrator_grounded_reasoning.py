@@ -1,4 +1,6 @@
-"""Sprint 3 integration tests for grounded reasoning execution."""
+"""Grounded reasoning: direct lookup, shallow comparison, and the structured
+fallback when evidence is insufficient.
+"""
 
 from dataclasses import dataclass, field
 
@@ -140,7 +142,7 @@ def _build_orchestrator() -> QueryOrchestrator:
     )
 
 
-def test_orchestrator_sprint3_direct_fact_lookup():
+def test_direct_fact_lookup():
     orchestrator = _build_orchestrator()
 
     result = orchestrator.answer("What is the nationality of Albert Einstein?")
@@ -151,7 +153,7 @@ def test_orchestrator_sprint3_direct_fact_lookup():
     assert result.failure_mode is None
 
 
-def test_orchestrator_sprint3_shallow_comparison():
+def test_shallow_comparison():
     orchestrator = _build_orchestrator()
 
     result = orchestrator.answer(
@@ -161,7 +163,7 @@ def test_orchestrator_sprint3_shallow_comparison():
     assert result.answer in {"yes", "no", "INSUFFICIENT_EVIDENCE"}
 
 
-def test_orchestrator_sprint3_insufficient_evidence_structured_fallback():
+def test_insufficient_evidence_structured_fallback():
     orchestrator = _build_orchestrator()
 
     result = orchestrator.answer("What is the nationality of Nikola Tesla?")

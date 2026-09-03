@@ -1,4 +1,4 @@
-"""Sprint 6 integration tests for aliasing and relation-targeted retrieval."""
+"""Alias resolution and relation-targeted retrieval through the orchestrator."""
 
 from dataclasses import dataclass, field
 
@@ -112,7 +112,7 @@ def _build_orchestrator(docs, fact_map, resolver_aliases=None) -> QueryOrchestra
     )
 
 
-def test_sprint6_alias_resolution_us_citizenship():
+def test_alias_resolution_us_citizenship():
     docs = [
         {
             "doc_id": "d1::c0",
@@ -148,7 +148,7 @@ def test_sprint6_alias_resolution_us_citizenship():
     assert result.answer in {"United States", "INSUFFICIENT_EVIDENCE"}
 
 
-def test_sprint6_canonical_alias_director_lookup():
+def test_canonical_alias_director_lookup():
     docs = [
         {
             "doc_id": "d2::c0",
@@ -177,7 +177,7 @@ def test_sprint6_canonical_alias_director_lookup():
     assert result.answer in {"yes", "INSUFFICIENT_EVIDENCE"}
 
 
-def test_sprint6_relation_targeted_retrieval_prioritizes_nationality():
+def test_relation_targeted_retrieval_prioritizes_nationality():
     docs = [
         {
             "doc_id": "d3::c0",
@@ -212,7 +212,7 @@ def test_sprint6_relation_targeted_retrieval_prioritizes_nationality():
     assert result.answer in {"German", "INSUFFICIENT_EVIDENCE"}
 
 
-def test_sprint6_dual_entity_comparison_retains_both_sides():
+def test_dual_entity_comparison_retains_both_sides():
     docs = [
         {
             "doc_id": "d4::c0",
@@ -256,7 +256,7 @@ def test_sprint6_dual_entity_comparison_retains_both_sides():
     assert any(f.statement.relation == "nationality" for f in result.evidence_facts)
 
 
-def test_sprint6_missing_alias_fallback_abstains_cleanly():
+def test_missing_alias_fallback_abstains_cleanly():
     docs = []
     facts = {}
     orchestrator = _build_orchestrator(
