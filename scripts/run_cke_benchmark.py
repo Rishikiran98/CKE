@@ -30,6 +30,7 @@ from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
 from cke.diagnostics import degradation_summary, environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
+from cke.evaluation.llm_qa import LLMAnswerer  # noqa: E402
 from cke.evaluation.span_qa import SpanExtractiveQA  # noqa: E402
 from cke.evaluation.token_counter import TokenCounter  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
@@ -90,9 +91,11 @@ def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
 
 
 class RAGPipeline:
-    def __init__(self, *, token_counter: TokenCounter, strict: bool = True) -> None:
+    def __init__(
+        self, *, token_counter: TokenCounter, answerer, strict: bool = True
+    ) -> None:
         self._strict = strict
-        self._qa = SpanExtractiveQA()
+        self._qa = answerer
         self._counter = token_counter
 
     def run_item(
@@ -125,10 +128,14 @@ class RAGPipeline:
         context = "\n".join(retrieved_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        truncated = bool(getattr(self._qa, "last_truncated", False))
+        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "answer": answer,
+            "answer_truncated": truncated,
+            "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "latency_ms": latency_ms,
             "retrieved_texts": retrieved_texts,
@@ -142,11 +149,13 @@ class RAGPipeline:
 
 
 class CKELitePipeline:
-    def __init__(self, *, token_counter: TokenCounter, strict: bool = True) -> None:
+    def __init__(
+        self, *, token_counter: TokenCounter, answerer, strict: bool = True
+    ) -> None:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
-        self._qa = SpanExtractiveQA()
+        self._qa = answerer
         self._counter = token_counter
 
     def run_item(
@@ -207,10 +216,14 @@ class CKELitePipeline:
         context = "\n".join(stmt_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        truncated = bool(getattr(self._qa, "last_truncated", False))
+        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "answer": answer,
+            "answer_truncated": truncated,
+            "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "latency_ms": latency_ms,
             "n_statements": len(evidence),
@@ -232,13 +245,14 @@ class HybridPipeline:
         self,
         *,
         token_counter: TokenCounter,
+        answerer,
         dense_top_k: int = 3,
         strict: bool = True,
     ) -> None:
         self._strict = strict
         self._extractor = RuleExtractor()
         self._seed_extractor = SeedEntityExtractor()
-        self._qa = SpanExtractiveQA()
+        self._qa = answerer
         self._counter = token_counter
         self._dense_top_k = dense_top_k
         self._merger = HybridRetrievalMerger()
@@ -309,10 +323,14 @@ class HybridPipeline:
         context = "\n".join(all_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        truncated = bool(getattr(self._qa, "last_truncated", False))
+        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
             "answer": answer,
+            "answer_truncated": truncated,
+            "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "latency_ms": latency_ms,
             "n_statements": n_statements,
@@ -331,11 +349,35 @@ class HybridPipeline:
 # ---------------------------------------------------------------------------
 
 
+def _score_row(r: dict[str, Any], gold: str, *extra: str) -> dict[str, Any]:
+    """One per-configuration row, scored.
+
+    Six hand-written dict literals used to do this, each copying a fixed list
+    of keys. When the answerer began reporting whether it had truncated the
+    context, the pipelines recorded it and every one of the six dropped it on
+    the floor, so the per-arm truncation counts read zero against a shared
+    total of 596. One function, one list of keys.
+    """
+    scored = {
+        "answer": r["answer"],
+        "prompt_tokens": r["prompt_tokens"],
+        "latency_ms": r["latency_ms"],
+        "answer_truncated": bool(r.get("answer_truncated", False)),
+        "answer_dropped_tokens": int(r.get("answer_dropped_tokens", 0)),
+        "em": EvaluationMetrics.exact_match(r["answer"], gold),
+        "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+    }
+    for key in extra:
+        scored[key] = r[key]
+    return scored
+
+
 def run_dataset(
     items: list[dict[str, Any]],
     dataset_name: str,
     limit: int,
     token_counter: TokenCounter,
+    answerer,
     verbose: bool = False,
     strict: bool = True,
 ) -> list[dict[str, Any]]:
@@ -345,9 +387,15 @@ def run_dataset(
     differ between arms because of how it was counted.
     """
 
-    rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
-    cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
-    hybrid_pipeline = HybridPipeline(token_counter=token_counter, strict=strict)
+    rag_pipeline = RAGPipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
+    cke_pipeline = CKELitePipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
+    hybrid_pipeline = HybridPipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
     results: list[dict[str, Any]] = []
 
     effective = items[:limit]
@@ -372,68 +420,27 @@ def run_dataset(
 
         # --- RAG k=5 ---
         r = rag_pipeline.run_item(question, docs, k=5)
-        row["rag_k5"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["rag_k5"] = _score_row(r, gold)
 
         # --- RAG k=10 ---
         r = rag_pipeline.run_item(question, docs, k=10)
-        row["rag_k10"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["rag_k10"] = _score_row(r, gold)
 
         # --- CKE-lite N=8 ---
         r = cke_pipeline.run_item(question, docs, n=8)
-        row["cke_n8"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["cke_n8"] = _score_row(r, gold, "n_statements")
 
         # --- CKE-lite N=12 ---
         r = cke_pipeline.run_item(question, docs, n=12)
-        row["cke_n12"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["cke_n12"] = _score_row(r, gold, "n_statements")
 
         # --- CKE-lite N=20 ---
         r = cke_pipeline.run_item(question, docs, n=20)
-        row["cke_n20"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["cke_n20"] = _score_row(r, gold, "n_statements")
 
         # --- Hybrid N=12, k_fallback=3 ---
         r = hybrid_pipeline.run_item(question, docs, n=12, k_fallback=3)
-        row["hybrid_n12"] = {
-            "answer": r["answer"],
-            "prompt_tokens": r["prompt_tokens"],
-            "latency_ms": r["latency_ms"],
-            "n_statements": r["n_statements"],
-            "mode": r["mode"],
-            "em": EvaluationMetrics.exact_match(r["answer"], gold),
-            "f1": EvaluationMetrics.f1_score(r["answer"], gold),
-        }
+        row["hybrid_n12"] = _score_row(r, gold, "n_statements", "mode")
 
         results.append(row)
 
@@ -450,7 +457,8 @@ CONFIGS = ["rag_k5", "rag_k10", "cke_n8", "cke_n12", "cke_n20", "hybrid_n12"]
 def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     """Compute mean EM, mean F1, median tokens, median latency per config."""
     agg: dict[str, dict[str, list[float]]] = {
-        c: {"em": [], "f1": [], "tokens": [], "latency_ms": []} for c in CONFIGS
+        c: {"em": [], "f1": [], "tokens": [], "latency_ms": [], "truncated": []}
+        for c in CONFIGS
     }
 
     for row in rows:
@@ -459,6 +467,7 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
                 continue
             d = row[cfg]
             agg[cfg]["em"].append(d.get("em", 0.0))
+            agg[cfg]["truncated"].append(bool(d.get("answer_truncated", False)))
             agg[cfg]["f1"].append(d.get("f1", 0.0))
             agg[cfg]["tokens"].append(d.get("prompt_tokens", 0))
             agg[cfg]["latency_ms"].append(d.get("latency_ms", 0.0))
@@ -473,6 +482,10 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             "median_tokens": round(statistics.median(lists["tokens"]), 1),
             "median_latency_ms": round(statistics.median(lists["latency_ms"]), 2),
             "n": len(lists["em"]),
+            # Which arm the answerer's window cut. One answerer serves every
+            # arm, so its shared totals cannot say; this can.
+            "truncated_items": sum(lists["truncated"]),
+            "truncation_rate": round(sum(lists["truncated"]) / len(lists["em"]), 4),
         }
     return result
 
@@ -495,6 +508,7 @@ def produce_comparison_table(
     per_dataset: dict[str, dict[str, dict[str, float]]],
     combined: dict[str, dict[str, float]],
     token_counter: TokenCounter,
+    answerer,
 ) -> str:
     """Generate a markdown comparison table."""
     lines: list[str] = ["# RAG vs CKE-lite Comparison Table", ""]
@@ -521,6 +535,10 @@ def produce_comparison_table(
         lines.append(row("Answer F1", "f1"))
         lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
         lines.append(row("Median latency (ms)", "median_latency_ms", "{:.1f}"))
+        if hasattr(answerer, "truncation"):
+            lines.append(
+                row("Items with context truncated", "truncated_items", "{:.0f}")
+            )
         lines.append("")
         # The ratio row that used to sit here was the source of the retracted
         # headline figure. It divided one word-count estimate by another, and
@@ -534,9 +552,7 @@ def produce_comparison_table(
         lines.append(
             f"Prompt tokens counted by {token_counter.description}. A count is "
             f"only comparable to another count made with the same encoding. "
-            f"Answers on every arm come from SpanExtractiveQA, a lexical span "
-            f"baseline with no learned components, not a language model, so "
-            f"the accuracy columns do not describe either retrieval strategy."
+            f"Answers on every arm come from {answerer.description}."
         )
         lines.append("")
 
@@ -731,6 +747,7 @@ def produce_failure_analysis(
 def produce_summary(
     combined: dict[str, dict[str, float]],
     token_counter: TokenCounter,
+    answerer,
 ) -> dict[str, Any]:
     """Produce the raw per-arm figures, with no verdict attached.
 
@@ -758,8 +775,34 @@ def produce_summary(
         "prompt_token_figures_are_estimates": token_counter.is_estimate,
         "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
-        "answers_produced_by": (
-            "SpanExtractiveQA — lexical span baseline, no language model"
+        "answers_produced_by": answerer.description,
+        "answer_truncation": (
+            {
+                "calls": answerer.truncation.calls,
+                "truncated": answerer.truncation.truncated,
+                "rate": round(answerer.truncation.rate, 4),
+                # Per arm, because the shared total cannot say which arm was
+                # cut, and that is the whole question about a context window.
+                "by_arm": {
+                    cfg: {
+                        "truncated_items": combined.get(cfg, {}).get(
+                            "truncated_items", 0
+                        ),
+                        "rate": combined.get(cfg, {}).get("truncation_rate", 0.0),
+                    }
+                    for cfg in (
+                        "rag_k5",
+                        "rag_k10",
+                        "cke_n8",
+                        "cke_n12",
+                        "cke_n20",
+                        "hybrid_n12",
+                    )
+                    if cfg in combined
+                },
+            }
+            if hasattr(answerer, "truncation")
+            else None
         ),
         "rag_k10_em": rag.get("em", 0.0),
         "cke_n12_em": cke.get("em", 0.0),
@@ -796,14 +839,19 @@ def run_retrieval_mode_ablation(
     dataset_name: str,
     limit: int,
     token_counter: TokenCounter,
+    answerer,
     verbose: bool = False,
     strict: bool = True,
 ) -> dict[str, dict[str, float]]:
     """Ablate across retrieval modes: graph_only, dense_only, hybrid."""
-    cke_pipeline = CKELitePipeline(token_counter=token_counter, strict=strict)
-    rag_pipeline = RAGPipeline(token_counter=token_counter, strict=strict)
+    cke_pipeline = CKELitePipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
+    rag_pipeline = RAGPipeline(
+        token_counter=token_counter, answerer=answerer, strict=strict
+    )
     hybrid_pipeline = HybridPipeline(
-        token_counter=token_counter, dense_top_k=3, strict=strict
+        token_counter=token_counter, answerer=answerer, dense_top_k=3, strict=strict
     )
 
     effective = items[:limit]
@@ -899,6 +947,32 @@ def main() -> None:
     )
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
+        "--answerer",
+        choices=("span", "llm"),
+        default="span",
+        help=(
+            "What reads the retrieved context. 'span' is the lexical baseline; "
+            "'llm' puts a language model in the loop, and under strict a run "
+            "with no reachable model refuses rather than falling back to span."
+        ),
+    )
+    parser.add_argument("--llm-backend", choices=("local", "api"), default="local")
+    parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="Model name for the LLM answerer (default: google/flan-t5-base locally)",
+    )
+    parser.add_argument(
+        "--llm-window",
+        type=int,
+        default=None,
+        help=(
+            "Longest prompt, in tokens, handed to a local model. Default is the "
+            "window the model reports for itself. Truncation is counted and "
+            "reported either way."
+        ),
+    )
+    parser.add_argument(
         "--retrieval-ablation",
         action="store_true",
         help="Run retrieval mode ablation (graph_only vs dense_only vs hybrid)",
@@ -908,6 +982,19 @@ def main() -> None:
     print(environment_report().render(), flush=True)
     strict = not args.allow_degraded
     token_counter = TokenCounter(strict=strict)
+    # One answerer for every arm. It is built here, strict, so a run with no
+    # model stops before its first item instead of quietly answering with
+    # the span baseline while being labelled 'llm'.
+    if args.answerer == "llm":
+        answerer = LLMAnswerer(
+            backend=args.llm_backend,
+            model=args.llm_model,
+            strict=strict,
+            max_input_tokens=args.llm_window,
+        )
+    else:
+        answerer = SpanExtractiveQA()
+    print(f"[answerer] {answerer.description}", flush=True)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -974,6 +1061,7 @@ def main() -> None:
             ds_name,
             limit=args.limit,
             token_counter=token_counter,
+            answerer=answerer,
             verbose=args.verbose,
             strict=strict,
         )
@@ -991,7 +1079,7 @@ def main() -> None:
 
     # --- Comparison table ---
     comparison_md = produce_comparison_table(
-        per_dataset_metrics, combined_metrics, token_counter
+        per_dataset_metrics, combined_metrics, token_counter, answerer
     )
     (output_dir / "comparison_table.md").write_text(comparison_md, encoding="utf-8")
     print("[output] comparison_table.md")
@@ -1024,7 +1112,7 @@ def main() -> None:
     print(f"[output] failure_analysis.json ({len(failure_samples)} samples)")
 
     # --- Summary ---
-    summary = produce_summary(combined_metrics, token_counter)
+    summary = produce_summary(combined_metrics, token_counter, answerer)
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
@@ -1049,10 +1137,7 @@ def main() -> None:
         f"  CKE N=12  — EM: {c_em:.4f}  " f"F1: {c_f1:.4f}  Median tokens: {c_tok:.0f}"
     )
     print(f"  Prompt tokens counted by {token_counter.description}.")
-    print(
-        "  Answers on every arm come from SpanExtractiveQA, a lexical span "
-        "baseline, not a language model."
-    )
+    print(f"  Answers on every arm come from {answerer.description}.")
     print("  No success criterion is evaluated: these figures cannot support one.")
     print("=" * 60)
 
@@ -1065,6 +1150,7 @@ def main() -> None:
                 ds_name,
                 limit=args.limit,
                 token_counter=token_counter,
+                answerer=answerer,
                 verbose=args.verbose,
                 strict=strict,
             )

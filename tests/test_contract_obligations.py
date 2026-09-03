@@ -79,6 +79,7 @@ def _cases(tmp: pathlib.Path):
     from cke.entity_resolution.entity_resolver import EntityResolver
     from cke.evaluation.ablation_runner import AblationRunner
     from cke.evaluation.token_counter import TokenCounter
+    from cke.evaluation.llm_qa import LLMAnswerer
     from cke.extractor.coreference_resolver import CoreferenceResolver
     from cke.extractor.llm_extractor import LLMExtractor
     from cke.graph.graph_store import GraphStore
@@ -167,6 +168,13 @@ def _cases(tmp: pathlib.Path):
             # which needs no network and no uninstall.
             "TokenCounter",
             lambda s: TokenCounter(encoding="no_such_encoding_xyz", strict=s),
+            None,
+        ),
+        (
+            # The api backend with the key explicitly absent: no network, no
+            # download, and the exact state a strict benchmark must refuse in.
+            "LLMAnswerer",
+            lambda s: LLMAnswerer(backend="api", api_key=None, strict=s),
             None,
         ),
     ]
