@@ -14,8 +14,10 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-#: Every module the list has ever held. Raise it when the list grows; never
-#: lower it.
+#: The list as it stands. A PR that adds a module adds it here in the same
+#: change, so the floor moves with the list and a later removal is caught;
+#: a subset check would let an addition slip in unrecorded and out again
+#: unnoticed. Never remove an entry.
 FLOOR = {
     "cke/models.py",
     "cke/pipeline/types.py",
@@ -29,11 +31,16 @@ def _mypy_config() -> dict:
         return tomllib.load(handle)["tool"]["mypy"]
 
 
-def test_the_checked_modules_include_everything_ever_checked():
+def test_the_checked_modules_are_exactly_the_recorded_floor():
     listed = set(_mypy_config()["files"])
 
-    missing = FLOOR - listed
-    assert not missing, f"the mypy list was shortened; dropped: {sorted(missing)}"
+    dropped = FLOOR - listed
+    assert not dropped, f"the mypy list was shortened; dropped: {sorted(dropped)}"
+    added = listed - FLOOR
+    assert not added, (
+        f"the mypy list grew by {sorted(added)}; add them to FLOOR in this "
+        "test so the ratchet records them"
+    )
 
 
 def test_every_listed_module_exists():
