@@ -62,6 +62,17 @@ _APPOSITIVE_CLOSE = re.compile(
     r",\s+(?:is|was|are|were|has|have|had|and|but|which|who|that)\b", re.I
 )
 
+#: Where a coordinated predicate begins inside an object. "was directed by
+#: Alice and produced by Bob" gave the agent "Alice and produced": the agent
+#: capture is unbounded and the appositive cut fires only after a comma. A
+#: coordinator followed by a participle and its preposition is a second
+#: predicate, not part of the first one's agent. What follows it is still not
+#: extracted — the second fact needs the subject reused, which this does not
+#: do — but no entity is invented for it.
+_COORDINATED_PREDICATE = re.compile(
+    r"\s+(?:and|or|but)\s+\w{3,}ed\s+(?:by|in|on|at)\b", re.I
+)
+
 #: An object that reduces to one of these carries no entity.
 _EMPTY_OBJECTS = frozenset(
     {"a", "an", "the", "it", "its", "this", "that", "these", "those", ""}
@@ -126,7 +137,13 @@ class RuleExtractor:
         # Active transitive, still named outright: no frame identifies a
         # transitive verb without a parser.
         (re.compile(r"(?P<s>[^.]+?)\s+uses\s+(?P<o>[^.]+)", re.I), "uses"),
-        (re.compile(r"(?P<s>[^.]+?)\s+develops?\s+(?P<o>[^.]+)", re.I), "develops"),
+        # Named outright, so its label is fixed rather than read off the verb:
+        # tense would otherwise split one relation into "develops" and
+        # "developed", and the graph is keyed on the latter.
+        (
+            re.compile(r"(?P<s>[^.]+?)\s+develop(?:s|ed)?\s+(?P<o>[^.]+)", re.I),
+            "developed",
+        ),
     )
 
     def extract(self, text: str) -> list[Statement]:
@@ -205,10 +222,21 @@ class RuleExtractor:
         cleaned = self._clean(token).strip("\"'()[]")
         cleaned = _LEADING_DETERMINERS.sub("", cleaned)
 
-        for closer in (_MODIFIER_BOUNDARY, _APPOSITIVE_CLOSE):
-            cut = closer.search(cleaned)
-            if cut:
-                cleaned = cleaned[: cut.start()]
+        # The object ends at the earliest boundary of any kind. Applied one
+        # after another instead, the modifier cut at " by " removed the very
+        # text the coordinated-predicate cut needed to recognise, so "Alice and
+        # produced by Bob" lost "by Bob" first and kept "Alice and produced".
+        cuts = [
+            match.start()
+            for closer in (
+                _MODIFIER_BOUNDARY,
+                _APPOSITIVE_CLOSE,
+                _COORDINATED_PREDICATE,
+            )
+            if (match := closer.search(cleaned))
+        ]
+        if cuts:
+            cleaned = cleaned[: min(cuts)]
 
         cleaned = self._truncate_on_word_boundary(cleaned)
         return _LEADING_DETERMINERS.sub("", cleaned).strip(" ,;")

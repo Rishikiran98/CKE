@@ -411,3 +411,38 @@ def test_an_object_stops_where_an_appositive_closes():
 
     assert [s.object for s in closes] == ["Istanbul"]
     assert [s.object for s in keeps] == ["Laleli, Fatih, Istanbul"]
+
+
+def test_rule_extractor_still_reads_the_past_tense_of_developed():
+    """A regression from the frames commit: the pattern became "develops?"
+    and "Salvatore developed Redis" — the form every graph example uses —
+    yielded nothing. The label stays "developed" whatever the tense, because
+    the graph is keyed on it and one relation must not split by inflection.
+    """
+    extractor = RuleExtractor()
+
+    # Each tense on its own. Feeding both in one text let a pattern that
+    # only read the present tense pass, because the label is fixed and the
+    # set of triples came out identical either way.
+    past = extractor.extract("Salvatore developed Redis.")
+    present = extractor.extract("Salvatore develops Redis.")
+
+    assert [(s.subject, s.relation, s.object) for s in past] == [
+        ("Salvatore", "developed", "Redis")
+    ]
+    assert [(s.subject, s.relation, s.object) for s in present] == [
+        ("Salvatore", "developed", "Redis")
+    ]
+
+
+def test_a_passive_agent_stops_before_a_coordinated_predicate():
+    """ "directed by Alice and produced by Bob" must not invent "Alice and
+    produced". Bob's fact is not recovered here; what matters is that no
+    entity is made up in its place."""
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        "The film was directed by Alice and produced by Bob."
+    )
+
+    assert [(s.relation, s.object) for s in statements] == [("directed_by", "Alice")]
