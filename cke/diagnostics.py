@@ -174,10 +174,17 @@ class DegradationMixin:
                 f"with strict=False to accept degraded behaviour."
             )
 
-        self.degraded = True
-        # Keep every reason, not just the last one.
+        # Keep every distinct reason, but never repeat one. A degradation
+        # reached from inside a loop would otherwise emit a warning per
+        # iteration and grow degraded_reason quadratically.
         existing = getattr(self, "degraded_reason", "")
-        self.degraded_reason = f"{existing}; {reason}" if existing else reason
+        reasons = existing.split("; ") if existing else []
+        if reason in reasons:
+            return
+
+        self.degraded = True
+        reasons.append(reason)
+        self.degraded_reason = "; ".join(reasons)
         logger.warning("%s is running degraded: %s", component, reason)
         record_degradation(component, reason)
 

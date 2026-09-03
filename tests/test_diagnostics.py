@@ -157,3 +157,39 @@ def test_report_is_json_serialisable():
     assert (
         json.loads(json.dumps(payload))["degradations"][0]["component"] == "Component"
     )
+
+
+def test_a_repeated_reason_is_recorded_once(caplog):
+    """A degradation reached from inside a loop must not repeat.
+
+    _fuzzy_score ran once per candidate entity, so an identical reason was
+    logged per iteration and appended to degraded_reason each time, growing it
+    quadratically.
+    """
+
+    class Looping(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+
+        def work(self, n):
+            for _ in range(n):
+                self._degrade("the same cause every time")
+
+    with caplog.at_level(logging.WARNING):
+        component = Looping()
+        component.work(50)
+
+    assert component.degraded_reason == "the same cause every time"
+    assert len(caplog.records) == 1
+    assert len(environment_report().degradations) == 1
+
+
+def test_distinct_reasons_are_still_all_kept():
+    class Varied(DegradationMixin):
+        def __init__(self):
+            self._init_degradation(False)
+            self._degrade("first")
+            self._degrade("second")
+            self._degrade("first")
+
+    assert Varied().degraded_reason == "first; second"

@@ -88,6 +88,27 @@ def create_app(graph_engine: KnowledgeGraphEngine | None = None):
     return app
 
 
+#: The module-level ASGI application, built on first access to ``app``.
+#: Cached so that repeated access returns the same object, as it did when the
+#: module built it eagerly: routes, middleware and state registered on one
+#: access must still be there on the next.
+_APP = None
+
+
+def get_app():
+    """Return the module-level ASGI application, building it once."""
+    global _APP
+    if _APP is None:
+        _APP = create_app()
+    return _APP
+
+
+def reset_app() -> None:
+    """Discard the cached application. For tests."""
+    global _APP
+    _APP = None
+
+
 def __getattr__(name: str):
     """Build the ASGI app on first attribute access, not at import time.
 
@@ -95,8 +116,15 @@ def __getattr__(name: str):
     importable without fastapi installed (PEP 562).
     """
     if name == "app":
-        return create_app()
+        return get_app()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["QueryRequest", "IngestRequest", "MissingDependencyError", "create_app"]
+__all__ = [
+    "IngestRequest",
+    "MissingDependencyError",
+    "QueryRequest",
+    "create_app",
+    "get_app",
+    "reset_app",
+]

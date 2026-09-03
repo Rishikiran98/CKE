@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from cke.diagnostics import declare_degradation, environment_report
 from cke.entity_resolution.entity_resolver import EntityResolver
@@ -375,6 +377,23 @@ def _load_factory(path: str):
     return getattr(module, function_name)
 
 
+def _accepts_strict(factory: Callable[..., Any]) -> bool:
+    """Return True if *factory* takes a ``strict`` keyword argument."""
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        # Some callables expose no inspectable signature.
+        return False
+
+    parameters = signature.parameters
+    if "strict" in parameters:
+        return parameters["strict"].kind is not inspect.Parameter.POSITIONAL_ONLY
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -398,10 +417,13 @@ def main() -> int:
     strict = not args.allow_degraded
 
     factory = _load_factory(args.factory)
-    try:
+    # Inspect the signature rather than calling and catching TypeError: a
+    # TypeError raised *inside* a factory that does accept strict would
+    # otherwise be mistaken for an unsupported keyword, re-running the factory
+    # non-strict and hiding the original failure.
+    if _accepts_strict(factory):
         orchestrator = factory(strict=strict)
-    except TypeError:
-        # A user-supplied factory need not accept the keyword.
+    else:
         orchestrator = factory()
     cases = get_default_golden_set()
     evaluator = E2EEvaluator(orchestrator)

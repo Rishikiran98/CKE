@@ -134,6 +134,17 @@ class EntityResolver(DegradationMixin):
         self._embedding_model: Any | None = _SENTINEL
         self._embedding_cache: dict[str, list[float]] = {}
 
+        if fuzz is None:
+            # Known at construction, so declare it here rather than from
+            # inside the per-candidate scoring loop.
+            self._degrade(
+                "rapidfuzz is not installed, so fuzzy matching uses "
+                "difflib.SequenceMatcher, a different algorithm whose ratios "
+                "are not comparable to rapidfuzz's. The fuzzy threshold "
+                f"({self.fuzzy_threshold}) was not calibrated for it. Install "
+                "it with `pip install rapidfuzz`"
+            )
+
         if aliases:
             canonical_to_aliases: dict[str, list[str]] = {}
             for alias, canonical in aliases.items():
@@ -470,15 +481,10 @@ class EntityResolver(DegradationMixin):
     # ------------------------------------------------------------------
 
     def _fuzzy_score(self, left: str, right: str) -> float:
+        # The rapidfuzz degradation is declared once in __init__, not here:
+        # this runs once per candidate entity.
         if fuzz is not None:
             return float(fuzz.ratio(left, right) / 100.0)
-        self._degrade(
-            "rapidfuzz is not installed, so fuzzy matching uses "
-            "difflib.SequenceMatcher, a different algorithm whose ratios are "
-            f"not comparable to rapidfuzz's. The fuzzy threshold "
-            f"({self.fuzzy_threshold}) was not calibrated for it. Install it "
-            "with `pip install rapidfuzz`"
-        )
         return SequenceMatcher(a=left, b=right).ratio()
 
     def _best_fuzzy(

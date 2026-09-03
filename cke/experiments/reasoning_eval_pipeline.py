@@ -28,8 +28,11 @@ class DatasetMetrics:
 class ReasoningEvalPipeline:
     """Evaluates path reasoning quality and runtime behavior across datasets."""
 
-    def __init__(self, reasoner: PathReasoner | None = None) -> None:
-        self.reasoner = reasoner or PathReasoner()
+    def __init__(
+        self, reasoner: PathReasoner | None = None, strict: bool = True
+    ) -> None:
+        self.strict = bool(strict)
+        self.reasoner = reasoner or PathReasoner(strict=strict)
 
     def evaluate_dataset(
         self,
@@ -151,11 +154,19 @@ def main() -> None:
     parser.add_argument("--locomo", required=True, help="Path to LoCoMo JSON")
     parser.add_argument("--max-samples", type=int, default=100)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit components to run degraded. Off by default: a reasoning "
+            "benchmark on a hashed embedder is not a measurement."
+        ),
+    )
     args = parser.parse_args()
 
     print(environment_report().render(), flush=True)
 
-    pipeline = ReasoningEvalPipeline()
+    pipeline = ReasoningEvalPipeline(strict=not args.allow_degraded)
     metrics = pipeline.evaluate(
         hotpot_path=args.hotpot,
         msmarco_path=args.msmarco,

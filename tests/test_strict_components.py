@@ -326,3 +326,66 @@ def test_entity_resolver_strict_refuses_hashed_similarity(monkeypatch):
 
     with pytest.raises(DegradedComponentError):
         module.EntityResolver(strict=True)._embed("anything")
+
+
+# ---------------------------------------------------------------------------
+# Evaluation entry points
+# ---------------------------------------------------------------------------
+
+
+def test_reasoning_eval_pipeline_is_strict_by_default(monkeypatch):
+    """It printed the environment report, then ran on a hashed embedder anyway."""
+    from cke.experiments import reasoning_eval_pipeline as module
+    from cke.retrieval import embedding_model as embed_module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", None)
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+
+    with pytest.raises(DegradedComponentError):
+        module.ReasoningEvalPipeline()
+
+    # The opt-out still works.
+    assert module.ReasoningEvalPipeline(strict=False) is not None
+
+
+def test_run_eval_does_not_retry_a_factory_that_raises_internally():
+    """A TypeError from inside a factory must not be read as an unsupported kwarg."""
+    from cke.evaluation.run_eval import _accepts_strict
+
+    def takes_strict(strict=False):
+        raise TypeError("a real bug inside the factory")
+
+    def takes_nothing():
+        return "orchestrator"
+
+    def takes_kwargs(**kwargs):
+        return "orchestrator"
+
+    assert _accepts_strict(takes_strict) is True
+    assert _accepts_strict(takes_nothing) is False
+    assert _accepts_strict(takes_kwargs) is True
+    # No inspectable signature: fall back to calling without the keyword.
+    assert _accepts_strict(len) is False
+
+
+def test_entity_resolver_declares_the_fuzzy_fallback_once(monkeypatch):
+    """The declaration used to run once per candidate entity."""
+    from cke.entity_resolution import entity_resolver as module
+
+    monkeypatch.setattr(module, "fuzz", None)
+
+    resolver = module.EntityResolver()
+    before = len(resolver.degraded_reason)
+    resolver._best_fuzzy("Entity 7", [f"Entity {i}" for i in range(60)])
+
+    assert len(resolver.degraded_reason) == before
+    assert "rapidfuzz" in resolver.degraded_reason
+
+
+def test_entity_resolver_strict_refuses_without_rapidfuzz(monkeypatch):
+    from cke.entity_resolution import entity_resolver as module
+
+    monkeypatch.setattr(module, "fuzz", None)
+
+    with pytest.raises(DegradedComponentError, match="rapidfuzz"):
+        module.EntityResolver(strict=True)
