@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from cke.graph.domain_classifier import DomainClassifier
+from cke.diagnostics import require_strict_component
+from cke.graph.domain_classifier import UNCLASSIFIED_DOMAIN, DomainClassifier
 from cke.graph.domain_registry import DomainRegistry
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.entity_resolution.entity_resolver import EntityResolver
@@ -27,12 +28,20 @@ class QueryRouter:
     ):
         self.strict = bool(strict)
         self.graph_engine = graph_engine
+        require_strict_component(
+            type(self).__name__, domain_classifier, "domain classifier", self.strict
+        )
         self.entity_resolver = EntityResolver(graph_engine=graph_engine, strict=strict)
         self.intent_classifier = IntentClassifier()
-        self.domain_classifier = domain_classifier or DomainClassifier()
+        # strict reaches every component under this one that can degrade.
+        # DomainClassifier and ConfidenceModel were constructed without it, so
+        # a run launched strict still degraded: the classifier labelled every
+        # unmatched query "programming" and the benchmark completed, exit 0,
+        # printing metrics its own degradation summary called invalid.
+        self.domain_classifier = domain_classifier or DomainClassifier(strict=strict)
         self.domain_registry = domain_registry
         self.query_decomposer = QueryDecomposer()
-        self.confidence_model = ConfidenceModel()
+        self.confidence_model = ConfidenceModel(strict=strict)
 
     def detect_entities(
         self,
@@ -294,6 +303,19 @@ class QueryRouter:
 
     def routing_policy_for_query(self, query: str):
         domain = self.domain_classifier.classify_entity(query)
+
+        # A domain that was never identified carries no policy. Treating it as
+        # "evolving" applied a real domain's retrieval adjustment to a query
+        # nothing was known about.
+        if domain == UNCLASSIFIED_DOMAIN:
+            return {
+                "domain": domain,
+                "state": "unknown",
+                "prefer_cached": False,
+                "retrieval_depth_delta": 0,
+                "prioritize_recent": False,
+            }
+
         state = (
             self.domain_registry.get_domain_state(domain)
             if self.domain_registry

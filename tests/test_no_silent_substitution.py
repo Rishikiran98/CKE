@@ -108,15 +108,34 @@ def test_confidence_model_declares_substituted_features():
         ConfidenceModel(strict=True).predict(Statement("A", "uses", "B"))
 
 
-def test_domain_classifier_declares_an_unclassifiable_entity():
-    from cke.graph.domain_classifier import DomainClassifier
+def test_domain_classifier_never_labels_the_unclassifiable_with_a_real_domain():
+    """The substitution is gone, so there is no longer one to declare.
 
-    DomainClassifier().classify_entity("zzzqqq unclassifiable")
+    This used to return "programming" for anything it could not place, and
+    declare a degradation to say so. Declaring it was an improvement on
+    silence, but the label was still a real domain, indistinguishable
+    downstream from a match, and it made strict mode unusable on any corpus
+    outside the taxonomy: a benchmark of encyclopedic questions matched no
+    keyword, so a strict run could not reach its first result.
 
-    assert any("no keyword matched" in r for r in _reasons())
+    Saying "unclassified" substitutes nothing, so it is an answer rather than
+    a degradation, and the assertion is the stronger one — not that the lie is
+    announced, but that it is not told.
+    """
+    from cke.graph.domain_classifier import (
+        UNCLASSIFIED_DOMAIN,
+        DomainClassifier,
+    )
 
-    with pytest.raises(DegradedComponentError):
-        DomainClassifier(strict=True).classify_entity("zzzqqq unclassifiable")
+    classifier = DomainClassifier(strict=True)
+    label = classifier.classify_entity("zzzqqq unclassifiable")
+
+    assert label == UNCLASSIFIED_DOMAIN
+    assert label not in DomainClassifier.DOMAIN_KEYWORDS
+    assert classifier.degraded is False
+
+    # A query it can place is still placed.
+    assert classifier.classify_entity("redis database index") == "databases"
 
 
 def test_locomo_loader_declares_an_unrecognised_record():

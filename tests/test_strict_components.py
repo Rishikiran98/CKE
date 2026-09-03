@@ -661,3 +661,70 @@ def test_every_component_in_the_contract_accepts_strict():
     assert not missing, "components that can degrade but take no strict: " + ", ".join(
         missing
     )
+
+
+# ----------------------------------------------------------------------
+# Injected components must declare themselves strict
+# ----------------------------------------------------------------------
+
+
+def _injection_cases():
+    """Each strict wrapper that accepts a prebuilt component, and one to give it.
+
+    A wrapper constructing its own dependency passes strict down. A wrapper
+    handed one cannot: the object was built elsewhere and may already have
+    degraded, so a strict run has to refuse it rather than inherit its
+    fallbacks while still calling itself strict.
+    """
+    from cke.entity_resolution.entity_resolver import EntityResolver
+    from cke.graph.domain_classifier import DomainClassifier
+    from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+    from cke.retrieval.graph_retriever import GraphRetriever
+    from cke.retrieval.retriever import GraphRetriever as SimpleGraphRetriever
+    from cke.router.router import QueryRouter
+
+    graph = KnowledgeGraphEngine()
+    return [
+        (
+            "SimpleGraphRetriever.router",
+            lambda strict_dep, strict: SimpleGraphRetriever(
+                graph, router=QueryRouter(strict=strict_dep), strict=strict
+            ),
+        ),
+        (
+            "GraphRetriever.entity_resolver",
+            lambda strict_dep, strict: GraphRetriever(
+                graph,
+                entity_resolver=EntityResolver(strict=strict_dep),
+                strict=strict,
+            ),
+        ),
+        (
+            "QueryRouter.domain_classifier",
+            lambda strict_dep, strict: QueryRouter(
+                domain_classifier=DomainClassifier(strict=strict_dep), strict=strict
+            ),
+        ),
+    ]
+
+
+@pytest.mark.parametrize("label", [case[0] for case in _injection_cases()])
+def test_a_strict_wrapper_refuses_a_non_strict_injection(label):
+    build = next(build for name, build in _injection_cases() if name == label)
+
+    with pytest.raises(DegradedComponentError):
+        build(False, True)
+
+
+@pytest.mark.parametrize("label", [case[0] for case in _injection_cases()])
+def test_a_strict_wrapper_accepts_a_strict_injection(label):
+    build = next(build for name, build in _injection_cases() if name == label)
+
+    assert build(True, True) is not None
+
+
+@pytest.mark.parametrize("label", [case[0] for case in _injection_cases()])
+def test_a_non_strict_wrapper_accepts_anything(label):
+    build = next(build for name, build in _injection_cases() if name == label)
+
+    assert build(False, False) is not None

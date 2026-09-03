@@ -7,6 +7,7 @@ import re
 from heapq import heappop, heappush, nlargest
 from itertools import count
 
+from cke.diagnostics import require_strict_component
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
@@ -38,6 +39,9 @@ class GraphRetriever:
     ) -> None:
         self.strict = bool(strict)
         self.graph_engine = graph_engine
+        require_strict_component(
+            type(self).__name__, entity_resolver, "entity resolver", self.strict
+        )
         self.entity_resolver = entity_resolver or EntityResolver(strict=strict)
         self.monitor = monitor
         self.path_ranker = path_ranker or PathRankingModel()

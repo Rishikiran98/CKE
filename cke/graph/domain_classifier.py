@@ -9,7 +9,15 @@ from cke.graph.assertion import Assertion
 
 
 #: Label applied when nothing matched. Not a classification.
-_UNCLASSIFIED_DOMAIN = "programming"
+#: Returned when nothing identifies an entity's domain. Deliberately not a
+#: member of DOMAIN_KEYWORDS: this used to be "programming", a real domain, so
+#: a caller could not tell a classification from a shrug, and every query about
+#: a film or a mosque was routed as though it were about software.
+_UNCLASSIFIED_DOMAIN = "unclassified"
+
+#: Public name for the sentinel, so a caller can recognise a shrug
+#: without matching on a string literal of its own.
+UNCLASSIFIED_DOMAIN = _UNCLASSIFIED_DOMAIN
 
 
 class DomainClassifier(DegradationMixin):
@@ -91,26 +99,27 @@ class DomainClassifier(DegradationMixin):
         return None
 
     def classify_entity(self, entity_name: str) -> str:
-        """Classify an entity, or declare that it could not be classified.
+        """Classify an entity, or say that it could not be classified.
 
-        No keyword matched and no embedding hint is available, so the result
-        used to be a real domain label indistinguishable from a match.
+        Returning _UNCLASSIFIED_DOMAIN is an answer, not a degradation. The
+        contract exists to stop a substituted value passing for a measured
+        one, and this substitutes nothing: the caller is told plainly that no
+        domain was identified and can decline to act on it.
+
+        It used to return "programming" — a real domain — and declare a
+        degradation. That made the label a lie and made strict mode unusable
+        on any corpus outside this taxonomy: a benchmark of encyclopedic
+        questions matched no keyword at all, so a strict run could not reach
+        its first result. The taxonomy covering only software and two sciences
+        is a limit of this classifier, not a fault in the data, and a limit is
+        reported rather than declared broken.
         """
         scores = self._keyword_score(entity_name)
         best_domain, best_score = max(scores.items(), key=lambda item: item[1])
         if best_score > 0:
             return best_domain
 
-        hint = self._embedding_hint(entity_name)
-        if hint:
-            return hint
-
-        self._degrade(
-            f"no keyword matched {entity_name!r} and no embedding hint is "
-            f"available, so it is labelled {_UNCLASSIFIED_DOMAIN!r}, which is "
-            "indistinguishable downstream from a real classification"
-        )
-        return _UNCLASSIFIED_DOMAIN
+        return self._embedding_hint(entity_name) or _UNCLASSIFIED_DOMAIN
 
     def classify_assertion(self, assertion: Assertion) -> str:
         content = " ".join(

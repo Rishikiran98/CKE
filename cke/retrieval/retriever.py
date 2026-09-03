@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from typing import List
 
+from cke.diagnostics import require_strict_component
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 from cke.router.router import QueryRouter
@@ -17,9 +18,15 @@ class GraphRetriever:
         self,
         graph_engine: KnowledgeGraphEngine,
         router: QueryRouter | None = None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.graph_engine = graph_engine
-        self.router = router or QueryRouter()
+        # A supplied router is not covered by this class's strict flag: it was
+        # built elsewhere and may already have degraded. Constructing one here
+        # honours strict, accepting one blindly did not.
+        require_strict_component(type(self).__name__, router, "router", self.strict)
+        self.router = router or QueryRouter(strict=strict)
 
     def retrieve(self, query: str, max_depth: int = 2) -> List[Statement]:
         policy = self.router.routing_policy_for_query(query)
