@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from cke.diagnostics import environment_report
 from cke.datasets.registry import DATASET_REGISTRY
 from cke.models import Statement
 from cke.reasoning.path_reasoner import PathReasoner
@@ -151,6 +152,8 @@ def main() -> None:
     parser.add_argument("--max-samples", type=int, default=100)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
+
+    print(environment_report().render(), flush=True)
 
     pipeline = ReasoningEvalPipeline()
     metrics = pipeline.evaluate(

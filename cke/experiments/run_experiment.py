@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
+from cke.diagnostics import declare_degradation, environment_report
 from cke.extractor.extractor import BaseExtractor, RuleBasedExtractor
 from cke.extractor.llm_extractor import LLMExtractor
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -26,8 +27,29 @@ class QAItem:
     answer: str
 
 
-def load_dataset(path: Path | None = None) -> List[QAItem]:
-    if path and path.exists():
+#: One hand-written item, for smoke-testing that the pipeline runs at all.
+#: Accuracy over it is not a result; ``--dataset`` is required to report one.
+_SMOKE_TEST_ITEM = QAItem(
+    question="What protocol does Redis pub/sub use?",
+    context=("Redis supports PubSub messaging. PubSub implemented_via RESP protocol."),
+    answer="RESP",
+)
+
+
+def load_dataset(path: Path | None = None, strict: bool = True) -> List[QAItem]:
+    """Load an evaluation dataset, or refuse.
+
+    Previously a missing or nonexistent ``--dataset`` silently substituted a
+    single hand-written item and the script went on to print accuracy figures
+    over it. That is one authored example scoring itself.
+    """
+    if path is not None and not path.exists():
+        raise FileNotFoundError(
+            f"dataset {path} does not exist. This script does not substitute "
+            "built-in data for a dataset you asked for."
+        )
+
+    if path is not None:
         raw = json.loads(path.read_text())
         return [
             QAItem(
@@ -38,41 +60,38 @@ def load_dataset(path: Path | None = None) -> List[QAItem]:
             for item in raw
         ]
 
-    # Tiny built-in sample for local prototype runs.
-    return [
-        QAItem(
-            question="What protocol does Redis pub/sub use?",
-            context=(
-                "Redis supports PubSub messaging. "
-                "PubSub implemented_via RESP protocol."
-            ),
-            answer="RESP",
-        ),
-    ]
+    declare_degradation(
+        "run_experiment.load_dataset",
+        "no --dataset was given, so the run uses a single hand-written smoke "
+        "test item. Accuracy over one authored example is not a measurement",
+        strict=strict,
+    )
+    return [_SMOKE_TEST_ITEM]
 
 
-def build_extractor(name: str) -> BaseExtractor:
+def build_extractor(name: str, strict: bool = False) -> BaseExtractor:
     if name == "llm":
-        return LLMExtractor()
+        return LLMExtractor(strict=strict)
     return RuleBasedExtractor()
 
 
-def build_reasoner(name: str):
+def build_reasoner(name: str, strict: bool = False):
     if name == "llm":
-        return LLMReasoner()
+        return LLMReasoner(strict=strict)
     if name == "template":
         return TemplateReasoner()
-    return PathReasoner()
+    return PathReasoner(strict=strict)
 
 
 def evaluate(
     items: Iterable[QAItem],
     extractor_name: str = "rule",
     reasoner_name: str = "template",
+    strict: bool = True,
 ) -> dict:
-    extractor = build_extractor(extractor_name)
-    reasoner = build_reasoner(reasoner_name)
-    rag = RAGBaseline()
+    extractor = build_extractor(extractor_name, strict=strict)
+    reasoner = build_reasoner(reasoner_name, strict=strict)
+    rag = RAGBaseline(strict=strict)
 
     items = list(items)
     rag.build_index([item.context for item in items])
@@ -85,7 +104,7 @@ def evaluate(
     rag_latency = 0.0
 
     for item in items:
-        graph = KnowledgeGraphEngine()
+        graph = KnowledgeGraphEngine(strict=strict)
         graph.add_statements(extractor.extract(item.context))
         retriever = GraphRetriever(graph)
 
@@ -127,10 +146,22 @@ def main() -> None:
     parser.add_argument(
         "--reasoner", choices=["template", "path", "llm"], default="path"
     )
+    parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit components to run degraded. Off by default: a run whose "
+            "extractor fell back to regexes is not a measurement."
+        ),
+    )
     args = parser.parse_args()
 
+    print(environment_report().render(), flush=True)
+    strict = not args.allow_degraded
+
     metrics = evaluate(
-        load_dataset(args.dataset),
+        load_dataset(args.dataset, strict=strict),
+        strict=strict,
         extractor_name=args.extractor,
         reasoner_name=args.reasoner,
     )
