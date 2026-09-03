@@ -221,3 +221,100 @@ def test_validate_qualifiers_rejects_invalid_structures():
     assert validate_qualifiers({"modality": "invalid_value"}) is False
     assert validate_qualifiers({"temporal": {"bad_key": "v"}}) is False
     assert validate_qualifiers({"condition": "not_a_dict"}) is False
+
+
+def test_rule_extractor_drops_a_parenthetical_from_a_subject():
+    """An aside is never part of the name a later sentence uses.
+
+    Encyclopedic prose is full of them, and carrying one into the subject
+    makes an entity nothing else in the graph can match.
+    """
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        'The Laleli Mosque (Turkish: "Laleli Camii") is located in Istanbul.'
+    )
+
+    assert {s.subject for s in statements} == {"The Laleli Mosque"}
+
+
+def test_rule_extractor_cuts_a_subject_at_an_internal_copula():
+    """A subject holding a finite copula is a clause, not a name.
+
+    The subject group is non-greedy and starts at the sentence, so the
+    located_in pattern received everything up to "located in" — the entity
+    plus a whole predicate.
+    """
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        "The Sultan Ahmed Mosque is a historic mosque located in Istanbul."
+    )
+    located = [s for s in statements if s.relation == "located_in"]
+
+    assert [s.subject for s in located] == ["The Sultan Ahmed Mosque"]
+
+
+def test_rule_extractor_reduces_a_subject_through_repeated_auxiliaries():
+    extractor = RuleExtractor()
+
+    statements = extractor.extract("Redis has been located in memory.")
+
+    assert {s.subject for s in statements} == {"Redis"}
+
+
+def test_rule_extractor_does_not_cut_a_subject_at_a_modifier_boundary():
+    """The object's rule would damage a name, and subjects here are names.
+
+    An object is a description, so cutting it at "from" or "for" leaves its
+    head noun. Applied to a subject it turns "Deliver Us from Evil" into
+    "Deliver Us" and "A Kiss for Corliss" into "A Kiss".
+    """
+    extractor = RuleExtractor()
+
+    subjects = {
+        s.subject
+        for s in extractor.extract(
+            "Deliver Us from Evil is a 2014 film. "
+            "A Kiss for Corliss is a 1949 comedy."
+        )
+    }
+
+    assert subjects == {"Deliver Us from Evil", "A Kiss for Corliss"}
+
+
+def test_rule_extractor_keeps_a_leading_determiner_on_a_subject():
+    """Stripping it would rename a title, and nothing needs it stripped.
+
+    "The Laleli Mosque" and "Laleli Mosque" are joined by the resolver's
+    containment rung, so the graph does not need the extractor to guess which
+    of the two a title meant.
+    """
+    extractor = RuleExtractor()
+
+    statements = extractor.extract("The Divide trilogy is a series of novels.")
+
+    assert {s.subject for s in statements} == {"The Divide trilogy"}
+
+
+def test_rule_extractor_rejects_a_subject_that_is_only_an_aside():
+    """Nothing is left to name, so there is no statement to make."""
+    extractor = RuleExtractor()
+
+    assert extractor.extract("(female) is a category.") == []
+
+
+def test_rule_extractor_rejects_a_subject_that_is_all_predicate():
+    """A cut leaving nothing means there was no entity to find.
+
+    An aside opening the subject leaves the copula first once it is removed,
+    so the cut consumes the whole string. Keeping the uncut text instead would
+    put an entity named "is a historic mosque" into the graph.
+    """
+    extractor = RuleExtractor()
+
+    statements = extractor.extract(
+        "(The Grand Mosque) is a historic mosque located in Istanbul."
+    )
+
+    assert [s.subject for s in statements] == []
