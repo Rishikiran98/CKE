@@ -34,6 +34,40 @@ MAY_USE_THE_NETWORK = {
     ),
 }
 
+#: tiktoken fetches an encoding's BPE file the first time it is asked for it,
+#: so a strict TokenCounter needs the network on a cold machine. These tests
+#: are about what a real tokenizer does — that its count is not a function of
+#: the whitespace word count, that it sees punctuation, that a literal control
+#: token in a document is counted rather than rejected — and a stub would only
+#: measure the stub. CI found them: they passed here on a warm tiktoken cache
+#: and were refused on the runner, which is the fragility the guard exists for.
+_TOKENIZER = (
+    "Needs the real cl100k_base encoding. The property under test is that a "
+    "tokenizer is not a word-count multiplier, which no stub can demonstrate."
+)
+MAY_USE_THE_NETWORK.update(
+    {
+        f"test_token_counter.py::{name}": _TOKENIZER
+        for name in (
+            "test_a_healthy_counter_is_not_degraded",
+            "test_the_count_is_not_a_function_of_the_word_count",
+            "test_punctuation_and_whitespace_are_counted",
+            "test_an_empty_string_is_zero_tokens",
+            "test_the_loaded_encoding_is_recorded_in_the_environment_report",
+            "test_a_special_token_literal_in_the_text_is_counted_not_rejected",
+        )
+    }
+)
+MAY_USE_THE_NETWORK.update(
+    {
+        f"test_benchmark_token_counting.py::{name}": _TOKENIZER
+        for name in (
+            "test_every_arm_counts_with_the_same_object",
+            "test_the_summary_names_the_counter_that_produced_its_figures",
+        )
+    }
+)
+
 #: Kept because it supplies an input the real router cannot be asked for.
 #: Every other router stub in this suite answered the routing question the
 #: orchestrator existed to ask, and has been replaced by the real QueryRouter.
@@ -46,21 +80,21 @@ def _test_files():
     return sorted(p for p in TESTS.glob("test_*.py"))
 
 
-def _marked_needs_model():
+def _marked_needs_download():
     found = set()
     for path in _test_files():
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.FunctionDef):
                 continue
             for decorator in node.decorator_list:
-                if "needs_model" in ast.unparse(decorator):
+                if "needs_download" in ast.unparse(decorator):
                     found.add(f"{path.name}::{node.name}")
     return found
 
 
 def test_the_network_marker_list_is_the_marker_list_in_the_files():
     """A test cannot grant itself network access without appearing here."""
-    assert _marked_needs_model() == set(MAY_USE_THE_NETWORK)
+    assert _marked_needs_download() == set(MAY_USE_THE_NETWORK)
 
 
 def test_every_exemption_states_why():

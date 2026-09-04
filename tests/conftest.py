@@ -7,8 +7,20 @@ real sentence-transformer, and they pass locally only because
 ``~/.cache/huggingface`` is warm; on a cold runner they fetch about 90 MB, and
 an upstream outage turns the suite red for reasons that have nothing to do
 with the code. A test that legitimately needs a model must now say so with
-``@pytest.mark.needs_model``, and ``tests/test_test_hygiene.py`` holds that
+``@pytest.mark.needs_download``, and ``tests/test_test_hygiene.py`` holds that
 list to a named few. Everything else is refused at the socket.
+
+A warm cache defeats this guard: nothing opens a socket when the file is
+already on disk, so a test that needs a download passes here and is refused
+on a cold runner. That is how the tiktoken tests below were found — by CI,
+after this file was written. To reproduce a cold machine before pushing::
+
+    COLD=$(mktemp -d)
+    TIKTOKEN_CACHE_DIR=$COLD/tiktoken HF_HOME=$COLD/hf XDG_CACHE_HOME=$COLD \
+        pytest -m "not needs_download"
+
+which is what the "Prove no unmarked test needs a download" step in ci.yml
+runs.
 
 **The degradation registry.** ``cke.diagnostics`` keeps a process-wide record
 of what degraded and which models loaded. Tests that read it were cleaning up
@@ -48,7 +60,8 @@ class NetworkAccessInTest(RuntimeError):
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "needs_model: this test loads a real model and may use the network. "
+        "needs_download: this test loads a real model or tokenizer and may use "
+        "the network. "
         "Marked tests are listed in tests/test_test_hygiene.py.",
     )
 
@@ -69,7 +82,7 @@ def _clean_runtime_state(request):
 def _clean_model_caches(request):
     from cke.retrieval import embedding_model
 
-    if request.node.get_closest_marker("needs_model"):
+    if request.node.get_closest_marker("needs_download"):
         # Emptying the cache here would make each marked test download again.
         yield
         return
@@ -88,7 +101,7 @@ def _no_network(request, monkeypatch):
     This cannot reach a subprocess, so a test that shells out is on its
     honour; those are marked too, and named in the hygiene test.
     """
-    if request.node.get_closest_marker("needs_model"):
+    if request.node.get_closest_marker("needs_download"):
         return
 
     def _refuse(*args, **kwargs):
@@ -96,7 +109,7 @@ def _no_network(request, monkeypatch):
             "this test opened a network connection. A test that depends on a "
             "download is red whenever the other end is, and green only on a "
             "machine whose cache is already warm. If it genuinely needs a "
-            "real model, mark it @pytest.mark.needs_model and add it to "
+            "real model, mark it @pytest.mark.needs_download and add it to "
             "tests/test_test_hygiene.py; otherwise stub the component."
         )
 
@@ -151,7 +164,7 @@ class StubSentenceTransformer:
 def offline_embedder(monkeypatch):
     """Make a strict component constructible without reaching the Hub.
 
-    Request this rather than marking a test ``needs_model`` whenever the test
+    Request this rather than marking a test ``needs_download`` whenever the test
     is about strictness, plumbing or graph reasoning and the encoder is only
     in the way.
     """

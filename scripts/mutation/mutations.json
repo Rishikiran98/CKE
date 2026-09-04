@@ -302,7 +302,7 @@
     {
       "label": "the network guard stops refusing sockets",
       "path": "tests/conftest.py",
-      "old": "    if request.node.get_closest_marker(\"needs_model\"):\n        return\n\n    def _refuse(*args, **kwargs):",
+      "old": "    if request.node.get_closest_marker(\"needs_download\"):\n        return\n\n    def _refuse(*args, **kwargs):",
       "new": "    if True:\n        return\n\n    def _refuse(*args, **kwargs):",
       "tests": "tests/test_test_hygiene.py"
     },
@@ -310,7 +310,7 @@
       "label": "a test grants itself network access without declaring it",
       "path": "tests/test_orchestrator_pipeline_skeleton.py",
       "old": "def test_pipeline_skeleton_runs():",
-      "new": "@pytest.mark.needs_model\ndef test_pipeline_skeleton_runs():",
+      "new": "@pytest.mark.needs_download\ndef test_pipeline_skeleton_runs():",
       "tests": "tests/test_test_hygiene.py"
     },
     {
@@ -340,6 +340,13 @@
       "old": "        for entity in candidate_entities:\n            self.entity_resolver.register_alias(entity, entity)\n",
       "new": "",
       "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "the cold-cache step stops deselecting only the declared downloads",
+      "path": "tests/test_token_counter.py",
+      "old": "@pytest.mark.needs_download\ndef test_the_count_is_not_a_function_of_the_word_count(counter):",
+      "new": "def test_the_count_is_not_a_function_of_the_word_count(counter):",
+      "tests": "tests/test_test_hygiene.py"
     }
   ]
 }

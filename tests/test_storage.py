@@ -92,7 +92,7 @@ def test_knowledge_graph_engine_persists_and_reloads_from_sqlite(tmp_path: Path)
     assert [edge.object for edge in paths[0]] == ["PubSub", "RESP"]
 
 
-@pytest.mark.needs_model
+@pytest.mark.needs_download
 def test_demo_supports_db_path_end_to_end(tmp_path: Path):
     db_path = tmp_path / "demo.db"
     result = subprocess.run(

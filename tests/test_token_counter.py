@@ -24,16 +24,24 @@ def counter() -> TokenCounter:
     Constructed strict on purpose: if the tokenizer cannot be loaded, these
     tests fail loudly rather than passing against the estimate they exist to
     rule out.
+
+    tiktoken fetches the BPE file for an encoding the first time it is asked
+    for it, so every test taking this fixture is marked needs_download. They
+    are about what a real tokenizer does — that its count is not a function
+    of the word count, that it sees punctuation — and a stub would only
+    measure the stub.
     """
     return TokenCounter(strict=True)
 
 
+@pytest.mark.needs_download
 def test_a_healthy_counter_is_not_degraded(counter):
     assert counter.degraded is False
     assert counter.is_estimate is False
     assert counter.description == "tiktoken cl100k_base"
 
 
+@pytest.mark.needs_download
 def test_the_count_is_not_a_function_of_the_word_count(counter):
     """The property that separates a tokenizer from a multiplier.
 
@@ -51,12 +59,14 @@ def test_the_count_is_not_a_function_of_the_word_count(counter):
     assert counter.count(rare) > counter.count(common)
 
 
+@pytest.mark.needs_download
 def test_punctuation_and_whitespace_are_counted(counter):
     """A word count cannot see either."""
     assert counter.count("a,b,c,d,e,f") > 1
     assert counter.count("hello") >= 1
 
 
+@pytest.mark.needs_download
 def test_an_empty_string_is_zero_tokens(counter):
     assert counter.count("") == 0
 
@@ -110,6 +120,7 @@ def test_a_degraded_counter_still_returns_a_number(monkeypatch):
     assert "word count" in degraded.description
 
 
+@pytest.mark.needs_download
 def test_the_loaded_encoding_is_recorded_in_the_environment_report(counter):
     from cke.diagnostics import environment_report
 
@@ -117,6 +128,7 @@ def test_the_loaded_encoding_is_recorded_in_the_environment_report(counter):
     assert any(model.component == "TokenCounter" for model in loaded)
 
 
+@pytest.mark.needs_download
 def test_a_special_token_literal_in_the_text_is_counted_not_rejected(counter):
     """Dataset text is text, including text that looks like a control token.
 

@@ -88,11 +88,11 @@ files = [
 testpaths = ["tests"]
 addopts = "-q --cov --cov-report=term-missing --strict-markers --strict-config"
 # --strict-markers: a typo in a marker name is an error, not a silently
-# unregistered marker that applies to nothing. needs_model is the only marker
+# unregistered marker that applies to nothing. needs_download is the only marker
 # this suite defines and it gates the network guard, so a misspelling of it
 # would quietly grant network access.
 markers = [
-    "needs_model: loads a real model and may use the network",
+    "needs_download: loads a real model or tokenizer and may use the network",
 ]
 filterwarnings = [
     "error",
