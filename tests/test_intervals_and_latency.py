@@ -224,3 +224,56 @@ def test_the_timed_region_covers_building_the_arms_structure():
     start = rag.index("t0 = time.perf_counter()")
 
     assert "build_index" in rag[start:], "the index build must fall inside the clock"
+
+
+# ---------------------------------------------------------------------------
+# Every report, not just the one the change was written against
+# ---------------------------------------------------------------------------
+
+
+def test_the_ablation_table_carries_the_intervals_too():
+    """It is read on its own. A figure quoted from it without its interval is
+    quoted without the thing that says what it is worth."""
+    rows = _rows([1.0, 0.0, 1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    table = bench.produce_ablation_table({"hotpotqa": metrics}, metrics)
+
+    bounds = metrics["rag_k10"]["intervals"]["em"]
+    assert f"({bounds['low']:.4g}–{bounds['high']:.4g})" in table
+    assert str(bench.BOOTSTRAP_SEED) in table
+
+
+def test_the_ablation_table_says_what_its_latency_covers():
+    rows = _rows([1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    table = bench.produce_ablation_table({"hotpotqa": metrics}, metrics)
+
+    assert "builds its index once" in table
+
+
+def test_a_figure_an_arm_never_produced_is_not_printed_as_zero():
+    """The ablation renderer defaulted every missing figure to 0, so an arm
+    that produced nothing printed 0.0000 beside arms that measured."""
+    rows = _rows([1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    table = bench.produce_ablation_table({"hotpotqa": metrics}, metrics)
+
+    cke_rows = [line for line in table.splitlines() if line.startswith("| CKE N=8")]
+    assert cke_rows, "the row must still be listed"
+    for line in cke_rows:
+        assert "0.0000" not in line
+        assert "not measured" in line
+
+
+def test_the_figure_cell_states_an_absence_rather_than_a_number():
+    assert bench.figure_cell({}, "em") == "not measured"
+    assert bench.figure_cell({"em": 0.0}, "em") == "0.0000"
+    assert (
+        bench.figure_cell(
+            {"em": 0.5, "intervals": {"em": {"low": 0.25, "high": 0.75}}}, "em"
+        )
+        == "0.5000 (0.25–0.75)"
+    )
