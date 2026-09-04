@@ -227,7 +227,19 @@ class EntityResolver(DegradationMixin):
         # when it cached its answer, so the cached answer is stale.
         self._resolution_cache.pop(canonical_name, None)
         for alias in aliases:
-            self._resolution_cache.pop(str(alias).strip(), None)
+            alias_name = str(alias).strip()
+            self._resolution_cache.pop(alias_name, None)
+            # A name that is an alias for something else is not a canonical
+            # entity of its own. The unresolvable rungs answer with the
+            # mention's own title case and register that, which made every
+            # mention nobody could place a canonical entity — and the
+            # exact-canonical rung is checked before the alias registry, so
+            # once a mention had been guessed at, saying what it actually
+            # meant could not change the answer. merge_entities has always
+            # dropped the name it merged away; this is the same rule applied
+            # wherever an alias is registered.
+            if alias_name != canonical_name:
+                self._canonical_entities.discard(alias_name)
 
     def _remember(self, mention: str, result: "ResolutionResult") -> "ResolutionResult":
         """Cache a resolution under the mention that produced it.
