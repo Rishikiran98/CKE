@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Any, Iterable, List
 
 import numpy as np
 
@@ -15,6 +15,7 @@ from cke.reasoning.reasoner import TemplateReasoner
 from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
 from cke.reasoning.verifier import ReasoningVerifier
 from cke.diagnostics import DegradationMixin
+from cke.pipeline.types import ReasonerOutcome
 from cke.retrieval.embedding_model import EmbeddingModel
 
 
@@ -85,11 +86,32 @@ class PathReasoner(DegradationMixin):
         self._advanced_reasoner = TemplateReasoner()
 
     def answer(self, query: str, context: Iterable[Statement]) -> str:
+        """The answer alone, for callers that only want the string."""
+        return self.reason(query, context).answer
+
+    def reason(
+        self,
+        query: str,
+        context: Iterable[Statement],
+        candidate_paths: list[Any] | None = None,
+    ) -> ReasonerOutcome:
+        """Answer, with the confidence this reasoner actually computed.
+
+        ``answer`` returned a bare string, so every caller downstream had to
+        invent a confidence for it: ``ReasonerAdapter`` substituted a
+        constant that happened to sit above the verifier's
+        threshold, declared the substitution, and therefore refused every
+        strict run it could otherwise have answered. The number was computed
+        here all along and thrown away one line before it was returned.
+        """
         evidence_graph = list(context)
         if not evidence_graph:
             self._last_trace = ["No evidence graph edges were provided."]
             self._emit_trace(query, [], [], [], 0.0, "", [])
-            return "I don't have enough graph context to answer that yet."
+            return self._abstained(
+                "I don't have enough graph context to answer that yet.",
+                "no_evidence_provided",
+            )
 
         inferred, rule_traces = self._apply_rules(evidence_graph)
         full_graph = evidence_graph + inferred
@@ -121,7 +143,14 @@ class PathReasoner(DegradationMixin):
                     final_answer=template_run.answer,
                     operators_used=list(template_run.operators_used),
                 )
-                return template_run.answer
+                return ReasonerOutcome(
+                    answer=template_run.answer,
+                    confidence=template_run.confidence_score,
+                    reasoning_path=list(template_run.path),
+                    required_facts=list(template_run.required_facts),
+                    operator_checks=operator_checks,
+                    summary="template_reasoning_verified",
+                )
             return self._fallback_to_advanced_reasoner(
                 query=query,
                 full_graph=full_graph,
@@ -135,7 +164,10 @@ class PathReasoner(DegradationMixin):
         if subject is None:
             self._last_trace = ["Unable to identify a subject entity from query."]
             self._emit_trace(query, [], full_graph, [], 0.0, "", [])
-            return "I don't have enough graph context to answer that yet."
+            return self._abstained(
+                "I don't have enough graph context to answer that yet.",
+                "no_subject_resolved",
+            )
 
         best_path, traversal_trace = self._best_path(
             subject, target_relation, query, full_graph
@@ -147,7 +179,7 @@ class PathReasoner(DegradationMixin):
                 *traversal_trace,
             ]
             self._emit_trace(query, [subject], full_graph, [], 0.0, "", [])
-            return "Insufficient graph evidence."
+            return self._abstained("Insufficient graph evidence.", "no_path_found")
 
         confidence = 1.0
         trace = [*traversal_trace]
@@ -208,7 +240,30 @@ class PathReasoner(DegradationMixin):
             final_answer=final_answer,
             operators_used=operators_used,
         )
-        return final_answer
+        return ReasonerOutcome(
+            answer=final_answer,
+            confidence=reasoning_confidence,
+            reasoning_path=list(best_path),
+            required_facts=self._required_facts_for_query(query, full_graph),
+            operator_checks=operator_checks,
+            summary="path_reasoning_verified",
+        )
+
+    def _abstained(self, answer: str, summary: str) -> ReasonerOutcome:
+        """An outcome for a query this reasoner declined to answer.
+
+        Zero here is a measurement: nothing was reasoned over, so there is no
+        confidence to report. It is not the substituted kind of zero — the
+        summary names which of the four abstention routes was taken.
+        """
+        return ReasonerOutcome(
+            answer=answer,
+            confidence=0.0,
+            reasoning_path=[],
+            required_facts=[],
+            operator_checks=[],
+            summary=summary,
+        )
 
     def format_reasoning_path(self, context: List[Statement] | None = None) -> str:
         if self._last_trace:
@@ -465,7 +520,15 @@ class PathReasoner(DegradationMixin):
         full_graph: list[Statement],
         reason: str,
         rule_traces: list[str],
-    ) -> str:
+    ) -> ReasonerOutcome:
+        # The question asked for path reasoning and a different reasoner
+        # answers instead, with no path and no confidence of its own. Every
+        # other fallback in this package declares; this one did not.
+        self._degrade(
+            f"path reasoning did not produce a verified answer ({reason}), so "
+            f"{type(self._advanced_reasoner).__name__} answered instead, with "
+            f"no reasoning path and no confidence of its own"
+        )
         answer = self._advanced_reasoner.answer(query, full_graph)
         self._last_trace = [*rule_traces, reason, "Fallback route -> advanced_reasoner"]
         self._emit_trace(
@@ -477,7 +540,7 @@ class PathReasoner(DegradationMixin):
             final_answer=answer,
             operators_used=["advanced_reasoner_fallback"],
         )
-        return answer
+        return self._abstained(answer, "advanced_reasoner_fallback")
 
     @staticmethod
     def _resolve_entities(graph: list[Statement]) -> list[str]:
