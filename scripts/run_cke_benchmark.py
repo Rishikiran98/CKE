@@ -1341,12 +1341,18 @@ def select_indices(
     return sorted(int(index) for index in drawn)
 
 
-def _split_is_complete(path: Path) -> bool | None:
-    """Whether the downloader vouched for this file as a whole split.
+def _split_is_complete(path: Path, records: int) -> bool | None:
+    """Whether the downloader vouched for this file, as it stands now.
 
     ``None`` when there is no note beside it: an unknown provenance is not a
     good one, and a file this harness did not fetch cannot be vouched for
     either way.
+
+    The count is compared, not merely required to exist. A note outlives the
+    file it describes: truncate or replace the data and the note still sits
+    there claiming 2417 records beside 300. Under --skip-download this is the
+    only check there is, so a note that is not checked against the file is
+    not a safeguard.
     """
     sidecar = path.with_name(path.name + ".source.json")
     if not sidecar.exists():
@@ -1356,7 +1362,7 @@ def _split_is_complete(path: Path) -> bool | None:
             note = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return None
-    return bool(note.get("complete_split")) and note.get("records") is not None
+    return bool(note.get("complete_split")) and note.get("records") == records
 
 
 def load_selected(
@@ -1378,7 +1384,7 @@ def load_selected(
         # Whether the downloader recorded this file as the whole published
         # split. A file it cannot vouch for may be a capped prefix, and a
         # sample of a prefix is still a sample of a prefix.
-        "complete_split": _split_is_complete(path),
+        "complete_split": _split_is_complete(path, len(raw)),
         "bytes": path.stat().st_size,
         "records_in_file": len(raw),
         "items_evaluated": len(items),

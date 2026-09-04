@@ -468,3 +468,25 @@ def test_the_provenance_says_whether_the_file_was_a_whole_split(tmp_path):
     )
     _, with_note = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
     assert with_note["complete_split"] is True
+
+
+def test_a_note_that_outlived_its_file_does_not_vouch_for_it(tmp_path):
+    """A note survives the file being truncated or replaced, and under
+    --skip-download the note is the only check there is."""
+    import json
+
+    from cke.datasets.hotpot_loader import HotpotDataset
+
+    record = {"_id": "a", "question": "Q?", "answer": "A", "context": [["T", ["s"]]]}
+    path = tmp_path / "hotpotqa_dev.json"
+    path.write_text(json.dumps([record, record]), encoding="utf-8")
+    path.with_name(path.name + ".source.json").write_text(
+        json.dumps({"complete_split": True, "records": 2417}), encoding="utf-8"
+    )
+
+    _, provenance = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
+
+    assert (
+        provenance["complete_split"] is False
+    ), "a note claiming 2417 records beside a file of 2 vouches for nothing"
+    assert provenance["records_in_file"] == 2
