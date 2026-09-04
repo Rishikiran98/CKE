@@ -202,3 +202,78 @@ def test_a_strict_run_refuses_a_dataset_that_drops_entries(
     # The opt-out still loads, with the item thinned and the drop declared.
     items = getattr(bench, loader)(path, 10, False)
     assert items[0]["documents"] == []
+
+
+# ---------------------------------------------------------------------------
+# The summary says what produced the answers
+# ---------------------------------------------------------------------------
+
+
+class _StubTruncation:
+    calls = 12
+    truncated = 4
+    rate = 4 / 12
+    dropped_tokens: list = []
+
+
+class _MeasuringAnswerer:
+    description = "a model that fits the context itself"
+    uses_language_model = True
+    truncation_measured = True
+    truncation = _StubTruncation()
+
+
+class _UnmeasuringAnswerer(_MeasuringAnswerer):
+    description = "a model behind an endpoint"
+    truncation_measured = False
+
+
+def test_the_summary_records_whether_a_model_read_the_context():
+    """Without it the accuracy columns could be a lexical baseline's own."""
+    from cke.evaluation.span_qa import SpanExtractiveQA
+
+    counter = TokenCounter()
+    combined = {"rag_k10": {"em": 0.3}, "cke_n12": {"em": 0.1}}
+
+    with_model = bench.produce_summary(combined, counter, _MeasuringAnswerer())
+    without = bench.produce_summary(combined, counter, SpanExtractiveQA())
+
+    assert with_model["generator_in_the_loop"] is True
+    assert without["generator_in_the_loop"] is False
+
+
+def test_an_answerer_that_cannot_measure_truncation_reports_that():
+    """A zero here would be a substituted value where a measurement belongs.
+
+    The api backend sends the context whole because it has no tokeniser for
+    the model behind the endpoint, so its truncated count stays zero whatever
+    the endpoint did with an over-long prompt.
+    """
+    counter = TokenCounter()
+    combined = {"rag_k10": {"truncated_items": 0, "truncation_rate": 0.0}}
+
+    reported = bench.produce_summary(combined, counter, _UnmeasuringAnswerer())
+    truncation = reported["answer_truncation"]
+
+    assert truncation["measured"] is False
+    assert truncation["calls"] == 12
+    assert "rate" not in truncation
+    assert "by_arm" not in truncation
+    assert "tokeniser" in truncation["reason"]
+
+
+def test_an_answerer_that_measures_truncation_reports_the_figures():
+    counter = TokenCounter()
+    combined = {
+        "rag_k10": {"truncated_items": 3, "truncation_rate": 0.5},
+        "cke_n12": {"truncated_items": 0, "truncation_rate": 0.0},
+    }
+
+    truncation = bench.produce_summary(combined, counter, _MeasuringAnswerer())[
+        "answer_truncation"
+    ]
+
+    assert truncation["measured"] is True
+    assert truncation["truncated"] == 4
+    assert truncation["by_arm"]["rag_k10"]["truncated_items"] == 3
+    assert truncation["by_arm"]["cke_n12"]["rate"] == 0.0

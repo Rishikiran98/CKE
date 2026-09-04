@@ -333,3 +333,47 @@ def test_a_branch_name_stops_a_strict_run(monkeypatch):
             model_revision="main",
             strict=True,
         )
+
+
+# ----------------------------------------------------------------------
+# The api backend cannot measure what it cut
+# ----------------------------------------------------------------------
+
+
+def test_a_window_requested_for_the_api_backend_is_declared(caplog):
+    """It was accepted and ignored: the context went whole either way."""
+    with caplog.at_level(logging.WARNING):
+        answerer = LLMAnswerer(backend="api", api_key="k", max_input_tokens=50)
+
+    assert answerer.degraded is True
+    assert "window" in answerer.degraded_reason
+    assert "tokeniser" in answerer.degraded_reason
+    assert any("window" in record.message for record in caplog.records)
+
+
+def test_a_window_requested_for_the_api_backend_stops_a_strict_run():
+    with pytest.raises(DegradedComponentError, match="window"):
+        LLMAnswerer(backend="api", api_key="k", max_input_tokens=50, strict=True)
+
+
+def test_the_api_backend_does_not_claim_to_measure_truncation():
+    """Its truncated count stays zero whatever the endpoint did with the
+    prompt, so reporting a rate would state a measurement never taken."""
+    answerer = LLMAnswerer(backend="api", api_key="k")
+
+    assert answerer.truncation_measured is False
+
+
+def test_the_local_backend_measures_truncation(monkeypatch):
+    _patch_loaders(monkeypatch)
+
+    answerer = LLMAnswerer(backend="local", model="stub", model_revision=_A_COMMIT)
+
+    assert answerer.truncation_measured is True
+
+
+def test_both_answerers_say_whether_a_model_read_the_context():
+    from cke.evaluation.span_qa import SpanExtractiveQA
+
+    assert LLMAnswerer(backend="api", api_key="k").uses_language_model is True
+    assert SpanExtractiveQA().uses_language_model is False

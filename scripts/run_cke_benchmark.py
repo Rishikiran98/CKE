@@ -777,38 +777,55 @@ def produce_summary(
         "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
         "answers_produced_by": answerer.description,
-        "answer_truncation": (
-            {
-                "calls": answerer.truncation.calls,
-                "truncated": answerer.truncation.truncated,
-                "rate": round(answerer.truncation.rate, 4),
-                # Per arm, because the shared total cannot say which arm was
-                # cut, and that is the whole question about a context window.
-                "by_arm": {
-                    cfg: {
-                        "truncated_items": combined.get(cfg, {}).get(
-                            "truncated_items", 0
-                        ),
-                        "rate": combined.get(cfg, {}).get("truncation_rate", 0.0),
-                    }
-                    for cfg in (
-                        "rag_k5",
-                        "rag_k10",
-                        "cke_n8",
-                        "cke_n12",
-                        "cke_n20",
-                        "hybrid_n12",
-                    )
-                    if cfg in combined
-                },
-            }
-            if hasattr(answerer, "truncation")
-            else None
-        ),
+        # Whether a model read the context at all. Without it the accuracy
+        # columns are a lexical baseline's own figures, and a reader of the
+        # results file alone has no way to tell.
+        "generator_in_the_loop": bool(getattr(answerer, "uses_language_model", False)),
+        "answer_truncation": _truncation_summary(answerer, combined),
         "rag_k10_em": rag.get("em", 0.0),
         "cke_n12_em": cke.get("em", 0.0),
         "rag_k10_f1": rag.get("f1", 0.0),
         "cke_n12_f1": cke.get("f1", 0.0),
+    }
+
+
+def _truncation_summary(answerer, combined: dict[str, dict[str, float]]):
+    """What the answerer cut, or that it could not tell.
+
+    The api backend sends a context whole because it has no tokeniser for the
+    model behind the endpoint. Its truncated count therefore stays zero
+    whatever the endpoint did, and printing that zero as a rate would put a
+    substituted value where a measurement belongs.
+    """
+    if not hasattr(answerer, "truncation"):
+        return None
+
+    if not getattr(answerer, "truncation_measured", True):
+        return {
+            "measured": False,
+            "calls": answerer.truncation.calls,
+            "reason": (
+                "the api backend has no tokeniser for the model behind the "
+                "endpoint, so the context is sent whole and what was cut, if "
+                "anything, is not visible from here"
+            ),
+        }
+
+    return {
+        "measured": True,
+        "calls": answerer.truncation.calls,
+        "truncated": answerer.truncation.truncated,
+        "rate": round(answerer.truncation.rate, 4),
+        # Per arm, because the shared total cannot say which arm was cut,
+        # and that is the whole question about a context window.
+        "by_arm": {
+            cfg: {
+                "truncated_items": combined.get(cfg, {}).get("truncated_items", 0),
+                "rate": combined.get(cfg, {}).get("truncation_rate", 0.0),
+            }
+            for cfg in CONFIGS
+            if cfg in combined
+        },
     }
 
 

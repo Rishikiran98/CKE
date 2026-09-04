@@ -29,6 +29,14 @@ and must say so rather than produce a number.
 Truncation is a measurement, not a nuisance. A model has a context window, a
 dense arm's prose can exceed it, and dropping the tail of the context changes
 what the model was shown. It is counted per call, per arm, and reported.
+
+Only the local backend can count it. Fitting a context to a window means
+tokenising it with the model's own tokeniser, and an endpoint does not lend
+one out. The api backend therefore sends the context whole and reports that
+truncation was not measured, rather than reporting that none occurred: what a
+remote endpoint does with an over-long prompt is not visible from here, and a
+zero in that column would be a substituted value standing where a measurement
+belongs.
 """
 
 from __future__ import annotations
@@ -89,6 +97,10 @@ class TruncationLog:
 class LLMAnswerer(DegradationMixin):
     """Answer with a language model, or refuse."""
 
+    #: A model reads the context here. The span baseline sets this False, and
+    #: a summary carries it so that a figure can be told from a lexical one.
+    uses_language_model = True
+
     def __init__(
         self,
         backend: str = "local",
@@ -139,6 +151,15 @@ class LLMAnswerer(DegradationMixin):
             )
             self.api_key = api_key or os.getenv("CKE_LLM_API_KEY")
             self.timeout_s = timeout_s
+            if max_input_tokens is not None:
+                self._degrade(
+                    f"a {max_input_tokens}-token window was requested for the "
+                    f"api backend, which cannot honour one: fitting a context "
+                    f"to a window needs the model's own tokeniser and an "
+                    f"endpoint does not lend one out, so the context is sent "
+                    f"whole and the window is ignored. Drop it, or use the "
+                    f"local backend, which measures truncation"
+                )
             if not self.api_key:
                 self._degrade(
                     "no API key is configured; set CKE_LLM_API_KEY or pass "
@@ -202,6 +223,17 @@ class LLMAnswerer(DegradationMixin):
         record_loaded_model(
             "LLMAnswerer", self.model_name, f"{self.model_name}@{self.model_revision}"
         )
+
+    @property
+    def truncation_measured(self) -> bool:
+        """Whether ``truncation`` counts anything, or only calls.
+
+        The local backend fits every context to the window and counts what it
+        dropped. The api backend cannot, so its truncated count stays zero
+        whatever the endpoint did with the prompt; reporting that zero as a
+        rate would state a measurement that was never taken.
+        """
+        return self.backend == "local"
 
     @property
     def available(self) -> bool:
