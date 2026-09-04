@@ -435,6 +435,27 @@
       "old": "def test_pipeline_skeleton_runs():",
       "new": "def test_reads_source():\n    import inspect\n\n    assert inspect.getsource(QueryOrchestrator) is not None\n\n\ndef test_pipeline_skeleton_runs():",
       "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "a test reads source through a path variable, evading the guard",
+      "path": "tests/test_orchestrator_pipeline_skeleton.py",
+      "old": "def test_pipeline_skeleton_runs():",
+      "new": "import pathlib\n\n\ndef test_reads_source_indirectly():\n    target = pathlib.Path(__file__).resolve().parents[1] / \"cke\" / \"models.py\"\n    assert \"class\" in target.read_text()\n\n\ndef test_pipeline_skeleton_runs():",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "a test reads source through open(), evading the guard",
+      "path": "tests/test_orchestrator_pipeline_skeleton.py",
+      "old": "def test_pipeline_skeleton_runs():",
+      "new": "def test_reads_source_with_open():\n    with open(\"cke/models.py\") as handle:\n        assert \"class\" in handle.read()\n\n\ndef test_pipeline_skeleton_runs():",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "an exemption goes stale and is kept",
+      "path": "tests/test_test_hygiene.py",
+      "old": "MAY_READ_SOURCE = {\n    \"test_benchmark_token_counting.py\": (",
+      "new": "MAY_READ_SOURCE = {\n    \"test_orchestrator_pipeline_skeleton.py\": (\n        \"A stale entry: this file reads no source, so listing it here \"\n        \"would let a getsource into it pass unchallenged.\"\n    ),\n    \"test_benchmark_token_counting.py\": (",
+      "tests": "tests/test_test_hygiene.py"
     }
   ]
 }
