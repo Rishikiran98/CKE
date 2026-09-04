@@ -12,7 +12,12 @@ class ConversationalMemoryStore(ConversationMemoryStore):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.ingestion_pipeline = ConversationIngestionPipeline(self)
+        # The pipeline is a contract component with live _degrade calls, and
+        # it was built without the store's strictness, so it could never be
+        # strict through this path however the store was constructed.
+        self.ingestion_pipeline = ConversationIngestionPipeline(
+            self, strict=getattr(self, "strict", False)
+        )
 
     def ingest_turn(
         self,

@@ -7,12 +7,13 @@ import time
 from collections import Counter
 from typing import Any, Callable
 
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.retrieval.rag_baseline import RAGRetriever
 from cke.observability.token_tracker import TokenTracker
 from cke.utils.experiment_logger import ExperimentLogger
 
 
-class ExperimentRunner:
+class ExperimentRunner(DegradationMixin):
     """Run end-to-end baseline experiments and aggregate metrics."""
 
     def __init__(
@@ -21,14 +22,29 @@ class ExperimentRunner:
         logger: ExperimentLogger | None = None,
         answer_generator: Callable[[str, list[dict[str, Any]]], str] | None = None,
         token_tracker: TokenTracker | None = None,
+        strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
+        require_strict_component(type(self).__name__, retriever, "retriever", strict)
+        require_strict_component(
+            type(self).__name__, token_tracker, "token tracker", strict
+        )
         self.retriever = retriever
         self.logger = logger or ExperimentLogger()
         self.answer_generator = answer_generator or self._default_answer_generator
-        self.token_tracker = token_tracker or TokenTracker()
+        self.token_tracker = token_tracker or TokenTracker(strict=strict)
 
     def run(self, dataset: list[dict[str, str]], top_k: int = 5) -> dict[str, float]:
-        total = max(len(dataset), 1)
+        if not dataset:
+            # max(len(dataset), 1) divided by one and reported exact_match 0.0
+            # for a run that scored nothing, which reads as a measured failure
+            # rather than an absent measurement.
+            raise ValueError(
+                "cannot run an experiment over an empty dataset: there is "
+                "nothing to score, and a zero here would be indistinguishable "
+                "from a run that scored zero"
+            )
+        total = len(dataset)
         exact_matches = 0
         total_f1 = 0.0
         total_latency = 0.0

@@ -42,5 +42,49 @@
       "new": "        confidence_valid = True",
       "tests": "tests/test_reasoner_confidence.py"
     }
+  ],
+  "strict": [
+    {
+      "label": "the degraded check goes back to being vacuous",
+      "path": "cke/diagnostics.py",
+      "old": "    if not hasattr(supplied, \"degraded\"):",
+      "new": "    if False:",
+      "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "the orchestrator stops checking its injectables",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "            require_strict_component(type(self).__name__, supplied, label, strict)",
+      "new": "            pass",
+      "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "the conversation store drops strict from its pipeline again",
+      "path": "cke/conversation/memory.py",
+      "old": "            self, strict=getattr(self, \"strict\", False)",
+      "new": "            self",
+      "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "the conversational retriever drops strict from the embedder",
+      "path": "cke/conversation/retriever.py",
+      "old": "            config=getattr(config, \"retrieval\", config),\n            strict=strict,",
+      "new": "            config=getattr(config, \"retrieval\", config),",
+      "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "the monitor swallows a metric error without declaring",
+      "path": "cke/observability/system_monitor.py",
+      "old": "            self._degrade(\n                f\"metric {getattr(func, '__name__', '<unknown>')} was not \"",
+      "new": "            _unused = (\n                f\"metric {getattr(func, '__name__', '<unknown>')} was not \"",
+      "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "an empty experiment scores zero instead of refusing",
+      "path": "cke/evaluation/experiment_runner.py",
+      "old": "        if not dataset:",
+      "new": "        if False:",
+      "tests": "tests/test_strict_reaches_everything.py"
+    }
   ]
 }

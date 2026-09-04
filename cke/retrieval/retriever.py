@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections import deque
 from typing import List
 
-from cke.diagnostics import require_strict_component
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 from cke.router.router import QueryRouter
 
 
-class GraphRetriever:
+class GraphRetriever(DegradationMixin):
     """Retrieve minimal graph context around routed entities."""
 
     def __init__(
@@ -20,7 +20,7 @@ class GraphRetriever:
         router: QueryRouter | None = None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.graph_engine = graph_engine
         # A supplied router is not covered by this class's strict flag: it was
         # built elsewhere and may already have degraded. Constructing one here

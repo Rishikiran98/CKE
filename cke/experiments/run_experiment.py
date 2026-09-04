@@ -110,7 +110,7 @@ def evaluate(
     for item in items:
         graph = KnowledgeGraphEngine(strict=strict)
         graph.add_statements(extractor.extract(item.context))
-        retriever = GraphRetriever(graph)
+        retriever = GraphRetriever(graph, strict=strict)
 
         start = time.perf_counter()
         graph_ctx = retriever.retrieve(item.question, max_depth=3)

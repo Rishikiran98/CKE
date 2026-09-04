@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from cke.conversation.answering import GroundedAnswerComposer
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.conversation.memory import ConversationalMemoryStore
 from cke.conversation.retriever import ConversationalRetriever
 from cke.conversation.types import ConversationAnswer, ConversationTurn
 
 
-class ConversationalOrchestrator:
+class ConversationalOrchestrator(DegradationMixin):
     """Ingest turns, semantically retrieve prior context, and answer naturally."""
 
     def __init__(
@@ -16,9 +17,20 @@ class ConversationalOrchestrator:
         memory_store: ConversationalMemoryStore | None = None,
         retriever: ConversationalRetriever | None = None,
         answer_composer: GroundedAnswerComposer | None = None,
+        strict: bool = False,
     ) -> None:
-        self.memory_store = memory_store or ConversationalMemoryStore()
-        self.retriever = retriever or ConversationalRetriever(self.memory_store)
+        # This took no strict at all, so the whole conversation subsystem was
+        # unreachable in strict mode: without sentence-transformers it ran on
+        # the hashed embedder by construction, whatever the caller asked for.
+        self._init_degradation(strict)
+        require_strict_component(
+            type(self).__name__, memory_store, "memory store", strict
+        )
+        require_strict_component(type(self).__name__, retriever, "retriever", strict)
+        self.memory_store = memory_store or ConversationalMemoryStore(strict=strict)
+        self.retriever = retriever or ConversationalRetriever(
+            self.memory_store, strict=strict
+        )
         self.answer_composer = answer_composer or GroundedAnswerComposer()
         self.last_bundle = None
         self.last_answer: ConversationAnswer | None = None

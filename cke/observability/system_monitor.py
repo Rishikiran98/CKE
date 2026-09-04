@@ -5,6 +5,8 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from cke.diagnostics import DegradationMixin
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,16 +24,18 @@ def _safe_metric(func):
     metric that silently stopped recording reads downstream as a measured zero.
     """
 
-    def wrapper(*args, **kwargs):
+    def wrapper(self, *args, **kwargs):
         try:
-            return func(*args, **kwargs)
+            return func(self, *args, **kwargs)
         except _METRIC_ERRORS as exc:
-            logger.warning(
-                "Metric %s was not recorded (%s: %s); any figure derived from "
-                "it undercounts",
-                getattr(func, "__name__", "<unknown>"),
-                type(exc).__name__,
-                exc,
+            # Obligation 1 was met here and obligations 2 and 3 were not: it
+            # warned, but set no flag and could not be constructed strict, so
+            # a snapshot written to system_metrics.json could not say that one
+            # of its figures had stopped recording.
+            self._degrade(
+                f"metric {getattr(func, '__name__', '<unknown>')} was not "
+                f"recorded ({type(exc).__name__}: {exc}), so any figure "
+                f"derived from it undercounts"
             )
             return None
 
@@ -39,7 +43,8 @@ def _safe_metric(func):
 
 
 @dataclass
-class SystemMonitor:
+class SystemMonitor(DegradationMixin):
+    strict: bool = False
     query_latency_ms: float = 0.0
     retrieval_steps: int = 0
     graph_nodes_traversed: int = 0
@@ -48,6 +53,9 @@ class SystemMonitor:
     bridge_nodes_found: int = 0
     neighborhood_nodes_expanded: int = 0
     _start: float = field(default=0.0, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._init_degradation(self.strict)
 
     # New Latency Metrics
     ingestion_latency_ms: float = 0.0
