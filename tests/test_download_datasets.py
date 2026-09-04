@@ -122,13 +122,64 @@ def test_musique_missing_raises_and_writes_nothing(tmp_path, monkeypatch):
     assert dl.MUSIQUE_SOURCE in str(excinfo.value)
 
 
-def test_musique_reuses_a_real_existing_file(tmp_path):
+def test_a_file_recorded_as_a_complete_split_is_reused(tmp_path):
     out = tmp_path / "musique_dev.json"
     _write(out, [_musique_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
 
     dl.download_musique(out)
 
     assert json.loads(out.read_text(encoding="utf-8"))[0]["id"] == "2hop__1_2"
+
+
+def test_a_file_that_may_be_a_capped_prefix_is_not_reused(tmp_path, monkeypatch):
+    """The cap is gone from this script, but a checkout upgraded into it still
+    holds the file the old one wrote: the first N records of a split ordered
+    by hop count. Reusing that runs the two-hop experiment this stopped."""
+    out = tmp_path / "musique_dev.json"
+    _write(out, [_musique_row()])  # no sidecar: written by the old downloader
+
+    attempted: list[str] = []
+
+    def _refuse(out_path, reasons=None):
+        attempted.append(str(out_path))
+        return False
+
+    monkeypatch.setattr(dl, "_try_hf_musique", _refuse)
+
+    with pytest.raises(dl.DatasetUnavailableError):
+        dl.download_musique(out)
+
+    assert attempted, "the file must be fetched again rather than reused"
+
+
+def test_a_file_edited_since_it_was_fetched_is_not_reused(tmp_path, monkeypatch):
+    out = tmp_path / "musique_dev.json"
+    _write(out, [_musique_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 999}), encoding="utf-8"
+    )
+    monkeypatch.setattr(dl, "_try_hf_musique", lambda out_path, reasons=None: False)
+
+    with pytest.raises(dl.DatasetUnavailableError):
+        dl.download_musique(out)
+
+
+def test_a_downloaded_split_records_that_it_is_complete(tmp_path, monkeypatch):
+    body = json.dumps(_locomo_conversations(2)).encode("utf-8")
+    monkeypatch.setattr(dl, "urlopen", _fake_urlopen([(body, None)]))
+    out = tmp_path / "locomo.json"
+
+    dl.download_locomo(out)
+
+    note = json.loads(dl.sidecar_path(out).read_text(encoding="utf-8"))
+    assert note["complete_split"] is True
+    assert note["records"] == 2
+    assert note["source"] == dl.LOCOMO_SOURCE
+    # And the file it describes is now reusable without another fetch.
+    assert dl.incomplete_reason(out, _locomo_conversations(2)) is None
 
 
 def test_unreadable_existing_file_is_rejected(tmp_path):
