@@ -1,0 +1,46 @@
+{
+  "reasoning": [
+    {
+      "label": "the reasoner throws its computed confidence away again",
+      "path": "cke/reasoning/path_reasoner.py",
+      "old": "            confidence=reasoning_confidence,\n            reasoning_path=list(best_path),",
+      "new": "            confidence=0.8,\n            reasoning_path=list(best_path),",
+      "tests": "tests/test_reasoner_confidence.py"
+    },
+    {
+      "label": "an abstention reports a confidence it did not measure",
+      "path": "cke/reasoning/path_reasoner.py",
+      "old": "            answer=answer,\n            confidence=0.0,\n            reasoning_path=[],",
+      "new": "            answer=answer,\n            confidence=0.8,\n            reasoning_path=[],",
+      "tests": "tests/test_reasoner_confidence.py"
+    },
+    {
+      "label": "the fallback to another reasoner stops declaring",
+      "path": "cke/reasoning/path_reasoner.py",
+      "old": "        self._degrade(\n            f\"path reasoning did not produce a verified answer ({reason}), so \"",
+      "new": "        _unused = (\n            f\"path reasoning did not produce a verified answer ({reason}), so \"",
+      "tests": "tests/test_reasoner_confidence.py"
+    },
+    {
+      "label": "the adapter substitutes even when the reasoner reported one",
+      "path": "cke/reasoning/reasoner_adapter.py",
+      "old": "        if hasattr(reasoner, \"reason\"):",
+      "new": "        if False:",
+      "tests": "tests/test_reasoner_confidence.py tests/test_substituted_values.py"
+    },
+    {
+      "label": "the adapter stops declaring a genuine substitution",
+      "path": "cke/reasoning/reasoner_adapter.py",
+      "old": "                self._degrade(\n                    f\"{type(self.reasoner).__name__} returned an answer \"",
+      "new": "                _unused = (\n                    f\"{type(self.reasoner).__name__} returned an answer \"",
+      "tests": "tests/test_reasoner_confidence.py tests/test_substituted_values.py"
+    },
+    {
+      "label": "the verifier accepts any confidence",
+      "path": "cke/reasoning/verifier.py",
+      "old": "        confidence_valid = confidence_score >= self.confidence_threshold",
+      "new": "        confidence_valid = True",
+      "tests": "tests/test_reasoner_confidence.py"
+    }
+  ]
+}
