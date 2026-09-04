@@ -174,6 +174,15 @@ class EntityResolver(DegradationMixin):
         self._init_degradation(strict)
         self.registry = AliasRegistry()
         self._canonical_entities: set[str] = set()
+        #: What a mention resolved to, and at what confidence, the first time
+        #: it was asked. Every rung below except containment already cached
+        #: its answer by registering an alias, which made the mention
+        #: canonical — and the canonical rung reports 0.95, not the
+        #: confidence of the rung that actually did the work. So the same
+        #: mention scored one number the first time a run met it and another
+        #: on every repeat, and a benchmark scored the same entity
+        #: differently depending on which item it appeared in.
+        self._resolution_cache: dict[str, "ResolutionResult"] = {}
         self.graph_engine = graph_engine
         self.fuzzy_threshold = fuzzy_threshold
         self.embedding_threshold = embedding_threshold
@@ -214,6 +223,23 @@ class EntityResolver(DegradationMixin):
             return
         self._canonical_entities.add(canonical_name)
         self.registry.add(canonical_name, aliases)
+        # A caller registering an alias knows something this resolver did not
+        # when it cached its answer, so the cached answer is stale.
+        self._resolution_cache.pop(canonical_name, None)
+        for alias in aliases:
+            self._resolution_cache.pop(str(alias).strip(), None)
+
+    def _remember(self, mention: str, result: "ResolutionResult") -> "ResolutionResult":
+        """Cache a resolution under the mention that produced it.
+
+        Registering the alias is what the rungs below already did. Recording
+        the confidence beside it is what stops the repeat of a mention being
+        scored 0.95 by the canonical rung instead of by the rung that
+        resolved it.
+        """
+        self.register_alias(mention, result.canonical)
+        self._resolution_cache[mention] = result
+        return result
 
     # ------------------------------------------------------------------
     # Core resolution — single entity
@@ -225,6 +251,13 @@ class EntityResolver(DegradationMixin):
         normalized = self._normalize(name)
         if not normalized:
             return ResolutionResult(canonical=name or "", confidence=0.0)
+
+        # 0. What this mention resolved to last time. Ahead of every rung
+        # below, because the rungs that cache register the mention as an
+        # alias and the canonical rung would then answer 0.95 for it.
+        remembered = self._resolution_cache.get(name)
+        if remembered is not None:
+            return remembered
 
         # 1. Exact canonical match
         if name in self._canonical_entities:
@@ -243,20 +276,23 @@ class EntityResolver(DegradationMixin):
                 AliasRegistry.normalize(known) == norm
                 or self._canonical_key(known) == key
             ):
-                self.register_alias(name, known)
-                return ResolutionResult(canonical=known, confidence=0.75)
+                return self._remember(
+                    name, ResolutionResult(canonical=known, confidence=0.75)
+                )
 
         # 4-6. Fuzzy → embedding → fallback (need candidates)
         candidates = self._graph_candidates()
         if not candidates:
             canonical = self._title_case_entity(name)
-            self.register_alias(name, canonical)
-            return ResolutionResult(canonical=canonical, confidence=0.50)
+            return self._remember(
+                name, ResolutionResult(canonical=canonical, confidence=0.50)
+            )
 
         best_fuzzy_candidate, best_fuzzy = self._best_fuzzy(normalized, candidates)
         if best_fuzzy_candidate and best_fuzzy >= self.fuzzy_threshold:
-            self.register_alias(name, best_fuzzy_candidate)
-            return ResolutionResult(best_fuzzy_candidate, confidence=best_fuzzy)
+            return self._remember(
+                name, ResolutionResult(best_fuzzy_candidate, confidence=best_fuzzy)
+            )
 
         contained = self._unique_container(name, candidates)
         if contained:
@@ -269,14 +305,17 @@ class EntityResolver(DegradationMixin):
 
         best_emb_candidate, best_emb = self._best_embedding(name, candidates)
         if best_emb_candidate and best_emb >= self.embedding_threshold:
-            self.register_alias(name, best_emb_candidate)
-            return ResolutionResult(best_emb_candidate, confidence=best_emb)
+            return self._remember(
+                name, ResolutionResult(best_emb_candidate, confidence=best_emb)
+            )
 
         canonical = self._title_case_entity(name)
-        self.register_alias(name, canonical)
-        return ResolutionResult(
-            canonical=canonical,
-            confidence=max(best_fuzzy, best_emb, 0.50),
+        return self._remember(
+            name,
+            ResolutionResult(
+                canonical=canonical,
+                confidence=max(best_fuzzy, best_emb, 0.50),
+            ),
         )
 
     def resolve_entity(self, name: str) -> str:

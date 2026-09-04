@@ -260,3 +260,74 @@ def test_the_entity_confidence_is_not_manufactured_by_the_orchestrator():
         "an entity resolved through the alias registry must not score the "
         "same as one the resolver knows nothing about"
     )
+
+
+def test_a_mention_resolves_the_same_way_every_time_it_is_asked(offline_embedder):
+    """Codex raised this on #103, and it was right and understated.
+
+    Every rung of resolve_with_score except containment caches its answer by
+    registering the mention as an alias, which makes it a canonical name —
+    and the canonical rung reports 0.95, not the confidence of the rung that
+    actually did the work. So the same mention scored one number the first
+    time a run met it and 0.95 on every repeat. Entity confidence is averaged
+    into entity_resolution_confidence and weighted into the confidence the
+    pipeline reports, so a benchmark scored the same entity differently
+    depending on which item it happened to appear in.
+
+    Codex proposed passing the graph engine into the orchestrator's default
+    resolver. That does not fix it: it changes which two values alternate.
+    Measured before this change, on "What is the citizenship of Albert
+    Einstein?" asked three times:
+
+        without a graph engine   0.50, 0.95, 0.95
+        with a graph engine      1.00, 0.95, 0.95
+    """
+    from cke.entity_resolution.entity_resolver import EntityResolver
+    from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("Albert Einstein", "citizenship", "United States")
+    question = "What is the citizenship of Albert Einstein?"
+
+    for label, resolver in (
+        ("no graph engine", EntityResolver()),
+        ("graph engine", EntityResolver(graph_engine=engine)),
+    ):
+        scores = []
+        for _ in range(3):
+            resolved = resolver.resolve_mentions(
+                question, candidate_entities=["Albert Einstein"]
+            )[0]
+            scores.append(resolved.link_confidence)
+        assert len(set(scores)) == 1, (
+            f"with {label}, the same mention scored {scores} across three "
+            f"identical requests, so a reported confidence depends on "
+            f"whether the entity was seen earlier in the run"
+        )
+
+
+def test_a_caller_registering_an_alias_invalidates_what_was_cached(
+    offline_embedder,
+):
+    """The cache must not outlive the knowledge it was built without.
+
+    A resolver that has already answered for a mention, and is then told by a
+    caller what that mention canonically is, must use what it was told rather
+    than serve the answer it worked out earlier.
+    """
+    from cke.entity_resolution.entity_resolver import EntityResolver
+    from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+
+    engine = KnowledgeGraphEngine()
+    engine.add_statement("Christopher Nolan", "directed", "Inception")
+    resolver = EntityResolver(graph_engine=engine)
+
+    # A misspelling, so the fuzzy rung resolves it without an embedding
+    # model: "Chris Nolan" reaches "Christopher Nolan" only through
+    # embeddings, which would make this a test about the encoder.
+    mention = "Christopher Nolen"
+    assert resolver.resolve_with_score(mention).canonical == "Christopher Nolan"
+
+    resolver.register_alias(mention, "Someone Else Entirely")
+
+    assert resolver.resolve_with_score(mention).canonical == "Someone Else Entirely"
