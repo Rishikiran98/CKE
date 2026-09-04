@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from cke.diagnostics import (
+    DegradationMixin,
     degradation_summary,
     environment_report,
     require_strict_component,
@@ -29,13 +30,13 @@ class DatasetMetrics:
     latency: float
 
 
-class ReasoningEvalPipeline:
+class ReasoningEvalPipeline(DegradationMixin):
     """Evaluates path reasoning quality and runtime behavior across datasets."""
 
     def __init__(
         self, reasoner: PathReasoner | None = None, strict: bool = True
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         require_strict_component(type(self).__name__, reasoner, "reasoner", self.strict)
         self.reasoner = reasoner or PathReasoner(strict=strict)
 

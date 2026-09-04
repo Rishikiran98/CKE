@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.graph.assertion import Assertion
 from cke.graph.conflict_engine import ConflictEngine
@@ -13,7 +14,7 @@ from cke.graph.trust_engine import TrustEngine
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 
 
-class GraphUpdatePipeline:
+class GraphUpdatePipeline(DegradationMixin):
     """Apply assertion updates into the graph store."""
 
     def __init__(
@@ -25,12 +26,20 @@ class GraphUpdatePipeline:
         deduplicator: AssertionDeduplicator | None = None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
+        for supplied, label in (
+            (resolver, "entity resolver"),
+            (trust_engine, "trust engine"),
+            (deduplicator, "deduplicator"),
+        ):
+            require_strict_component(type(self).__name__, supplied, label, self.strict)
         self.graph = graph
         self.resolver = resolver or EntityResolver(strict=strict)
         self.trust_engine = trust_engine or TrustEngine(strict=strict)
         self.conflict_engine = conflict_engine or ConflictEngine()
-        self.deduplicator = deduplicator or AssertionDeduplicator(self.trust_engine)
+        self.deduplicator = deduplicator or AssertionDeduplicator(
+            self.trust_engine, strict=strict
+        )
         self.conflict_metadata: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     def _resolve_entity(self, name: str) -> str:

@@ -5,17 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.graph.assertion import Assertion
 from cke.graph.trust_engine import TrustEngine
 
 
-class AssertionDeduplicator:
+class AssertionDeduplicator(DegradationMixin):
     """Merge duplicate assertions by identity + qualifier bucket."""
 
     def __init__(
         self, trust_engine: TrustEngine | None = None, strict: bool = False
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
+        require_strict_component(
+            type(self).__name__, trust_engine, "trust engine", self.strict
+        )
         self.trust_engine = trust_engine or TrustEngine(strict=strict)
 
     @staticmethod

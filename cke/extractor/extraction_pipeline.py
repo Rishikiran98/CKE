@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.extractor.coreference_resolver import CoreferenceResolver
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.extractor.llm_extractor import LLMExtractor
@@ -13,7 +14,7 @@ from cke.schema.relation_mapper import RelationMapper
 from cke.trust.confidence_model import ConfidenceModel
 
 
-class ExtractionPipeline:
+class ExtractionPipeline(DegradationMixin):
     """End-to-end extraction from raw documents to graph assertions."""
 
     def __init__(
@@ -24,8 +25,14 @@ class ExtractionPipeline:
         conflict_engine: ConflictEngine | None = None,
         strict: bool = False,
     ) -> None:
+        self._init_degradation(strict)
+        require_strict_component(
+            type(self).__name__, graph_engine, "graph engine", self.strict
+        )
+        require_strict_component(
+            type(self).__name__, extractor, "extractor", self.strict
+        )
         self.graph_engine = graph_engine
-        self.strict = bool(strict)
         self.coref = CoreferenceResolver(strict=strict)
         self.paragraph_extractor = ParagraphExtractor(window_size=window_size)
         self.extractor = extractor or LLMExtractor(
@@ -33,7 +40,7 @@ class ExtractionPipeline:
         )
         self.entity_resolver = EntityResolver(graph_engine=graph_engine, strict=strict)
         self.relation_mapper = RelationMapper(strict=strict)
-        self.confidence_model = ConfidenceModel()
+        self.confidence_model = ConfidenceModel(strict=strict)
         self.conflict_engine = conflict_engine or ConflictEngine()
 
     def process_document(

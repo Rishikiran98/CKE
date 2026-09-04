@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from cke.conversation.memory import ConversationalMemoryStore
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.conversation.retrieval import (
     CandidateGenerator,
     FactRetriever,
@@ -15,7 +16,7 @@ from cke.conversation.types import RetrievalBundle
 from cke.retrieval.embedding_model import EmbeddingModel
 
 
-class ConversationalRetriever:
+class ConversationalRetriever(DegradationMixin):
     """Retrieve evidence across raw events, memories, summaries, and graph facts."""
 
     def __init__(
@@ -26,7 +27,13 @@ class ConversationalRetriever:
         config=None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
+        require_strict_component(
+            type(self).__name__, memory_store, "memory store", self.strict
+        )
+        require_strict_component(
+            type(self).__name__, embedding_model, "embedding model", self.strict
+        )
         self.memory_store = memory_store
         self.candidate_generator = CandidateGenerator(
             memory_store,

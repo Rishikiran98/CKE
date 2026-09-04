@@ -7,7 +7,7 @@ import re
 from heapq import heappop, heappush, nlargest
 from itertools import count
 
-from cke.diagnostics import require_strict_component
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
@@ -26,7 +26,7 @@ from cke.router.query_plan import QueryPlan
 _DIVERSITY_FLOOR = 8
 
 
-class GraphRetriever:
+class GraphRetriever(DegradationMixin):
     """Retrieve sparse evidence paths from the graph for a query plan."""
 
     def __init__(
@@ -37,7 +37,7 @@ class GraphRetriever:
         path_ranker: PathRankingModel | None = None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.graph_engine = graph_engine
         require_strict_component(
             type(self).__name__, entity_resolver, "entity resolver", self.strict

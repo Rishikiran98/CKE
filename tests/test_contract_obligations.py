@@ -64,6 +64,113 @@ class _FallbackRouter:
         return _EmptyPack()
 
 
+class _HealthyGraphEngine:
+    """Stands in for a graph engine that has not degraded.
+
+    The conversation cases below are about the pipeline and the candidate
+    generator. Letting them build a real KnowledgeGraphEngine means networkx
+    being absent refuses first, and the case proves nothing about the
+    component it names.
+    """
+
+    strict = True
+    degraded = False
+    degraded_reason = ""
+
+    def add_statement(self, *args, **kwargs):
+        return None
+
+
+class _DegradedEmbedder:
+    """An embedder that declares itself strict and has already degraded.
+
+    Supplied so that the two retrievers below are shown to refuse. Left to
+    build their own, whichever inner component is constructed first refuses,
+    and the case says nothing about the retriever it names.
+    """
+
+    strict = True
+    degraded = True
+    degraded_reason = "sentence-transformers was absent when it was built"
+    model_name = "stub-embedder"
+    model_revision = None
+
+    def embed_text(self, text):
+        return [0.0, 0.0]
+
+    def embed_texts(self, texts):
+        return [[0.0, 0.0] for _ in texts]
+
+
+class _RaisingExtractor:
+    """An extractor that fails on every turn, losing that turn's candidates."""
+
+    def extract(self, *args, **kwargs):
+        raise ValueError("this extractor cannot run")
+
+
+class _ShortEmbedder:
+    """An embedder that returns fewer vectors than it was given texts."""
+
+    strict = True
+    degraded = False
+    degraded_reason = ""
+
+    def embed_text(self, text):
+        return [0.0, 0.0]
+
+    def embed_texts(self, texts):
+        return []
+
+
+class _BareReasoner:
+    """A reasoner that answers with a string and no confidence of its own."""
+
+    def answer(self, query, context):
+        return "Turkey"
+
+
+class _OneChunkRetriever:
+    def retrieve(self, query, k=5):
+        return [{"doc_id": "c1", "text": "Redis uses RESP", "score": 0.9}]
+
+
+def _conversation_store(strict):
+    """A memory store holding one event, so retrieval has something to embed."""
+    from cke.conversation.memory_store import ConversationMemoryStore
+    from cke.conversation.types import ConversationEvent
+
+    store = ConversationMemoryStore(graph_engine=_HealthyGraphEngine(), strict=strict)
+    store.store_event(
+        ConversationEvent(
+            conversation_id="c1",
+            event_id="e1",
+            turn_id="t1",
+            turn_order=1,
+            role="user",
+            text="I moved to Berlin",
+            timestamp="2026-01-01T00:00:00Z",
+        )
+    )
+    return store
+
+
+def _chunk_facts():
+    """A chunk store whose statement carries no trust score of its own."""
+    from cke.retrieval.chunk_fact_store import ChunkFactStore
+
+    store = ChunkFactStore()
+    store.add_facts("c1", [Statement("Redis", "uses", "RESP")])
+    return store
+
+
+def _short_corpus(tmp, name):
+    """An MS MARCO TSV with one usable row and one that has too few columns."""
+    path = tmp / name
+    path.write_text("d1\thttp://example/1\tTitle\tBody\nd2\ttwo-columns-only\n")
+    return path
+
+
 def _graph():
     from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 
@@ -90,6 +197,7 @@ def _cases(tmp: pathlib.Path):
     from cke.graph_engine.graph_engine import KnowledgeGraphEngine
     from cke.observability.token_tracker import TokenTracker
     from cke.reasoning.llm_reasoner import LLMReasoner
+    from cke.reasoning.reasoner import TemplateReasoner
     from cke.reasoning.path_reasoner import PathReasoner
     from cke.retrieval.default_evidence_retriever import DefaultEvidenceRetriever
     from cke.retrieval.dense_evidence_retriever import DenseEvidenceRetriever
@@ -99,16 +207,42 @@ def _cases(tmp: pathlib.Path):
     from cke.retrieval.rag_baseline import RAGRetriever
     from cke.schema.relation_mapper import RelationMapper
     from cke.storage.sqlite_store import SQLiteStore
+    from cke.conversation.ingestion import ConversationIngestionPipeline
+    from cke.conversation.memory_store import ConversationMemoryStore
+    from cke.conversation.retrieval.candidate_generation import CandidateGenerator
+    from cke.experiments.retrieval_eval_pipeline import MSMARCOCorpus
+    from cke.observability.system_monitor import SystemMonitor
+    from cke.reasoning.reasoner_adapter import ReasonerAdapter
+    from cke.retrieval.evidence_retriever import EvidenceRetriever
+    from cke.schema.assertion import Assertion
+    from cke.trust.calibration import TrustCalibrator
+    from cke.trust.confidence_calibrator import ConfidenceCalibrator
     from cke.trust.confidence_model import ConfidenceModel
 
     assertion = {"subject": "A", "relation": "uses", "object": "B"}
     return [
         ("EmbeddingModel", lambda s: EmbeddingModel(strict=s), None),
         ("FaissIndex", lambda s: FaissIndex(strict=s), None),
-        ("RAGRetriever", lambda s: RAGRetriever(strict=s), None),
-        ("DenseRetriever", lambda s: DenseRetriever(strict=s), None),
+        (
+            "RAGRetriever",
+            lambda s: RAGRetriever(embedding_model=_DegradedEmbedder(), strict=s),
+            None,
+        ),
+        (
+            "DenseRetriever",
+            lambda s: DenseRetriever(embedding_model=_DegradedEmbedder(), strict=s),
+            None,
+        ),
         ("LLMExtractor", lambda s: LLMExtractor(strict=s), None),
-        ("LLMReasoner", lambda s: LLMReasoner(strict=s), None),
+        (
+            # The fallback is supplied rather than built, so this case is
+            # about the missing API key. Left to default, LLMReasoner builds a
+            # PathReasoner whose embedding model refuses first, and the case
+            # never showed that a strict run refuses to answer without an LLM.
+            "LLMReasoner",
+            lambda s: LLMReasoner(fallback=TemplateReasoner(), strict=s),
+            None,
+        ),
         ("EntityResolver", lambda s: EntityResolver(strict=s), None),
         ("CoreferenceResolver", lambda s: CoreferenceResolver(strict=s), None),
         ("RelationMapper", lambda s: RelationMapper(strict=s), None),
@@ -118,7 +252,11 @@ def _cases(tmp: pathlib.Path):
             lambda s: TrustEngine(config_path=tmp / "absent.yaml", strict=s),
             None,
         ),
-        ("PathReasoner", lambda s: PathReasoner(strict=s), None),
+        (
+            "PathReasoner",
+            lambda s: PathReasoner(embedding_model=_DegradedEmbedder(), strict=s),
+            None,
+        ),
         (
             "DenseEvidenceRetriever",
             lambda s: DenseEvidenceRetriever(_NoScoreRetriever(), strict=s),
@@ -193,6 +331,62 @@ def _cases(tmp: pathlib.Path):
             lambda s: LLMAnswerer(backend="api", api_key=None, strict=s),
             None,
         ),
+        (
+            "MSMARCOCorpus",
+            lambda s: MSMARCOCorpus(_short_corpus(tmp, f"corpus-{s}.tsv"), strict=s),
+            None,
+        ),
+        (
+            # A metric recorder handed a value it cannot count. The figure it
+            # feeds undercounts, and a snapshot could not previously say so.
+            "SystemMonitor",
+            lambda s: SystemMonitor(strict=s),
+            lambda o: o.record_retrieval("not a number"),
+        ),
+        (
+            "ConversationIngestionPipeline",
+            lambda s: ConversationIngestionPipeline(
+                ConversationMemoryStore(graph_engine=_HealthyGraphEngine(), strict=s),
+                extractors=[_RaisingExtractor()],
+                strict=s,
+            ),
+            lambda o: o.ingest_turn("c1", "user", "I moved to Berlin"),
+        ),
+        (
+            "CandidateGenerator",
+            lambda s: CandidateGenerator(
+                _conversation_store(s), embedding_model=_ShortEmbedder(), strict=s
+            ),
+            lambda o: o.generate("where did I move", conversation_id="c1"),
+        ),
+        (
+            "ReasonerAdapter",
+            lambda s: ReasonerAdapter(_BareReasoner(), strict=s),
+            lambda o: o.reason(
+                "where is it?", [Statement("Hagia Sophia", "located in", "Istanbul")]
+            ),
+        ),
+        (
+            # config_path=None selects the built-in weights deliberately and is
+            # not a degradation; the trust substitution below is.
+            "EvidenceRetriever",
+            lambda s: EvidenceRetriever(
+                _OneChunkRetriever(), _chunk_facts(), config_path=None, strict=s
+            ),
+            lambda o: o.retrieve("what does redis use"),
+        ),
+        (
+            "TrustCalibrator",
+            lambda s: TrustCalibrator(strict=s),
+            lambda o: o.fit_from_graph(
+                [Assertion(subject="A", relation="uses", object="B")]
+            ),
+        ),
+        (
+            "ConfidenceCalibrator",
+            lambda s: ConfidenceCalibrator(strict=s),
+            lambda o: o.calibrate({}),
+        ),
     ]
 
 
@@ -217,7 +411,17 @@ def test_component_honours_all_three_obligations(name, bare, caplog, tmp_path):
     assert "degraded" in caplog.text.lower(), f"{name} did not warn"
 
     clear_runtime_state()
-    with pytest.raises(DegradedComponentError):
+    with pytest.raises(DegradedComponentError) as raised:
         strict_component = build(True)
         if trigger:
             trigger(strict_component)
+
+    # Which component refused matters. Several of these build collaborators
+    # that can degrade for reasons of their own, so a bare `raises` passes
+    # when the component under test never refused anything and something it
+    # constructed did.
+    refused = str(raised.value)
+    assert refused.startswith(name), (
+        f"{name} was expected to refuse under strict, but the refusal came "
+        f"from elsewhere: {refused}"
+    )

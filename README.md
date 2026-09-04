@@ -40,11 +40,22 @@ A component can run with reduced capability when an optional dependency, a
 model, an API key, or a config file is missing. And a value can be substituted
 where nothing was measured: a retrieval result with no score, a statement with
 no trust, an evaluated row with no prediction, a stored context that will not
-decode. Twenty-six components declare both kinds.
+decode. Forty-seven components declare both kinds.
 Any such component warns at `WARNING` naming the specific cause, sets an
 inspectable `degraded` flag with a `degraded_reason`, and raises
 `DegradedComponentError` instead of degrading when constructed with
 `strict=True`.
+
+This number is not maintained by hand. `tests/test_contract_census.py` walks
+`cke/` and requires every declaring class to be held to the contract by name.
+Thirty-four are driven into their own degraded state and checked against all
+three obligations. Fifteen accept an injected collaborator and must refuse one
+that has degraded and one that cannot say whether it has — that list is read
+out of the package rather than curated, so a guard added without a test for it
+fails the census. Three components are in both. One carries the flag and
+substitutes nothing, with its reason stated. The number said twenty-six for as
+long as it was maintained by hand, and matched the test that asserted it while
+thirteen components sat outside both.
 
 Every benchmark, evaluation and experiment entry point constructs its
 components with `strict=True`, prints the environment report before it starts,

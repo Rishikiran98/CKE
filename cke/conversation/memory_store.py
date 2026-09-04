@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from cke.conversation.config import ConversationConfig
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.conversation.types import (
     CanonicalMemory,
     ConversationEvent,
@@ -15,7 +16,7 @@ from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 
 
-class ConversationMemoryStore:
+class ConversationMemoryStore(DegradationMixin):
     """In-memory store with clear separation between events and canonical memories."""
 
     def __init__(
@@ -25,7 +26,10 @@ class ConversationMemoryStore:
         config: ConversationConfig | None = None,
         strict: bool = False,
     ) -> None:
-        self.strict = bool(strict)
+        self._init_degradation(strict)
+        require_strict_component(
+            type(self).__name__, graph_engine, "graph engine", self.strict
+        )
         self.config = config or ConversationConfig()
         self.graph_engine = graph_engine or KnowledgeGraphEngine(strict=strict)
         self._events_by_conversation: dict[str, list[ConversationEvent]] = defaultdict(
