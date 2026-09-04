@@ -18,13 +18,6 @@ from cke.diagnostics import DegradedComponentError, clear_runtime_state
 from cke.models import Statement
 
 
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
-
-
 @pytest.fixture
 def bare(monkeypatch):
     """An environment with none of the optional dependencies."""

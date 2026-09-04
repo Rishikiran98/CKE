@@ -297,5 +297,56 @@
       "new": "",
       "tests": "tests/test_contract_census.py"
     }
+  ],
+  "hygiene": [
+    {
+      "label": "the network guard stops refusing sockets",
+      "path": "tests/conftest.py",
+      "old": "    if request.node.get_closest_marker(\"needs_download\"):\n        return\n\n    def _refuse(*args, **kwargs):",
+      "new": "    if True:\n        return\n\n    def _refuse(*args, **kwargs):",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "a test grants itself network access without declaring it",
+      "path": "tests/test_orchestrator_pipeline_skeleton.py",
+      "old": "def test_pipeline_skeleton_runs():",
+      "new": "@pytest.mark.needs_download\ndef test_pipeline_skeleton_runs():",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "the registry stops being cleared between tests",
+      "path": "tests/conftest.py",
+      "old": "    clear_runtime_state()\n    yield\n    clear_runtime_state()",
+      "new": "    yield",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "a stub router is reintroduced to answer the routing question",
+      "path": "tests/test_orchestrator_pipeline_skeleton.py",
+      "old": "def test_pipeline_skeleton_runs():",
+      "new": "class SneakyRouter:\n    def route(self, query):\n        return None\n\n\ndef test_pipeline_skeleton_runs():",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "pytest stops running coverage for anyone but CI",
+      "path": "pyproject.toml",
+      "old": "addopts = \"-q --cov --cov-report=term-missing --strict-markers --strict-config\"",
+      "new": "addopts = \"-q --strict-markers --strict-config\"",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "the orchestrator's alias overwrite is fixed without the xfail being retired",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "        for entity in candidate_entities:\n            self.entity_resolver.register_alias(entity, entity)\n",
+      "new": "",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "the cold-cache step stops deselecting only the declared downloads",
+      "path": "tests/test_token_counter.py",
+      "old": "@pytest.mark.needs_download\ndef test_the_count_is_not_a_function_of_the_word_count(counter):",
+      "new": "def test_the_count_is_not_a_function_of_the_word_count(counter):",
+      "tests": "tests/test_test_hygiene.py"
+    }
   ]
 }

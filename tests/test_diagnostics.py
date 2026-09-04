@@ -14,19 +14,11 @@ from cke import diagnostics
 from cke.diagnostics import (
     DegradationMixin,
     DegradedComponentError,
-    clear_runtime_state,
     declare_degradation,
     degradation_summary,
     environment_report,
     record_loaded_model,
 )
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 class Component(DegradationMixin):

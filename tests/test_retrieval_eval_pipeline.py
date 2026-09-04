@@ -15,7 +15,7 @@ import json
 import numpy as np
 import pytest
 
-from cke.diagnostics import DegradedComponentError, clear_runtime_state
+from cke.diagnostics import DegradedComponentError
 from cke.experiments import retrieval_eval_pipeline as pipeline
 from cke.experiments.retrieval_eval_pipeline import (
     CorpusDocument,
@@ -25,13 +25,6 @@ from cke.experiments.retrieval_eval_pipeline import (
     evaluate_recall_at_k,
     load_hotpot_queries,
 )
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 @pytest.fixture

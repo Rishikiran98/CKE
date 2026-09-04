@@ -38,6 +38,7 @@ def test_a_pipeline_cannot_be_built_without_a_counter(name):
         getattr(bench, name)(strict=False)
 
 
+@pytest.mark.needs_download
 def test_every_arm_counts_with_the_same_object():
     counter = TokenCounter(strict=True)
     built = [
@@ -63,6 +64,7 @@ def test_the_script_no_longer_defines_a_word_count_estimator():
     assert "len(text.split()) * 1.3" not in source
 
 
+@pytest.mark.needs_download
 def test_the_summary_names_the_counter_that_produced_its_figures():
     counter = TokenCounter(strict=True)
     summary = bench.produce_summary(
@@ -346,6 +348,17 @@ def test_the_summary_records_the_identity_of_every_model_loaded():
         clear_runtime_state()
 
 
+class _HealthyCounter:
+    """The two attributes produce_summary reads, from something that cannot
+    degrade and so cannot appear in the degradation list under test."""
+
+    description = "tiktoken cl100k_base"
+    is_estimate = False
+
+    def count(self, text: str) -> int:
+        return len(text.split())
+
+
 def test_the_summary_carries_what_degraded_beside_the_figures():
     """A degradation printed only to a console is lost the moment it scrolls."""
     from cke.diagnostics import clear_runtime_state, record_degradation
@@ -354,7 +367,11 @@ def test_the_summary_carries_what_degraded_beside_the_figures():
     try:
         record_degradation("EmbeddingModel", "it hashed tokens instead")
 
-        summary = bench.produce_summary({}, TokenCounter(), SpanExtractiveQA())
+        # A healthy counter, supplied rather than built: produce_summary reads
+        # only these two attributes from it, and a real TokenCounter fetches
+        # its encoding, degrades when it cannot, and adds itself to the very
+        # list this test asserts the contents of.
+        summary = bench.produce_summary({}, _HealthyCounter(), SpanExtractiveQA())
 
         assert summary["environment"]["degradations"] == [
             {"component": "EmbeddingModel", "reason": "it hashed tokens instead"}

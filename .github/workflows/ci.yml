@@ -44,6 +44,20 @@ jobs:
       - name: Run tests with coverage, failing under the floor
         run: pytest -q --cov --cov-report=term-missing
 
+      - name: Prove no unmarked test needs a download
+        # The socket guard only fires when something actually opens a socket,
+        # and a warm cache means it does not: these tests passed here and were
+        # refused on the runner, where the cache was cold. Pointing every
+        # cache at an empty directory makes a warm machine behave like a cold
+        # one, so the guard catches a new download at the desk rather than
+        # here. Deselects the ten tests that declare they need one.
+        run: |
+          COLD="$(mktemp -d)"
+          TIKTOKEN_CACHE_DIR="$COLD/tiktoken" \
+          HF_HOME="$COLD/hf" \
+          XDG_CACHE_HOME="$COLD" \
+            pytest -m "not needs_download" --no-cov
+
       - name: Run the demo and assert on its answer
         # Not `python demo.py | tee demo.out`: the default shell is `bash -e`
         # without pipefail, so the pipeline reported tee's status and the

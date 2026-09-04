@@ -81,6 +81,23 @@ files = [
     "cke/trust/confidence_calibrator.py",
 ]
 
+[tool.pytest.ini_options]
+# There was no pytest configuration at all. A developer running plain `pytest`
+# got no coverage and no floor: the floor lived in one string in ci.yml, so
+# the gate existed only on the runner and nowhere a contributor would meet it.
+testpaths = ["tests"]
+addopts = "-q --cov --cov-report=term-missing --strict-markers --strict-config"
+# --strict-markers: a typo in a marker name is an error, not a silently
+# unregistered marker that applies to nothing. needs_download is the only marker
+# this suite defines and it gates the network guard, so a misspelling of it
+# would quietly grant network access.
+markers = [
+    "needs_download: loads a real model or tokenizer and may use the network",
+]
+filterwarnings = [
+    "error",
+]
+
 [tool.coverage.run]
 # scripts/ is measured. It was not, and it holds the benchmark driver and the
 # downloaders — the code that produces every number this project reports —

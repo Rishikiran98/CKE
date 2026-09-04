@@ -11,16 +11,8 @@ import pytest
 
 from cke.diagnostics import (
     DegradedComponentError,
-    clear_runtime_state,
     environment_report,
 )
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 def _reasons() -> list[str]:
