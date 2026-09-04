@@ -8,7 +8,6 @@ one, and records what it loaded so a results file can state it.
 
 from __future__ import annotations
 
-import pathlib
 
 import logging
 
@@ -77,16 +76,61 @@ def test_a_full_commit_hash_pins():
     assert revision_pin_problem("some/model", _A_COMMIT.upper()) is None
 
 
-def test_the_two_pinned_loaders_share_one_check():
-    """One statement of what a pin is, not one per loader that drifts."""
-    from cke.evaluation import llm_qa
-    from cke.retrieval import embedding_model
+@pytest.mark.parametrize(
+    "revision",
+    [None, "", "main", "v2.0", "1110a24", "z" * 40],
+)
+def test_the_two_pinned_loaders_refuse_the_same_revisions(revision, monkeypatch):
+    """One statement of what a pin is, not one per loader that drifts.
 
-    for module in (llm_qa, embedding_model):
-        source = (module.__file__ or "").replace(".pyc", ".py")
-        text = pathlib.Path(source).read_text(encoding="utf-8")
-        assert "[0-9a-fA-F]{40}" not in text, f"{module.__name__} re-states the rule"
-        assert "revision_pin_problem" in text
+    This used to read both modules' source and assert that neither restated
+    the 40-hex regex. That is satisfied by a loader that restates the rule in
+    any other form, and broken by one that mentions the pattern in a comment.
+    What matters is that the two agree, so ask them the same questions.
+    """
+    from cke.evaluation.llm_qa import LLMAnswerer
+    from cke.retrieval import embedding_model as embed_module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", _stub_loader([]))
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(embed_module, "_FAILED_MODEL_LOADS", {})
+
+    with pytest.raises(DegradedComponentError) as embedder_refused:
+        embed_module.EmbeddingModel("some/model", revision, strict=True)
+
+    with pytest.raises(DegradedComponentError) as answerer_refused:
+        LLMAnswerer(
+            backend="local",
+            model="some/model",
+            model_revision=revision,
+            strict=True,
+        )
+
+    # The shared statement of the rule, verbatim. Asserting only that the
+    # model name appears passed on any refusal that mentioned it — including
+    # the load failure that follows when the pin check is removed, which is
+    # how a mutation deleting that check survived this test.
+    problem = revision_pin_problem("some/model", revision)
+    assert problem is not None
+    for refusal in (embedder_refused, answerer_refused):
+        assert problem in str(refusal.value), (
+            "this loader refused for some other reason, so it is not sharing "
+            f"the pin rule: {refusal.value}"
+        )
+
+
+def test_the_two_pinned_loaders_accept_the_same_revision(monkeypatch):
+    """The other half: a real commit is a pin for both of them."""
+    from cke.retrieval import embedding_model as embed_module
+
+    monkeypatch.setattr(embed_module, "SentenceTransformer", _stub_loader([]))
+    monkeypatch.setattr(embed_module, "_GLOBAL_MODEL_CACHE", {})
+    monkeypatch.setattr(embed_module, "_FAILED_MODEL_LOADS", {})
+
+    embedder = embed_module.EmbeddingModel("some/model", _A_COMMIT, strict=True)
+
+    assert embedder.degraded is False
+    assert revision_pin_problem("some/model", _A_COMMIT) is None
 
 
 # ---------------------------------------------------------------------------

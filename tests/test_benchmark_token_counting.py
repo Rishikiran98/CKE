@@ -56,12 +56,42 @@ def test_the_script_no_longer_defines_a_word_count_estimator():
 
     It existed twice — as a class and as a module-level helper — and a copy
     left behind is a copy that gets called again.
-    """
-    source = (ROOT / "scripts" / "run_cke_benchmark.py").read_text(encoding="utf-8")
 
-    assert "WORDS_TO_TOKENS" not in source
-    assert "_token_count_static" not in source
-    assert "len(text.split()) * 1.3" not in source
+    This is an anti-resurrection check rather than a behavioural one: the
+    property is that certain code does not exist, and there is no run that
+    can demonstrate the absence of a definition. It reads the parse tree
+    rather than the text, so a mention in a comment or a docstring no longer
+    fails it and a reformatting no longer passes it.
+    """
+    import ast
+
+    tree = ast.parse(
+        (ROOT / "scripts" / "run_cke_benchmark.py").read_text(encoding="utf-8")
+    )
+
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    assert "_token_count_static" not in defined
+    assert "WORDS_TO_TOKENS" not in defined
+    assert not any(
+        isinstance(node, ast.Name) and node.id == "WORDS_TO_TOKENS"
+        for node in ast.walk(tree)
+    )
+
+    multiplications = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Mult)
+        and any(
+            isinstance(side, ast.Constant) and side.value == 1.3
+            for side in (node.left, node.right)
+        )
+    ]
+    assert multiplications == [], "a word-count multiplier is back in the driver"
 
 
 @pytest.mark.needs_download

@@ -21,7 +21,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 #: The floor as it stands, for the scope below. Raise it with the
 #: configuration; never lower it, and never narrow the scope to raise it.
-FLOOR = 78.0
+FLOOR = 78.5
 
 #: What is measured. Widening this is what re-baselined the floor once, and
 #: recording it here is what makes a narrowing visible.

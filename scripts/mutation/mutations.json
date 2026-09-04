@@ -371,5 +371,70 @@
       "new": "        resolved = None\n        if resolved:\n            return ResolutionResult(canonical=resolved, confidence=0.90)",
       "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
     }
+  ],
+  "behaviour": [
+    {
+      "label": "the adapter stops declaring its substituted confidence",
+      "path": "cke/reasoning/reasoner_adapter.py",
+      "old": "            if adapted.statements:",
+      "new": "            if False:",
+      "tests": "tests/test_substituted_values.py"
+    },
+    {
+      "label": "the orchestrator builds its reasoner adapter non-strict again",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "        self.reasoner_adapter = ReasonerAdapter(self.reasoner, strict=strict)",
+      "new": "        self.reasoner_adapter = ReasonerAdapter(self.reasoner)",
+      "tests": "tests/test_substituted_values.py"
+    },
+    {
+      "label": "a strict refusal is swallowed as an abstention again",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "        except DegradedComponentError:",
+      "new": "        except _NeverRaised:",
+      "tests": "tests/test_strict_components.py"
+    },
+    {
+      "label": "the orchestrator builds its reasoner without strict",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "            self.reasoner = PathReasoner(strict=strict)",
+      "new": "            self.reasoner = PathReasoner()",
+      "tests": "tests/test_strict_components.py"
+    },
+    {
+      "label": "the index build moves outside the latency clock",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "        t0 = time.perf_counter()\n\n        if not docs:",
+      "new": "        if not docs:",
+      "tests": "tests/test_intervals_and_latency.py"
+    },
+    {
+      "label": "the git state is read after the run has written its own files",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    git_state = _git_description()\n\n    output_dir = Path(args.output_dir)\n    output_dir.mkdir(parents=True, exist_ok=True)",
+      "new": "    output_dir = Path(args.output_dir)\n    output_dir.mkdir(parents=True, exist_ok=True)\n    git_state = _git_description()",
+      "tests": "tests/test_intervals_and_latency.py"
+    },
+    {
+      "label": "one pinned loader stops sharing the rule",
+      "path": "cke/evaluation/llm_qa.py",
+      "old": "        pin_problem = revision_pin_problem(self.model_name, self.model_revision)",
+      "new": "        pin_problem = None",
+      "tests": "tests/test_model_pinning.py"
+    },
+    {
+      "label": "run_experiment builds its retriever non-strict again",
+      "path": "cke/experiments/run_experiment.py",
+      "old": "        retriever = GraphRetriever(graph, strict=strict)",
+      "new": "        retriever = GraphRetriever(graph)",
+      "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "a test goes back to asserting on source text",
+      "path": "tests/test_orchestrator_pipeline_skeleton.py",
+      "old": "def test_pipeline_skeleton_runs():",
+      "new": "def test_reads_source():\n    import inspect\n\n    assert inspect.getsource(QueryOrchestrator) is not None\n\n\ndef test_pipeline_skeleton_runs():",
+      "tests": "tests/test_test_hygiene.py"
+    }
   ]
 }

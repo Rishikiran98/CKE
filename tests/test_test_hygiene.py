@@ -198,3 +198,74 @@ def test_pytest_is_configured_in_the_repository_and_not_only_in_ci():
     assert "--cov" in config["addopts"]
     assert "--strict-markers" in config["addopts"]
     assert "error" in config["filterwarnings"]
+
+
+#: Tests allowed to read Python source, each because the property it holds is
+#: the absence of a definition — which no run can demonstrate. Each reads the
+#: parse tree, not the text, so a mention in a comment cannot satisfy it and a
+#: reformatting cannot break it.
+MAY_READ_SOURCE = {
+    "test_benchmark_token_counting.py": (
+        "The word-count multiplier existed twice, as a class and as a "
+        "module-level helper, and a copy left behind is a copy that gets "
+        "called again. Absence of a definition has no runtime witness."
+    ),
+    "test_strict_components.py": (
+        "Walks cke/ for classes that declare a degradation without carrying "
+        "the flag. A hand-kept list is how these were missed in the first "
+        "place, so it is read out of the package."
+    ),
+    "test_substituted_values.py": (
+        "Same sweep, for declare_degradation called from a method rather "
+        "than a module-level function."
+    ),
+    "test_contract_census.py": (
+        "The census itself: every declaring class must be accounted for, "
+        "which is a question about what cke/ contains."
+    ),
+    "test_test_hygiene.py": (
+        "This file, which enforces the rule and so has to read the tests."
+    ),
+    "test_download_datasets.py": (
+        "R1: evaluation data must come from a real, externally maintained "
+        "source. The synthetic generator that was deleted must stay deleted, "
+        "and absence of a definition has no runtime witness."
+    ),
+    "test_model_pinning.py": (
+        "Resolves a module's __file__ only to name it in a message; the "
+        "assertions themselves construct both loaders and compare refusals."
+    ),
+}
+
+
+def test_no_test_asserts_on_source_text():
+    """A test that greps its own implementation is evidence about a string.
+
+    `assert "self._degrade" in inspect.getsource(...)` passes on a comment,
+    on a dead branch and on a call that is never reached, and fails on a
+    rename that changes nothing. Every one of those has been replaced by a
+    test that runs the thing. The few files below read the parse tree instead,
+    and each says why.
+    """
+    offenders = []
+    for path in _test_files():
+        source = path.read_text()
+        # Path(__file__) to locate the repository root is not reading source;
+        # getsource, parsing a module, and slicing a .py file's text are.
+        reads_source = [
+            marker
+            for marker in ("inspect.getsource", "ast.parse(", '.py").read_text(')
+            if marker in source
+        ]
+        if reads_source and path.name not in MAY_READ_SOURCE:
+            offenders.append(f"{path.name}: {', '.join(reads_source)}")
+    assert offenders == [], (
+        "these assert on source text; run the behaviour instead, or add the "
+        "file to MAY_READ_SOURCE with the reason absence cannot be observed"
+    )
+
+
+def test_every_source_reading_file_states_why():
+    for name, reason in MAY_READ_SOURCE.items():
+        assert (TESTS / name).exists(), f"{name} is listed and does not exist"
+        assert len(reason) > 40, f"{name} reads source with no stated reason"
