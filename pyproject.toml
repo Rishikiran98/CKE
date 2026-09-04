@@ -115,7 +115,13 @@ branch = true
 # coverage of cke/ and scripts/ together. Widening what is measured and
 # counting branches both add uncovered ground; the number went down because
 # it now describes more of the repository, which is the point.
-fail_under = 78.0
+#
+# 78.0 -> 80.0 when the source-text assertions were replaced by behavioural
+# ones: a test that greps an implementation executes none of it, so the
+# replacements moved the measured figure to 80.13 without a line of cke/ or
+# scripts/ being written. The floor follows the measurement; slack in a floor
+# is room for a regression to fit through.
+fail_under = 80.0
 precision = 2
 skip_covered = true
 

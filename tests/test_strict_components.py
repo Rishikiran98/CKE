@@ -421,18 +421,41 @@ def test_llm_extractor_declares_an_empty_llm_response(monkeypatch):
     assert "no valid assertions" in extractor.degraded_reason
 
 
-def test_orchestrator_does_not_swallow_a_strict_refusal():
+def test_orchestrator_does_not_swallow_a_strict_refusal(offline_embedder):
     """DegradedComponentError subclasses RuntimeError, so a broad except
-    caught it and scored a refused run as an abstention."""
-    import inspect
+    caught it and scored a refused run as an abstention.
 
-    from cke.pipeline import query_orchestrator as module
+    This used to compare the character offsets of two except clauses in the
+    source of _run_reasoner. That passes if the clauses appear in a comment
+    and fails if one is renamed, and it says nothing about what answer() does
+    with a refusal — so give it a reasoner that refuses and look.
+    """
+    from cke.diagnostics import DegradedComponentError
+    from cke.pipeline.query_orchestrator import QueryOrchestrator
+    from cke.router.query_router import QueryRouter
 
-    source = inspect.getsource(module.QueryOrchestrator._run_reasoner)
-    assert "except DegradedComponentError:" in source
-    assert source.index("except DegradedComponentError:") < source.index(
-        "except Exception:"
+    class RefusingReasoner:
+        strict = True
+        degraded = False
+        degraded_reason = ""
+
+        def reason(self, *args, **kwargs):
+            raise DegradedComponentError("this reasoner refused to run degraded")
+
+    from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+
+    engine = KnowledgeGraphEngine(strict=True)
+    engine.add_statement("Hagia Sophia", "located_in", "Istanbul", confidence=0.9)
+    orchestrator = QueryOrchestrator(
+        graph_engine=engine,
+        router=QueryRouter(strict=True),
+        reasoner=RefusingReasoner(),
+        retrieval_mode="graph",
+        strict=True,
     )
+
+    with pytest.raises(DegradedComponentError, match="refused to run degraded"):
+        orchestrator.answer("Which country is Hagia Sophia located in?")
 
 
 def test_failed_model_load_is_attempted_once_per_process(monkeypatch):
@@ -533,18 +556,29 @@ def test_graph_retriever_propagates_strict(monkeypatch):
         module.GraphRetriever(KnowledgeGraphEngine(), strict=True)
 
 
-def test_query_orchestrator_propagates_strict(monkeypatch):
-    """The orchestrator hardcoded non-strict for its reasoner and resolver."""
-    import inspect
+def test_query_orchestrator_propagates_strict(offline_embedder):
+    """The orchestrator hardcoded non-strict for its reasoner and resolver.
 
-    from cke.pipeline import query_orchestrator as module
+    Asserting that "PathReasoner(strict=strict)" appears in __init__ checks
+    that a line of code exists. What a strict run needs is that the object it
+    builds refuses its own fallbacks, so ask the object.
+    """
+    from cke.graph_engine.graph_engine import KnowledgeGraphEngine
+    from cke.pipeline.query_orchestrator import QueryOrchestrator
+    from cke.router.query_router import QueryRouter
 
-    signature = inspect.signature(module.QueryOrchestrator.__init__)
-    assert "strict" in signature.parameters
+    orchestrator = QueryOrchestrator(
+        graph_engine=KnowledgeGraphEngine(strict=True),
+        router=QueryRouter(strict=True),
+        retrieval_mode="graph",
+        strict=True,
+    )
 
-    source = inspect.getsource(module.QueryOrchestrator.__init__)
-    assert "PathReasoner(strict=strict)" in source
-    assert "EntityResolver(strict=strict)" in source
+    assert orchestrator.strict is True
+    assert orchestrator.reasoner.strict is True
+    assert orchestrator.entity_resolver.strict is True
+    assert orchestrator.reasoner_adapter.strict is True
+    assert orchestrator.degraded is False
 
 
 def test_coreference_declares_the_fallback_when_a_model_finds_nothing(monkeypatch):

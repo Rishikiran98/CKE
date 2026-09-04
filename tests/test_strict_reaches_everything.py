@@ -15,6 +15,9 @@ import pytest
 
 from cke.diagnostics import DegradedComponentError
 
+#: One sentence the rule extractor can read, so evaluate() has work to do.
+CONTEXT = "Salvatore Sanfilippo developed Redis."
+
 
 # ---------------------------------------------------------------------------
 # The check that could not tell a healthy component from a degraded one
@@ -115,17 +118,40 @@ def test_strict_reaches_the_ingestion_pipeline_and_the_embedder(offline_embedder
 # ---------------------------------------------------------------------------
 
 
-def test_every_entry_point_passes_strict_to_what_it_builds():
-    """A source check, because these are constructor call sites rather than
-    behaviour — but a narrow one: each name below is a component with a
-    degradation path that the driver used to build without strict."""
-    from pathlib import Path
+def test_every_entry_point_passes_strict_to_what_it_builds(offline_embedder):
+    """run_experiment.evaluate built its GraphRetriever non-strict.
 
-    root = Path(__file__).resolve().parents[1]
-    experiment = (root / "cke" / "experiments" / "run_experiment.py").read_text(
-        encoding="utf-8"
-    )
-    assert "GraphRetriever(graph, strict=strict)" in experiment
+    Its own signature says strict=True, so a run launched strict got a
+    retriever that would accept its own fallbacks. I first wrote this as a
+    source check for the literal call, with a note admitting it — which is
+    the shape of test this branch exists to remove. Watch the construction
+    instead: every GraphRetriever the function builds must be strict when it
+    is.
+    """
+    from cke.experiments import run_experiment as module
+
+    built = []
+    real = module.GraphRetriever
+
+    def _record(graph, *args, **kwargs):
+        retriever = real(graph, *args, **kwargs)
+        built.append(retriever)
+        return retriever
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(module, "GraphRetriever", _record)
+        module.evaluate(
+            [module.QAItem(question="Who made Redis?", context=CONTEXT, answer="x")],
+            strict=True,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert built, "evaluate() built no retriever, so nothing was checked"
+    for retriever in built:
+        assert retriever.strict is True
+        assert retriever.degraded is False, retriever.degraded_reason
 
 
 def test_the_monitor_declares_a_metric_it_could_not_record():

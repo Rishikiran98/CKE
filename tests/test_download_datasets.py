@@ -63,15 +63,41 @@ def _musique_row() -> dict:
 
 
 def test_no_synthetic_generator_remains():
-    """The generator and its fixtures must stay deleted."""
-    source = (ROOT / "scripts" / "download_datasets.py").read_text(encoding="utf-8")
-    for name in (
+    """The generator and its fixtures must stay deleted.
+
+    R1 is that evaluation data comes from a real, citable, externally
+    maintained source or the run errors out. Absence of a definition has no
+    runtime witness, so this reads the parse tree — not the text, which a
+    mention in a comment satisfied and a reformatting could break.
+    """
+    import ast
+
+    tree = ast.parse(
+        (ROOT / "scripts" / "download_datasets.py").read_text(encoding="utf-8")
+    )
+
+    gone = {
         "_make_synthetic",
         "_SYNTHETIC_TEMPLATES",
         "_ENTITY_POOL",
         "_RELATION_SENTENCES",
-    ):
-        assert name not in source
+    }
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    } | {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+    assert (
+        gone & (defined | referenced) == set()
+    ), "a synthetic data generator is back in the downloader"
 
 
 def test_missing_dataset_raises_and_writes_nothing(tmp_path, monkeypatch):

@@ -7,7 +7,10 @@ second.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -214,16 +217,54 @@ def test_the_outputs_say_what_a_latency_figure_covers():
         assert "builds its index once" in text
 
 
-def test_the_timed_region_covers_building_the_arms_structure():
-    """The claim above must match the code: the clock starts before the
-    index is built, not after."""
-    source = (ROOT / "scripts" / "run_cke_benchmark.py").read_text(encoding="utf-8")
-    rag = source[
-        source.index("class RAGPipeline") : source.index("class CKELitePipeline")
-    ]
-    start = rag.index("t0 = time.perf_counter()")
+class _CountingCounter:
+    """A token counter that needs no encoding and so no download."""
 
-    assert "build_index" in rag[start:], "the index build must fall inside the clock"
+    description = "stub counter"
+    is_estimate = False
+
+    def count(self, text: str) -> int:
+        return len(str(text).split())
+
+
+def test_the_timed_region_covers_building_the_arms_structure(monkeypatch):
+    """The claim above must match the run: the index build is inside the clock.
+
+    This used to slice the driver's source between two class names, find
+    "t0 = time.perf_counter()", and assert "build_index" appeared after it.
+    That passes on a comment and on a dead branch, fails on a rename that
+    changes nothing, and says nothing about the number reported. So make the
+    index build take a measurable amount of time and read the latency.
+    """
+    slow_build_ms = 60
+
+    class SlowIndexRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def build_index(self, docs):
+            time.sleep(slow_build_ms / 1000.0)
+
+        def retrieve(self, question, k=5):
+            return [{"doc_id": "d1", "text": "Hagia Sophia is in Istanbul."}]
+
+    monkeypatch.setattr(bench, "RAGRetriever", SlowIndexRetriever)
+    pipeline = bench.RAGPipeline(
+        token_counter=_CountingCounter(),
+        answerer=SpanExtractiveQA(),
+        strict=False,
+    )
+
+    result = pipeline.run_item(
+        "Where is Hagia Sophia?",
+        [{"doc_id": "d1", "text": "Hagia Sophia is in Istanbul."}],
+        k=1,
+    )
+
+    assert result["latency_ms"] >= slow_build_ms, (
+        "the reported latency does not include the index build, so it is a "
+        "query latency and the reports describe it as more than that"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -439,15 +480,51 @@ def test_a_key_present_in_only_one_run_is_reported(tmp_path):
     assert bench.compare_runs(first, second) == ["b: only in the first run"]
 
 
-def test_the_git_state_is_read_before_the_run_writes_anything():
+def test_the_git_state_is_read_before_the_run_writes_anything(tmp_path, monkeypatch):
     """With --output-dir inside the repository, the run's own files were in
     the tree by the time the state was read, so a run that started clean
-    recorded itself dirty because of the artifacts it had just produced."""
-    source = (ROOT / "scripts" / "run_cke_benchmark.py").read_text(encoding="utf-8")
-    read_at = source.index("git_state = _git_description()")
-    made_at = source.index("output_dir.mkdir(")
+    recorded itself dirty because of the artifacts it had just produced.
 
-    assert read_at < made_at, "the state must be read before the directory exists"
+    This used to compare the character offsets of two lines in the driver.
+    Instead, watch the call: record whether the output directory existed at
+    the moment the state was read. The run is expected to fail afterwards —
+    it has no datasets — and that is fine, because everything under test has
+    already happened by then.
+    """
+    output_dir = tmp_path / "results-that-do-not-exist-yet"
+    observed = {}
+
+    def _spy():
+        observed["output_dir_existed"] = output_dir.exists()
+        return "0000000 (clean)"
+
+    monkeypatch.setattr(bench, "_git_description", _spy)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_cke_benchmark.py",
+            # --allow-degraded so the run gets as far as the line under test
+            # on a machine with no tokenizer cached: a strict TokenCounter
+            # refuses before main() reads the git state, and this test is
+            # about the ordering, not about strictness.
+            "--allow-degraded",
+            "--skip-download",
+            "--output-dir",
+            str(output_dir),
+            "--limit",
+            "1",
+        ],
+    )
+
+    with contextlib.suppress(BaseException):
+        bench.main()
+
+    assert observed, "the run never read the git state at all"
+    assert observed["output_dir_existed"] is False, (
+        "the state was read after the output directory existed, so a run "
+        "writing into the repository records itself dirty for its own files"
+    )
 
 
 def test_the_provenance_says_whether_the_file_was_a_whole_split(tmp_path):
