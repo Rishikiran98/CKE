@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
+from cke.datasets.musique_loader import MuSiQueDataset  # noqa: E402
 from cke.diagnostics import degradation_summary, environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
@@ -822,6 +823,12 @@ def _load_hotpotqa(path: Path, limit: int) -> list[dict[str, Any]]:
     return ds.items[:limit]
 
 
+def _load_musique(path: Path, limit: int) -> list[dict[str, Any]]:
+    ds = MuSiQueDataset()
+    ds.load(str(path))
+    return ds.items[:limit]
+
+
 def _load_wiki2(path: Path, limit: int) -> list[dict[str, Any]]:
     ds = WikiMultiHopDataset()
     ds.load(str(path))
@@ -932,6 +939,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="results")
     parser.add_argument("--hotpot-path", default=None)
     parser.add_argument("--wiki2-path", default=None)
+    parser.add_argument("--musique-path", default=None)
     parser.add_argument(
         "--allow-degraded",
         action="store_true",
@@ -1021,12 +1029,16 @@ def main() -> None:
         spec.loader.exec_module(dl_mod)  # type: ignore[union-attr]
         dl_mod.download_hotpotqa(data_dir / "hotpotqa_dev.json", limit=args.limit)
         dl_mod.download_wiki2(data_dir / "wiki2_dev.json", limit=args.limit)
+        dl_mod.download_musique(data_dir / "musique_dev.json", limit=args.limit)
 
     hotpot_path = (
         Path(args.hotpot_path) if args.hotpot_path else data_dir / "hotpotqa_dev.json"
     )
     wiki2_path = (
         Path(args.wiki2_path) if args.wiki2_path else data_dir / "wiki2_dev.json"
+    )
+    musique_path = (
+        Path(args.musique_path) if args.musique_path else data_dir / "musique_dev.json"
     )
 
     # --- Load datasets ---
@@ -1056,6 +1068,18 @@ def main() -> None:
             ) from exc
     else:
         print(f"[load] 2WikiMultiHopQA not found at {wiki2_path}")
+
+    if musique_path.exists():
+        try:
+            datasets["musique"] = _load_musique(musique_path, args.limit)
+            print(f"[load] MuSiQue: {len(datasets['musique'])} items")
+        except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
+            raise RuntimeError(
+                f"MuSiQue failed to load from {musique_path}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+    else:
+        print(f"[load] MuSiQue not found at {musique_path}")
 
     if not datasets:
         print("[error] No datasets loaded. Exiting.")

@@ -44,6 +44,24 @@ def _real_row(item_id: str = "5a8b57f25542995d1e6f1371") -> dict:
     }
 
 
+def _musique_row() -> dict:
+    return {
+        "id": "2hop__1_2",
+        "question": "Who is the spouse of the Green performer?",
+        "answer": "Miquette Giraudy",
+        "answer_aliases": [],
+        "answerable": True,
+        "paragraphs": [
+            {
+                "idx": 0,
+                "title": "Green (Steve Hillage album)",
+                "paragraph_text": "Green is an album by Steve Hillage.",
+                "is_supporting": True,
+            }
+        ],
+    }
+
+
 def test_no_synthetic_generator_remains():
     """The generator and its fixtures must stay deleted."""
     source = (ROOT / "scripts" / "download_datasets.py").read_text(encoding="utf-8")
@@ -90,6 +108,27 @@ def test_stale_generated_corpus_is_rejected(tmp_path, filename, prefix, download
     message = str(excinfo.value)
     assert "generated items" in message
     assert f"{prefix}0" in message
+
+
+def test_musique_missing_raises_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "_try_hf_musique", lambda *a, **k: False)
+    out = tmp_path / "musique_dev.json"
+
+    with pytest.raises(dl.DatasetUnavailableError) as excinfo:
+        dl.download_musique(out)
+
+    assert not out.exists()
+    assert "MuSiQue" in str(excinfo.value)
+    assert dl.MUSIQUE_SOURCE in str(excinfo.value)
+
+
+def test_musique_reuses_a_real_existing_file(tmp_path):
+    out = tmp_path / "musique_dev.json"
+    _write(out, [_musique_row()])
+
+    dl.download_musique(out)
+
+    assert json.loads(out.read_text(encoding="utf-8"))[0]["id"] == "2hop__1_2"
 
 
 def test_unreadable_existing_file_is_rejected(tmp_path):

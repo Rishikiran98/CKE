@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download HotpotQA and 2WikiMultiHopQA dev splits into the data/ directory.
+"""Download the multi-hop QA dev splits into the data/ directory.
 
 Datasets are fetched from HuggingFace through the `datasets` library. There is
 no fallback. If a dataset cannot be obtained, this script raises
@@ -17,6 +17,7 @@ DATA_DIR = ROOT / "data"
 
 HOTPOTQA_SOURCE = "https://huggingface.co/datasets/hotpotqa/hotpot_qa"
 WIKI2_SOURCE = "https://huggingface.co/datasets/xanhho/2WikiMultihopQA"
+MUSIQUE_SOURCE = "https://huggingface.co/datasets/dgslibisey/MuSiQue"
 
 # Item ids written by the synthetic generator that this script used to carry.
 # data/ is gitignored, so a checkout that ran the old downloader still holds
@@ -190,6 +191,68 @@ def _try_hf_wiki2(
     return True
 
 
+def _try_hf_musique(
+    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
+) -> bool:
+    """Download the MuSiQue answerable dev split via HuggingFace datasets.
+
+    Paragraphs are written whole, including the ``is_supporting`` flag: it is
+    the dataset's own label for which documents an answer needs, and a
+    retrieval recall figure has nothing to measure against without it.
+    """
+    log = reasons if reasons is not None else []
+    try:
+        from datasets import load_dataset  # type: ignore
+    except ImportError as exc:
+        log.append(f"`datasets` library not importable: {exc}")
+        return False
+
+    ds = None
+    for name in ("dgslibisey/MuSiQue", "musique"):
+        try:
+            ds = load_dataset(name, split="validation")
+            break
+        except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
+            log.append(f"HuggingFace load of {name!r} failed: {exc}")
+            ds = None
+
+    if ds is None:
+        return False
+
+    rows = []
+    for item in ds:
+        rows.append(
+            {
+                "id": item.get("id", ""),
+                "question": item.get("question", ""),
+                "answer": item.get("answer", ""),
+                "answer_aliases": list(item.get("answer_aliases") or []),
+                "answerable": item.get("answerable"),
+                "paragraphs": [
+                    {
+                        "idx": p.get("idx"),
+                        "title": p.get("title", ""),
+                        "paragraph_text": p.get("paragraph_text", ""),
+                        "is_supporting": bool(p.get("is_supporting")),
+                    }
+                    for p in item.get("paragraphs", [])
+                ],
+            }
+        )
+        if limit and len(rows) >= limit:
+            break
+
+    if not rows:
+        log.append("HuggingFace returned an empty validation split")
+        return False
+
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"[download] MuSiQue: {len(rows)} items \u2192 {out_path}")
+    return True
+
+
 def _load_existing(path: Path, dataset: str, source_url: str) -> list:
     """Return the rows of an existing dataset file, or raise.
 
@@ -276,6 +339,21 @@ def download_wiki2(out_path: Path, limit: int = 500) -> None:
     raise DatasetUnavailableError("2WikiMultiHopQA (dev)", WIKI2_SOURCE, reasons)
 
 
+def download_musique(out_path: Path, limit: int = 500) -> None:
+    """Ensure MuSiQue is present at ``out_path`` or raise."""
+    if out_path.exists():
+        existing = _load_existing(out_path, "MuSiQue (dev)", MUSIQUE_SOURCE)
+        n = len(existing)
+        print(f"[download] MuSiQue already exists: {n} items at {out_path}")
+        return
+
+    reasons: list[str] = []
+    if _try_hf_musique(out_path, limit=limit, reasons=reasons):
+        return
+
+    raise DatasetUnavailableError("MuSiQue (dev)", MUSIQUE_SOURCE, reasons)
+
+
 def main() -> None:
     import argparse
 
@@ -288,6 +366,7 @@ def main() -> None:
 
     download_hotpotqa(args.data_dir / "hotpotqa_dev.json", limit=args.limit)
     download_wiki2(args.data_dir / "wiki2_dev.json", limit=args.limit)
+    download_musique(args.data_dir / "musique_dev.json", limit=args.limit)
 
     print("[download] Done.")
 
