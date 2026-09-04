@@ -2,14 +2,26 @@ name: Security Scan
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+  # This ran only on push to main, so the scan could never block a pull
+  # request: a change introducing a finding merged green and the failure
+  # appeared afterwards, on a branch nobody was gating.
+  pull_request:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v5
@@ -25,4 +37,4 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run Bandit Security Scan
-        run: bandit -c bandit.yaml -r cke
+        run: bandit -c bandit.yaml -r cke scripts

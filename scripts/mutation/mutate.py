@@ -23,7 +23,9 @@ import argparse
 import json
 import os
 import shutil
-import subprocess  # nosec B404 - fixed argv, no shell
+
+# Fixed argv, never through a shell.
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,7 +70,8 @@ def run_mutation(mutation: Mutation) -> tuple[bool, str]:
             pristine.replace(mutation.old, mutation.new, 1), encoding="utf-8"
         )
         _clear_bytecode()
-        completed = subprocess.run(  # nosec B603 - fixed argv, no shell
+        # Fixed argv, no shell.
+        completed = subprocess.run(  # nosec B603
             [
                 sys.executable,
                 "-m",

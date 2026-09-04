@@ -49,6 +49,9 @@ def test_ci_runs_the_suite_under_coverage():
         if line.strip().startswith("run:")
     ]
 
+    # "--cov" in any form, not "--cov=cke": what is measured is pinned by the
+    # source assertion above, and asserting it twice meant widening coverage
+    # to the drivers required editing this test as well as the config.
     assert any(
-        line.startswith("pytest") and "--cov=cke" in line for line in run_lines
+        line.startswith("pytest") and "--cov" in line for line in run_lines
     ), run_lines

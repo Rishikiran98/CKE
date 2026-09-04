@@ -459,3 +459,40 @@ def test_locomo_gives_up_when_every_transfer_is_short(tmp_path, monkeypatch):
     assert "20 bytes short" in str(excinfo.value)
     assert dl.LOCOMO_SOURCE in str(excinfo.value)
     assert not out.exists()
+
+
+def test_the_hub_splits_are_pinned_to_a_commit(monkeypatch):
+    """A dataset name is not a dataset, for the reason a model name is not a
+    model: the Hub can serve different rows under it tomorrow, and a number
+    computed over rows that can change is not reproducible."""
+    seen: list[dict] = []
+
+    def _capture(name, **kwargs):
+        seen.append({"name": name, **kwargs})
+        raise RuntimeError("stop after recording the call")
+
+    import sys
+    import types
+
+    module = types.ModuleType("datasets")
+    module.load_dataset = _capture  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "datasets", module)
+
+    dl._try_hf_hotpotqa(tmp := __import__("pathlib").Path("/tmp/unused.json"), [])
+    dl._try_hf_musique(tmp, [])
+
+    assert seen, "the loader must have been called"
+    for call in seen:
+        revision = call.get("revision")
+        assert revision, f"{call['name']} was fetched without a revision"
+        assert len(revision) == 40, f"{call['name']} is not pinned to a full commit"
+
+
+def test_the_sidecar_records_the_revision_the_rows_came_from(tmp_path):
+    out = tmp_path / "musique_dev.json"
+    dl._write_split(out, [_musique_row()], "MuSiQue (dev)", dl.MUSIQUE_SOURCE, "a" * 40)
+
+    note = json.loads(dl.sidecar_path(out).read_text(encoding="utf-8"))
+
+    assert note["revision"] == "a" * 40
+    assert note["source"] == dl.MUSIQUE_SOURCE
