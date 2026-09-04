@@ -53,24 +53,29 @@ class WikiMultiHopDataset(DatasetLoader, DegradationMixin):
             )
         return documents
 
+    def normalize_record(self, index: int, record: dict[str, Any]) -> dict[str, Any]:
+        """Normalise one raw 2WikiMultiHopQA record into the CKE item shape.
+
+        Public, and named as the other loaders name it, so a caller that
+        evaluates part of a file can normalise only the records it evaluates.
+        Normalising the rest declares degradations for context this run never
+        looked at, which under strict refuses the run.
+        """
+        return {
+            "id": str(record.get("_id", f"wiki2_{index}")),
+            "question": str(record.get("question", "")),
+            "answer": str(record.get("answer", "")),
+            "documents": self._context_to_documents(record.get("context", [])),
+            "supporting_facts": record.get("supporting_facts", []),
+            "metadata": {
+                "type": record.get("type"),
+                "evidences": record.get("evidences"),
+            },
+        }
+
     def load(self, path: str) -> "WikiMultiHopDataset":
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
 
-        self.items = []
-        for idx, row in enumerate(rows):
-            item_id = str(row.get("_id", f"wiki2_{idx}"))
-            self.items.append(
-                {
-                    "id": item_id,
-                    "question": str(row.get("question", "")),
-                    "answer": str(row.get("answer", "")),
-                    "documents": self._context_to_documents(row.get("context", [])),
-                    "supporting_facts": row.get("supporting_facts", []),
-                    "metadata": {
-                        "type": row.get("type"),
-                        "evidences": row.get("evidences"),
-                    },
-                }
-            )
+        self.items = [self.normalize_record(idx, row) for idx, row in enumerate(rows)]
         return self

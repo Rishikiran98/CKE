@@ -225,11 +225,14 @@ def test_a_strict_run_refuses_a_dataset_that_drops_entries(
     path.write_text(json.dumps(records), encoding="utf-8")
 
     with pytest.raises(DegradedComponentError):
-        getattr(bench, loader)(path, 10, True)
+        getattr(bench, loader)(path, 10, True, bench.SAMPLE_SEED, "sample")
 
     # The opt-out still loads, with the item thinned and the drop declared.
-    items = getattr(bench, loader)(path, 10, False)
+    items, provenance = getattr(bench, loader)(
+        path, 10, False, bench.SAMPLE_SEED, "sample"
+    )
     assert items[0]["documents"] == []
+    assert provenance["items_evaluated"] == 1
 
 
 # ---------------------------------------------------------------------------
