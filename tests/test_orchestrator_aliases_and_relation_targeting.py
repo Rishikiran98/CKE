@@ -331,3 +331,61 @@ def test_a_caller_registering_an_alias_invalidates_what_was_cached(
     resolver.register_alias(mention, "Someone Else Entirely")
 
     assert resolver.resolve_with_score(mention).canonical == "Someone Else Entirely"
+
+
+def test_a_caller_can_correct_a_name_the_resolver_guessed_at(offline_embedder):
+    """The case #106's invalidation test had to route around.
+
+    The unresolvable rungs answer with the mention's own title case and
+    register that, which made every mention nobody could place a canonical
+    entity in its own right. The exact-canonical rung is checked before the
+    alias registry, so once a mention had been guessed at, a caller saying
+    what it actually meant could not change the answer — #106 had to test
+    invalidation with a misspelling the fuzzy rung resolved elsewhere,
+    because this obvious case did not work.
+    """
+    from cke.entity_resolution.entity_resolver import EntityResolver
+
+    resolver = EntityResolver()
+
+    guessed = resolver.resolve_with_score("Chris Nolan")
+    assert guessed.canonical == "Chris Nolan"
+
+    resolver.register_alias("Chris Nolan", "Christopher Nolan")
+
+    corrected = resolver.resolve_with_score("Chris Nolan")
+    assert corrected.canonical == "Christopher Nolan"
+    assert corrected.confidence == 0.90, (
+        "resolving through the alias registry must be scored as such, not as "
+        "the exact-canonical match the guess had turned it into"
+    )
+
+
+def test_a_guessed_name_is_not_reported_as_a_known_entity(offline_embedder):
+    """known_entities() is what a caller reads to see what the graph holds."""
+    from cke.entity_resolution.entity_resolver import EntityResolver
+
+    resolver = EntityResolver()
+    resolver.resolve_with_score("Some Mention Nobody Can Place")
+    resolver.register_alias("Some Mention Nobody Can Place", "A Real Entity")
+
+    known = list(resolver.known_entities())
+
+    assert "A Real Entity" in known
+    assert "Some Mention Nobody Can Place" not in known
+
+
+def test_clustering_still_folds_a_variant_onto_the_name_it_matched(offline_embedder):
+    """Registering a guess is what lets later mentions cluster onto it.
+
+    Not removing that: an unplaceable mention still becomes something later
+    variants can match against. What changed is only that a name registered
+    as an alias for something else stops being canonical in its own right.
+    """
+    from cke.entity_resolution.entity_resolver import EntityResolver
+
+    resolver = EntityResolver()
+    canonical = resolver.resolve_entity("Redis")
+
+    assert resolver.resolve_entity("Redis DB") == canonical
+    assert resolver.resolve_entity("Redis database") == canonical

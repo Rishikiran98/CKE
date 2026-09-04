@@ -381,9 +381,23 @@
     {
       "label": "the cache outlives an alias the caller registered afterwards",
       "path": "cke/entity_resolution/entity_resolver.py",
-      "old": "        self._resolution_cache.pop(canonical_name, None)\n        for alias in aliases:\n            self._resolution_cache.pop(str(alias).strip(), None)",
-      "new": "        pass",
+      "old": "        self._resolution_cache.pop(canonical_name, None)\n        for alias in aliases:\n            alias_name = str(alias).strip()\n            self._resolution_cache.pop(alias_name, None)",
+      "new": "        for alias in aliases:\n            alias_name = str(alias).strip()",
       "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "a name registered as an alias stays canonical in its own right",
+      "path": "cke/entity_resolution/entity_resolver.py",
+      "old": "            if alias_name != canonical_name:\n                self._canonical_entities.discard(alias_name)",
+      "new": "            if False:\n                self._canonical_entities.discard(alias_name)",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "an alias is dropped from canonical even when it is the canonical name",
+      "path": "cke/entity_resolution/entity_resolver.py",
+      "old": "            if alias_name != canonical_name:\n                self._canonical_entities.discard(alias_name)",
+      "new": "            self._canonical_entities.discard(alias_name)",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py tests/test_entity_resolution.py"
     }
   ],
   "behaviour": [
