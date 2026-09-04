@@ -29,3 +29,10 @@ jobs:
 
       - name: Run tests with coverage, failing under the floor
         run: pytest -q --cov=cke --cov-report=term-missing
+
+      - name: Run the demo and assert on its answer
+        run: |
+          python demo.py | tee demo.out
+          grep -Fxq "Answer: Turkey" demo.out
+          grep -Fq "Rule applied located_in_transitivity" demo.out
+          grep -Fq "No component degraded during this run." demo.out
