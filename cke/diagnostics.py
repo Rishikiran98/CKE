@@ -214,6 +214,21 @@ def require_strict_component(
             f"strict=False."
         )
 
+    if not hasattr(supplied, "degraded"):
+        # The check above is vacuous without this one. A component that sets
+        # self.strict by hand and never inherits DegradationMixin has no
+        # degraded attribute, so getattr returns the default and an already
+        # degraded instance passes. Something that cannot say whether it
+        # degraded cannot be accepted by a run that forbids degrading.
+        raise DegradedComponentError(
+            f"{component} was constructed with strict=True but given a "
+            f"{label} ({type(supplied).__name__}) that cannot report whether "
+            f"it has degraded. It declares no `degraded` attribute, so this "
+            f"check could not tell a healthy instance from a degraded one. "
+            f"Have it inherit DegradationMixin, or construct {component} with "
+            f"strict=False."
+        )
+
 
 class DegradationMixin:
     """Give a component the three-part degradation contract.

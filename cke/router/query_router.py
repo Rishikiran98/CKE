@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from cke.diagnostics import require_strict_component
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.graph.domain_classifier import UNCLASSIFIED_DOMAIN, DomainClassifier
 from cke.graph.domain_registry import DomainRegistry
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -16,7 +16,7 @@ from cke.router.query_plan import QueryPlan
 from cke.trust.confidence_model import ConfidenceModel, ReasoningConfidenceSignals
 
 
-class QueryRouter:
+class QueryRouter(DegradationMixin):
     _QUESTION_WORDS = {"what", "how", "where", "when", "why", "which", "who", "whom"}
 
     def __init__(
@@ -26,7 +26,7 @@ class QueryRouter:
         domain_registry: DomainRegistry | None = None,
         strict: bool = False,
     ):
-        self.strict = bool(strict)
+        self._init_degradation(strict)
         self.graph_engine = graph_engine
         require_strict_component(
             type(self).__name__, domain_classifier, "domain classifier", self.strict

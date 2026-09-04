@@ -24,12 +24,15 @@ class ConversationalRetriever:
         embedding_model: EmbeddingModel | None = None,
         reference_resolver: ConversationalReferenceResolver | None = None,
         config=None,
+        strict: bool = False,
     ) -> None:
+        self.strict = bool(strict)
         self.memory_store = memory_store
         self.candidate_generator = CandidateGenerator(
             memory_store,
             embedding_model=embedding_model,
             config=getattr(config, "retrieval", config),
+            strict=strict,
         )
         self.reference_resolver = reference_resolver or ConversationalReferenceResolver(
             memory_store

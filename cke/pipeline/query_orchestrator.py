@@ -6,7 +6,11 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from cke.diagnostics import DegradationMixin, DegradedComponentError
+from cke.diagnostics import (
+    DegradationMixin,
+    require_strict_component,
+    DegradedComponentError,
+)
 from cke.entity_resolution.alias_registry import AliasRegistry
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.pipeline.types import (
@@ -52,6 +56,25 @@ class QueryOrchestrator(DegradationMixin):
         strict: bool = False,
     ):
         self._init_degradation(strict)
+        # A strict run cannot verify an arbitrary prebuilt object, so each one
+        # must declare itself strict and undegraded. Without this the
+        # orchestrator reported itself strict while running on collaborators
+        # that would not refuse their own fallbacks — the exact hole
+        # require_strict_component exists to close, unused here while
+        # GraphRetriever, QueryRouter and RAGRetriever all used it.
+        for supplied, label in (
+            (router, "router"),
+            (retriever, "retriever"),
+            (assembler, "assembler"),
+            (reasoner, "reasoner"),
+            (verifier, "verifier"),
+            (operator_selector, "operator selector"),
+            (operator_executor, "operator executor"),
+            (entity_resolver, "entity resolver"),
+            (dense_retriever, "dense retriever"),
+        ):
+            require_strict_component(type(self).__name__, supplied, label, strict)
+
         self.graph_engine = graph_engine
         self.router = router
         self.retrieval_mode = retrieval_mode
@@ -407,7 +430,7 @@ class QueryOrchestrator(DegradationMixin):
             from cke.retrieval.retrieval_router import RetrievalRouter
             from cke.retrieval.retriever import GraphRetriever
 
-            graph_ret = GraphRetriever(graph_engine)
+            graph_ret = GraphRetriever(graph_engine, strict=strict)
             router = RetrievalRouter(graph_ret, dense_retriever)
             return HybridEvidenceRetriever(router, strict=strict)
 
@@ -417,7 +440,7 @@ class QueryOrchestrator(DegradationMixin):
             return DenseEvidenceRetriever(dense_retriever, strict=strict)
 
         if graph_engine is not None:
-            return DefaultEvidenceRetriever(graph_engine)
+            return DefaultEvidenceRetriever(graph_engine, strict=strict)
 
         return None
 

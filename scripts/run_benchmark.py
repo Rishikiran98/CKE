@@ -96,7 +96,13 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    loader = DATASET_REGISTRY[args.dataset]()
+    strict = not args.allow_degraded
+    # The loader was built non-strict whatever the run asked for, so a strict
+    # run loaded its data non-strict: a dataset that dropped malformed entries
+    # declared it and the run carried on to report metrics over fewer
+    # documents than the items hold. run_cke_benchmark fixed this and this
+    # driver kept the defect.
+    loader = DATASET_REGISTRY[args.dataset](strict=strict)
     data = loader.load(args.dataset_path).items[: args.limit]
 
     docs = []
@@ -109,12 +115,14 @@ def main() -> None:
                 }
             )
 
-    retriever = RAGRetriever(strict=not args.allow_degraded)
+    retriever = RAGRetriever(strict=strict)
     if docs:
         retriever.build_index(docs)
 
-    token_tracker = TokenTracker()
-    runner = ExperimentRunner(retriever=retriever, token_tracker=token_tracker)
+    token_tracker = TokenTracker(strict=strict)
+    runner = ExperimentRunner(
+        retriever=retriever, token_tracker=token_tracker, strict=strict
+    )
     dataset_rows = [
         {"question": row.get("question", ""), "answer": row.get("answer", "")}
         for row in data
@@ -126,7 +134,7 @@ def main() -> None:
         ablation = AblationRunner(evaluator=_ablation_evaluator).run(
             data, output_dir=output_dir
         )
-    monitor = SystemMonitor()
+    monitor = SystemMonitor(strict=strict)
     system_metrics = monitor.snapshot()
 
     (output_dir / f"{args.dataset}_metrics.json").write_text(
