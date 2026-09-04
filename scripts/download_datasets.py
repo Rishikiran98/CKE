@@ -20,6 +20,14 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 
 HOTPOTQA_SOURCE = "https://huggingface.co/datasets/hotpotqa/hotpot_qa"
+
+#: The Hub commits these splits are pinned to. A dataset name is not a
+#: dataset for the same reason a model name is not a model: the Hub can serve
+#: different rows under the same name tomorrow, and a number computed over
+#: rows that can change underneath it is not reproducible. The download
+#: records the revision it fetched in the file's sidecar.
+HOTPOTQA_REVISION = "1908d6afbbead072334abe2965f91bd2709910ab"
+MUSIQUE_REVISION = "c8f4f8c9465fb69d31a8eae894c3fd509c4ca321"
 WIKI2_SOURCE = "https://github.com/Alab-NII/2wikimultihop"
 
 #: The dataset archive the 2WikiMultiHopQA authors publish from that
@@ -94,7 +102,9 @@ def _try_hf_hotpotqa(out_path: Path, reasons: list[str] | None = None) -> bool:
             kwargs: dict = {}
             if cfg:
                 kwargs["name"] = cfg
-            ds = load_dataset(name, split="validation", **kwargs)
+            ds = load_dataset(
+                name, split="validation", revision=HOTPOTQA_REVISION, **kwargs
+            )
             break
         except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
             # Broad by necessity: datasets/huggingface_hub raise many distinct
@@ -133,7 +143,9 @@ def _try_hf_hotpotqa(out_path: Path, reasons: list[str] | None = None) -> bool:
         log.append("HuggingFace returned an empty validation split")
         return False
 
-    _write_split(out_path, rows, "HotpotQA (distractor dev)", HOTPOTQA_SOURCE)
+    _write_split(
+        out_path, rows, "HotpotQA (distractor dev)", HOTPOTQA_SOURCE, HOTPOTQA_REVISION
+    )
     print(f"[download] HotpotQA: {len(rows)} items → {out_path}")
     return True
 
@@ -150,7 +162,8 @@ def _stream_archive(url: str, handle, log: list[str]) -> bool:
     """
     handle.seek(0)
     handle.truncate()
-    with urlopen(url, timeout=600) as response:  # noqa: S310
+    # The URL is one of this module's own constants, https only.
+    with urlopen(url, timeout=600) as response:  # noqa: S310  # nosec B310
         declared = int(response.headers.get("Content-Length") or 0)
         written = 0
         while True:
@@ -242,7 +255,7 @@ def _try_hf_musique(out_path: Path, reasons: list[str] | None = None) -> bool:
     ds = None
     for name in ("dgslibisey/MuSiQue", "musique"):
         try:
-            ds = load_dataset(name, split="validation")
+            ds = load_dataset(name, split="validation", revision=MUSIQUE_REVISION)
             break
         except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
             log.append(f"HuggingFace load of {name!r} failed: {exc}")
@@ -275,7 +288,7 @@ def _try_hf_musique(out_path: Path, reasons: list[str] | None = None) -> bool:
         log.append("HuggingFace returned an empty validation split")
         return False
 
-    _write_split(out_path, rows, "MuSiQue (dev)", MUSIQUE_SOURCE)
+    _write_split(out_path, rows, "MuSiQue (dev)", MUSIQUE_SOURCE, MUSIQUE_REVISION)
     print(f"[download] MuSiQue: {len(rows)} items \u2192 {out_path}")
     return True
 
@@ -320,7 +333,13 @@ def sidecar_path(out_path: Path) -> Path:
     return out_path.with_name(out_path.name + ".source.json")
 
 
-def _write_split(out_path: Path, rows: list, dataset: str, source_url: str) -> None:
+def _write_split(
+    out_path: Path,
+    rows: list,
+    dataset: str,
+    source_url: str,
+    revision: str | None = None,
+) -> None:
     """Write a split and the note that says it is the whole of one.
 
     The note is what makes a cached file reusable. Without it a file is just
@@ -336,6 +355,7 @@ def _write_split(out_path: Path, rows: list, dataset: str, source_url: str) -> N
             {
                 "dataset": dataset,
                 "source": source_url,
+                "revision": revision,
                 "records": len(rows),
                 "complete_split": True,
                 "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

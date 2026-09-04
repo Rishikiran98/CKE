@@ -137,5 +137,56 @@
       "new": "        if False:",
       "tests": "tests/test_undeclared_substitutions.py tests/test_substituted_values.py"
     }
+  ],
+  "gates": [
+    {
+      "label": "the demo step goes back to discarding a crash",
+      "path": ".github/workflows/ci.yml",
+      "old": "          set -o pipefail\n          python demo.py | tee demo.out",
+      "new": "          python demo.py | tee demo.out",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "tests stop running on pull requests into dev",
+      "path": ".github/workflows/ci.yml",
+      "old": "  pull_request:\n\nenv:",
+      "new": "  pull_request:\n    branches: [main]\n\nenv:",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the security scan goes back to push-only",
+      "path": ".github/workflows/security.yml",
+      "old": "  pull_request:\n\nenv:",
+      "new": "\nenv:",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the security scan stops reading the drivers",
+      "path": ".github/workflows/security.yml",
+      "old": "run: bandit -c bandit.yaml -r cke scripts",
+      "new": "run: bandit -c bandit.yaml -r cke",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "a job may run unbounded",
+      "path": ".github/workflows/ci.yml",
+      "old": "    timeout-minutes: 30",
+      "new": "",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "a workflow gets a write-capable token",
+      "path": ".github/workflows/ci.yml",
+      "old": "permissions:\n  contents: read",
+      "new": "permissions:\n  contents: write",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the dataset revisions stop being pinned",
+      "path": "scripts/download_datasets.py",
+      "old": "name, split=\"validation\", revision=HOTPOTQA_REVISION, **kwargs",
+      "new": "name, split=\"validation\", **kwargs",
+      "tests": "tests/test_download_datasets.py"
+    }
   ]
 }

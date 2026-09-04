@@ -18,7 +18,9 @@ import hashlib
 import json
 import re
 import statistics
-import subprocess  # nosec B404 - only `git`, argv list, no shell
+
+# Only `git`, always as an argv list, never through a shell.
+import subprocess  # nosec B404
 import sys
 import time
 import warnings
@@ -1416,7 +1418,8 @@ def _git_description() -> dict[str, Any]:
 
     def _git(*command: str) -> str | None:
         try:
-            done = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+            # Fixed argv, no shell.
+            done = subprocess.run(  # nosec B603 B607
                 ["git", *command],
                 cwd=str(ROOT),
                 capture_output=True,
