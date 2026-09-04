@@ -927,6 +927,24 @@ def produce_comparison_table(
     return "\n".join(lines)
 
 
+def figure_cell(
+    metrics_for_config: dict[str, Any], key: str, fmt: str = "{:.4f}"
+) -> str:
+    """One figure with the interval it carries, or why there is none.
+
+    Used by every markdown table, so a figure cannot appear in one report
+    with its interval and in another without it, and a figure an arm never
+    produced cannot print as a zero in either.
+    """
+    if key not in metrics_for_config:
+        return "not measured"
+    text = fmt.format(metrics_for_config[key])
+    bounds = metrics_for_config.get("intervals", {}).get(key)
+    if bounds:
+        text += f" ({bounds['low']:.4g}–{bounds['high']:.4g})"
+    return text
+
+
 def produce_ablation_table(
     per_dataset: dict[str, dict[str, dict[str, float]]],
     combined: dict[str, dict[str, float]],
@@ -947,12 +965,13 @@ def produce_ablation_table(
         lines.append("|--------|----|----|---------------|---------------------|")
         for c in rag_cfgs:
             m = metrics.get(c, {})
-            em = m.get("em", 0)
-            f1 = m.get("f1", 0)
-            tok = m.get("median_tokens", 0)
-            lat = m.get("median_latency_ms", 0)
-            lbl = _CONFIG_LABELS[c]
-            lines.append(f"| {lbl} | {em:.4f} | {f1:.4f} " f"| {tok:.0f} | {lat:.1f} |")
+            lines.append(
+                f"| {_CONFIG_LABELS[c]} "
+                f"| {figure_cell(m, 'em')} "
+                f"| {figure_cell(m, 'f1')} "
+                f"| {figure_cell(m, 'median_tokens', '{:.0f}')} "
+                f"| {figure_cell(m, 'median_latency_ms', '{:.1f}')} |"
+            )
         lines.append("")
 
         lines.append("### CKE-lite (N ablation)")
@@ -969,13 +988,13 @@ def produce_ablation_table(
         )
         for c in cke_cfgs:
             m = metrics.get(c, {})
-            em = m.get("em", 0)
-            f1 = m.get("f1", 0)
-            tok = m.get("median_tokens", 0)
-            lat = m.get("median_latency_ms", 0)
-            lbl = _CONFIG_LABELS[c]
             lines.append(
-                f"| {lbl} | {em:.4f} | {f1:.4f} " f"| {tok:.0f} | {lat:.1f} " f"| n/a |"
+                f"| {_CONFIG_LABELS[c]} "
+                f"| {figure_cell(m, 'em')} "
+                f"| {figure_cell(m, 'f1')} "
+                f"| {figure_cell(m, 'median_tokens', '{:.0f}')} "
+                f"| {figure_cell(m, 'median_latency_ms', '{:.1f}')} "
+                f"| n/a |"
             )
         lines.append("")
 
@@ -986,10 +1005,24 @@ def produce_ablation_table(
         lines.append("|--------|----|----|---------------|---------------------|")
         m = metrics.get("hybrid_n12", {})
         lines.append(
-            f"| Hybrid N=12 | {m.get('em', 0):.4f} | {m.get('f1', 0):.4f} "
-            f"| {m.get('median_tokens', 0):.0f} | {m.get('median_latency_ms', 0):.1f} |"
+            f"| Hybrid N=12 "
+            f"| {figure_cell(m, 'em')} "
+            f"| {figure_cell(m, 'f1')} "
+            f"| {figure_cell(m, 'median_tokens', '{:.0f}')} "
+            f"| {figure_cell(m, 'median_latency_ms', '{:.1f}')} |"
         )
         lines.append("")
+
+    # This file is read on its own, so it carries the same qualifications the
+    # comparison table does. A figure quoted from here without them is quoted
+    # without the two things that say what it is worth.
+    lines.append(
+        f"Parenthesised ranges are 95% percentile bootstrap intervals, "
+        f"{BOOTSTRAP_REPLICATES} resamples of the items with replacement, "
+        f"seed {BOOTSTRAP_SEED}, one resample shared by every arm."
+    )
+    lines.append("")
+    lines.append(f"Latency is {LATENCY_INCLUDES}.")
 
     return "\n".join(lines)
 
@@ -1545,11 +1578,14 @@ def main() -> None:
     print("[output] comparison_table.md")
 
     # --- Ablation ---
-    ablation_json = {
+    ablation_json: dict[str, Any] = {
         ds: {cfg: m for cfg, m in metrics.items()}
         for ds, metrics in per_dataset_metrics.items()
     }
     ablation_json["combined"] = combined_metrics
+    # Read on its own, so it says what its latency covers rather than leaving
+    # the figure to be taken for a production query time.
+    ablation_json["latency_includes"] = LATENCY_INCLUDES
     (output_dir / "ablation.json").write_text(
         json.dumps(ablation_json, indent=2), encoding="utf-8"
     )
@@ -1623,7 +1659,10 @@ def main() -> None:
                 strict=strict,
             )
         (output_dir / "retrieval_ablation.json").write_text(
-            json.dumps(retrieval_ablation, indent=2),
+            json.dumps(
+                {**retrieval_ablation, "latency_includes": LATENCY_INCLUDES},
+                indent=2,
+            ),
             encoding="utf-8",
         )
         print("[output] retrieval_ablation.json")
