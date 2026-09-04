@@ -138,13 +138,13 @@ def test_domain_classifier_never_labels_the_unclassifiable_with_a_real_domain():
     assert classifier.classify_entity("redis database index") == "databases"
 
 
-def test_locomo_loader_declares_an_unrecognised_record():
-    """A record with no known turn key loaded with zero documents."""
+def test_locomo_loader_declares_a_conversation_with_no_sessions():
+    """A record with no session_N turn list loads with zero documents."""
     from cke.datasets.locomo_loader import LoCoMoDataset
 
-    LoCoMoDataset()._extract_turns({"something_else": []})
+    LoCoMoDataset()._conversation_documents({"speaker_a": "A"})
 
-    assert any("recognised turn keys" in r for r in _reasons())
+    assert any("no session_N turn lists" in r for r in _reasons())
 
 
 def test_hotpot_loader_declares_dropped_context_entries():

@@ -284,3 +284,70 @@ def test_wiki2_rejects_an_archive_with_no_dev_split(tmp_path, monkeypatch):
         dl.download_wiki2(out)
 
     assert not out.exists()
+
+
+# ---------------------------------------------------------------------------
+# LoCoMo
+# ---------------------------------------------------------------------------
+
+
+def _locomo_conversations(n: int = 2) -> list[dict]:
+    return [
+        {
+            "sample_id": f"conv-{i}",
+            "conversation": {
+                "speaker_a": "Ann",
+                "speaker_b": "Bo",
+                "session_1": [{"speaker": "Ann", "dia_id": "D1:1", "text": "Hi"}],
+            },
+            "qa": [{"question": "Q?", "answer": "A", "evidence": ["D1:1"]}],
+        }
+        for i in range(n)
+    ]
+
+
+def test_locomo_downloads_the_published_conversations(tmp_path, monkeypatch):
+    body = json.dumps(_locomo_conversations(3)).encode("utf-8")
+    monkeypatch.setattr(dl, "urlopen", _fake_urlopen([(body, None)]))
+    out = tmp_path / "locomo.json"
+
+    dl.download_locomo(out)
+
+    rows = json.loads(out.read_text(encoding="utf-8"))
+    assert [r["sample_id"] for r in rows] == ["conv-0", "conv-1", "conv-2"]
+
+
+def test_locomo_limit_caps_conversations_not_questions(tmp_path, monkeypatch):
+    body = json.dumps(_locomo_conversations(3)).encode("utf-8")
+    monkeypatch.setattr(dl, "urlopen", _fake_urlopen([(body, None)]))
+    out = tmp_path / "locomo.json"
+
+    dl.download_locomo(out, limit=2)
+
+    assert len(json.loads(out.read_text(encoding="utf-8"))) == 2
+
+
+def test_locomo_retries_a_truncated_transfer(tmp_path, monkeypatch):
+    body = json.dumps(_locomo_conversations(1)).encode("utf-8")
+    monkeypatch.setattr(
+        dl, "urlopen", _fake_urlopen([(body, len(body) - 20), (body, None)])
+    )
+    out = tmp_path / "locomo.json"
+
+    dl.download_locomo(out)
+
+    assert json.loads(out.read_text(encoding="utf-8"))[0]["sample_id"] == "conv-0"
+
+
+def test_locomo_gives_up_when_every_transfer_is_short(tmp_path, monkeypatch):
+    body = json.dumps(_locomo_conversations(1)).encode("utf-8")
+    short = [(body, len(body) - 20)] * dl._ARCHIVE_ATTEMPTS
+    monkeypatch.setattr(dl, "urlopen", _fake_urlopen(short))
+    out = tmp_path / "locomo.json"
+
+    with pytest.raises(dl.DatasetUnavailableError) as excinfo:
+        dl.download_locomo(out)
+
+    assert "20 bytes short" in str(excinfo.value)
+    assert dl.LOCOMO_SOURCE in str(excinfo.value)
+    assert not out.exists()

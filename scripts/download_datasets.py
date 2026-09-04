@@ -32,6 +32,12 @@ _WIKI2_ARCHIVE_URL = "https://www.dropbox.com/s/npidmtadreo6df2/data.zip?dl=1"
 #: stopped 19 MB and 12 MB short and the third completed.
 _ARCHIVE_ATTEMPTS = 3
 MUSIQUE_SOURCE = "https://huggingface.co/datasets/dgslibisey/MuSiQue"
+LOCOMO_SOURCE = "https://github.com/snap-research/locomo"
+
+#: The conversation file published from that repository.
+_LOCOMO_URL = (
+    "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
+)
 
 # Item ids written by the synthetic generator that this script used to carry.
 # data/ is gitignored, so a checkout that ran the old downloader still holds
@@ -291,6 +297,45 @@ def _try_hf_musique(
     return True
 
 
+def _try_official_locomo(
+    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
+) -> bool:
+    """Download the LoCoMo conversations from the authors' repository.
+
+    ``limit`` caps conversations, not questions: a conversation is the unit
+    the file publishes, and its questions cannot be answered without it.
+    """
+    log = reasons if reasons is not None else []
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".json") as handle:
+            for attempt in range(1, _ARCHIVE_ATTEMPTS + 1):
+                if _stream_archive(_LOCOMO_URL, handle, log):
+                    break
+                log.append(f"  (attempt {attempt} of {_ARCHIVE_ATTEMPTS})")
+            else:
+                return False
+            handle.seek(0)
+            raw = json.load(handle)
+    except Exception as exc:  # noqa: BLE001 - network and parse errors vary
+        log.append(f"download of {_LOCOMO_URL} failed: {exc}")
+        return False
+
+    if not isinstance(raw, list) or not raw:
+        log.append(f"{_LOCOMO_URL} is not a non-empty JSON list of conversations")
+        return False
+
+    rows = raw[:limit] if limit else raw
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    questions = sum(len(row.get("qa") or []) for row in rows if isinstance(row, dict))
+    print(
+        f"[download] LoCoMo: {len(rows)} conversations, "
+        f"{questions} questions \u2192 {out_path}"
+    )
+    return True
+
+
 def _load_existing(path: Path, dataset: str, source_url: str) -> list:
     """Return the rows of an existing dataset file, or raise.
 
@@ -392,6 +437,21 @@ def download_musique(out_path: Path, limit: int = 500) -> None:
     raise DatasetUnavailableError("MuSiQue (dev)", MUSIQUE_SOURCE, reasons)
 
 
+def download_locomo(out_path: Path, limit: int | None = None) -> None:
+    """Ensure LoCoMo is present at ``out_path`` or raise."""
+    if out_path.exists():
+        existing = _load_existing(out_path, "LoCoMo", LOCOMO_SOURCE)
+        n = len(existing)
+        print(f"[download] LoCoMo already exists: {n} conversations at {out_path}")
+        return
+
+    reasons: list[str] = []
+    if _try_official_locomo(out_path, limit=limit, reasons=reasons):
+        return
+
+    raise DatasetUnavailableError("LoCoMo", LOCOMO_SOURCE, reasons)
+
+
 def main() -> None:
     import argparse
 
@@ -405,6 +465,8 @@ def main() -> None:
     download_hotpotqa(args.data_dir / "hotpotqa_dev.json", limit=args.limit)
     download_wiki2(args.data_dir / "wiki2_dev.json", limit=args.limit)
     download_musique(args.data_dir / "musique_dev.json", limit=args.limit)
+    # No limit: ten conversations is the whole published set.
+    download_locomo(args.data_dir / "locomo.json")
 
     print("[download] Done.")
 

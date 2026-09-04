@@ -153,7 +153,7 @@ def _cases(tmp: pathlib.Path):
         (
             "LoCoMoDataset",
             lambda s: LoCoMoDataset(strict=s),
-            lambda o: o._extract_turns({"unrecognised": []}),
+            lambda o: o._conversation_documents({"speaker_a": "A"}),
         ),
         (
             "WikiMultiHopDataset",
