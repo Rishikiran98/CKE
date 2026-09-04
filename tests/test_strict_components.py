@@ -11,18 +11,11 @@ import logging
 
 import pytest
 
-from cke.diagnostics import DegradedComponentError, clear_runtime_state
+from cke.diagnostics import DegradedComponentError
 
 #: A revision with the shape of a pin, for stubbed models that have no Hub
 #: page. Loaders refuse anything that is not a full commit hash.
 _A_COMMIT = "0" * 40
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 # ---------------------------------------------------------------------------
@@ -727,13 +720,27 @@ def test_a_strict_wrapper_refuses_a_non_strict_injection(label):
 
 @pytest.mark.parametrize("label", [case[0] for case in _injection_cases()])
 def test_a_strict_wrapper_accepts_a_strict_injection(label):
+    """Accepted, and strict, and undegraded.
+
+    This asserted `is not None` — that a constructor returned an object,
+    which is true of every constructor that does not raise. It was the
+    acceptance half of a pair whose refusal half does the work, so half of
+    every case here could not fail.
+    """
     build = next(build for name, build in _injection_cases() if name == label)
 
-    assert build(True, True) is not None
+    wrapper = build(True, True)
+
+    assert wrapper.strict is True, "it accepted the injection but is not strict"
+    assert wrapper.degraded is False, wrapper.degraded_reason
 
 
 @pytest.mark.parametrize("label", [case[0] for case in _injection_cases()])
 def test_a_non_strict_wrapper_accepts_anything(label):
+    """A non-strict wrapper takes a non-strict collaborator and says so."""
     build = next(build for name, build in _injection_cases() if name == label)
 
-    assert build(False, False) is not None
+    wrapper = build(False, False)
+
+    assert wrapper.strict is False
+    assert hasattr(wrapper, "degraded"), "it cannot report whether it degraded"

@@ -7,14 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from cke.diagnostics import DegradedComponentError, clear_runtime_state
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
+from cke.diagnostics import DegradedComponentError
 
 
 # ---------------------------------------------------------------------------

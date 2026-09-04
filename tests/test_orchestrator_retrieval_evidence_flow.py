@@ -1,26 +1,12 @@
 """Retrieved statements reach the orchestrator as evidence."""
 
-from dataclasses import dataclass
-
 from cke.models import Statement
 from cke.pipeline.evidence_assembler import EvidenceAssembler
 from cke.pipeline.query_orchestrator import QueryOrchestrator
 from cke.pipeline.types import QueryResult
 from cke.retrieval.chunk_fact_store import ChunkFactStore
 from cke.retrieval.evidence_retriever import EvidenceRetriever
-
-
-@dataclass
-class StubQueryPlan:
-    reasoning_route: str = "advanced_reasoner"
-
-
-class StubRouter:
-    def route(self, query: str) -> StubQueryPlan:
-        return StubQueryPlan(reasoning_route="advanced_reasoner")
-
-    def detect_entities(self, query: str) -> list[str]:
-        return ["United States"]
+from cke.router.query_router import QueryRouter
 
 
 class StubRAGRetriever:
@@ -81,7 +67,7 @@ def test_retrieval_evidence_flow():
 
     orchestrator = QueryOrchestrator(
         graph_engine=None,
-        router=StubRouter(),
+        router=QueryRouter(),
         retriever=EvidenceRetriever(StubRAGRetriever(docs), store),
         assembler=EvidenceAssembler(),
     )

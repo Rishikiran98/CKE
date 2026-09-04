@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from cke.diagnostics import DegradedComponentError, clear_runtime_state
+from cke.diagnostics import DegradedComponentError
 from cke.graph_engine.graph_engine import KnowledgeGraphEngine
 from cke.models import Statement
 from cke.pipeline.query_orchestrator import QueryOrchestrator
@@ -23,13 +23,6 @@ from cke.reasoning.verifier import ReasoningVerifier
 from cke.router.query_router import QueryRouter
 
 _QUESTION = "Which country is Hagia Sophia located in?"
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 def _chain(confidence: float) -> list[Statement]:
@@ -88,7 +81,7 @@ def test_weak_evidence_no_longer_clears_the_verifier_on_a_constant():
     assert "no confidence of its own" in reasoner.degraded_reason
 
 
-def test_a_reasoner_that_cannot_verify_refuses_under_strict():
+def test_a_reasoner_that_cannot_verify_refuses_under_strict(offline_embedder):
     with pytest.raises(DegradedComponentError, match="path reasoning"):
         PathReasoner(strict=True).reason(_QUESTION, _chain(0.5))
 
@@ -143,7 +136,7 @@ def test_the_adapter_still_declares_for_a_reasoner_that_has_no_confidence():
 # ---------------------------------------------------------------------------
 
 
-def test_a_strict_orchestrator_answers_a_query_it_can_answer():
+def test_a_strict_orchestrator_answers_a_query_it_can_answer(offline_embedder):
     """No test anywhere constructed a strict QueryOrchestrator and called
     .answer(). It raised on every query the adapter handled."""
     orchestrator = QueryOrchestrator(
@@ -156,7 +149,7 @@ def test_a_strict_orchestrator_answers_a_query_it_can_answer():
     assert 0.0 < result.confidence <= 1.0
 
 
-def test_the_strict_and_permissive_orchestrators_agree():
+def test_the_strict_and_permissive_orchestrators_agree(offline_embedder):
     """They differ only in what they refuse, never in what they report."""
     strict = QueryOrchestrator(
         graph_engine=_engine(), router=QueryRouter(strict=True), strict=True

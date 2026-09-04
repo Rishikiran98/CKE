@@ -2,90 +2,13 @@
 abstention on a missing bridge.
 """
 
-from dataclasses import dataclass, field
-import re
-
 from cke.models import Statement
 from cke.pipeline.evidence_assembler import EvidenceAssembler
 from cke.pipeline.query_orchestrator import QueryOrchestrator
 from cke.pipeline.types import ReasonerOutcome
 from cke.retrieval.chunk_fact_store import ChunkFactStore
 from cke.retrieval.evidence_retriever import EvidenceRetriever
-
-
-@dataclass
-class StubQueryPlan:
-    reasoning_route: str = "advanced_reasoner"
-    decomposition: list[dict[str, str | float]] = field(default_factory=list)
-    operator_hint: str | None = None
-    target_relations: list[str] = field(default_factory=list)
-    multi_hop_hint: bool = False
-    bridge_entities_expected: bool = False
-
-
-class StubRouter:
-    def route(self, query: str) -> StubQueryPlan:
-        lowered = query.lower()
-        decomposition: list[dict[str, str | float]] = []
-        target_relations: list[str] = []
-        multi_hop_hint = any(
-            marker in lowered
-            for marker in ["character portrayed by", "connected", "between", "via"]
-        )
-        bridge_entities_expected = multi_hop_hint or "same nationality" in lowered
-
-        if "located" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "located_in", "confidence": 1.0}
-            )
-            target_relations.append("located_in")
-        if "portrayed" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "portrayed", "confidence": 1.0}
-            )
-            target_relations.append("portrayed")
-        if "film" in lowered or "appears" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "appears_in", "confidence": 0.9}
-            )
-            target_relations.append("appears_in")
-        if "nationality" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "nationality", "confidence": 1.0}
-            )
-            target_relations.append("nationality")
-
-        return StubQueryPlan(
-            decomposition=decomposition,
-            operator_hint=None,
-            target_relations=target_relations,
-            multi_hop_hint=multi_hop_hint,
-            bridge_entities_expected=bridge_entities_expected,
-        )
-
-    def detect_entities(self, query: str) -> list[str]:
-        entities = []
-        lowered = query.lower()
-        for candidate in [
-            "A",
-            "B",
-            "C",
-            "Person X",
-            "Character Y",
-            "Film Z",
-            "Scott Derrickson",
-            "Ed Wood",
-            "Bridge Missing",
-        ]:
-            candidate_lower = candidate.lower()
-            if len(candidate) == 1:
-                pattern = rf"\b{re.escape(candidate_lower)}\b"
-                matched = re.search(pattern, lowered) is not None
-            else:
-                matched = candidate_lower in lowered
-            if matched:
-                entities.append(candidate)
-        return entities
+from cke.router.query_router import QueryRouter
 
 
 class StubRAGRetriever:
@@ -178,7 +101,7 @@ def _build_orchestrator(
     reasoner = PathAwareStubReasoner()
     orchestrator = QueryOrchestrator(
         graph_engine=None,
-        router=StubRouter(),
+        router=QueryRouter(),
         retriever=EvidenceRetriever(StubRAGRetriever(docs), store),
         assembler=EvidenceAssembler(max_candidate_paths=10),
         reasoner=reasoner,
@@ -273,7 +196,7 @@ def test_dual_entity_connection_preserves_both_sides():
 
     subjects = {fact.statement.subject for fact in result.evidence_facts}
     assert {"Scott Derrickson", "Ed Wood"}.issubset(subjects)
-    assert result.answer in {"yes", "INSUFFICIENT_EVIDENCE"}
+    assert result.answer == "yes"
 
 
 def test_missing_bridge_abstains_without_hallucinating():

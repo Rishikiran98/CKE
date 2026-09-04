@@ -2,45 +2,13 @@
 missing evidence abstains.
 """
 
-from dataclasses import dataclass, field
-
 from cke.models import Statement
 from cke.pipeline.evidence_assembler import EvidenceAssembler
 from cke.pipeline.query_orchestrator import QueryOrchestrator
 from cke.pipeline.types import ReasonerOutcome
 from cke.retrieval.chunk_fact_store import ChunkFactStore
 from cke.retrieval.evidence_retriever import EvidenceRetriever
-
-
-@dataclass
-class StubQueryPlan:
-    reasoning_route: str = "advanced_reasoner"
-    decomposition: list[dict[str, str | float]] = field(default_factory=list)
-
-
-class StubRouter:
-    def route(self, query: str) -> StubQueryPlan:
-        lowered = query.lower()
-        decomposition = []
-        if "nationality" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "nationality", "confidence": 1.0}
-            )
-        return StubQueryPlan(
-            reasoning_route="advanced_reasoner", decomposition=decomposition
-        )
-
-    def detect_entities(self, query: str) -> list[str]:
-        entities = []
-        for candidate in [
-            "Albert Einstein",
-            "Scott Derrickson",
-            "Ed Wood",
-            "Unknown Person",
-        ]:
-            if candidate.lower() in query.lower():
-                entities.append(candidate)
-        return entities
+from cke.router.query_router import QueryRouter
 
 
 class StubRAGRetriever:
@@ -105,7 +73,7 @@ def _build_orchestrator(docs, fact_map) -> QueryOrchestrator:
         store.add_facts(chunk_id, statements)
     return QueryOrchestrator(
         graph_engine=None,
-        router=StubRouter(),
+        router=QueryRouter(),
         retriever=EvidenceRetriever(StubRAGRetriever(docs), store),
         assembler=EvidenceAssembler(),
         reasoner=StubReasoner(),

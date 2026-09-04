@@ -13,15 +13,8 @@ import sys
 
 import pytest
 
-from cke.diagnostics import DegradedComponentError, clear_runtime_state
+from cke.diagnostics import DegradedComponentError
 from cke.evaluation.token_counter import TokenCounter
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 @pytest.fixture()

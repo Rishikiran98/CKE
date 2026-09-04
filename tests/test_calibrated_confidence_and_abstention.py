@@ -72,7 +72,20 @@ class FailingVerifier:
 
 
 @dataclass
-class StubRouter:
+class FixedConfidenceRouter:
+    """A router whose route confidence is set by the test, not computed.
+
+    The other seven stub routers in this suite were removed in favour of the
+    real QueryRouter: they answered the routing question the orchestrator was
+    supposed to ask, so the tests using them proved nothing about routing.
+
+    This one stays, and is not that. These tests vary route_confidence across
+    a range and check how the calibrator weighs it; the real router computes
+    one value from the query and offers no way to ask for another, so the
+    input has to come from here. It returns a real QueryPlan, and nothing
+    downstream of it is stubbed.
+    """
+
     query_plan: QueryPlan = field(
         default_factory=lambda: QueryPlan(
             reasoning_route="graph_traversal",
@@ -104,7 +117,7 @@ def _build_orchestrator(
 
     return QueryOrchestrator(
         graph_engine=None,
-        router=StubRouter(
+        router=FixedConfidenceRouter(
             QueryPlan(
                 reasoning_route="graph_traversal",
                 route_confidence=route_confidence,

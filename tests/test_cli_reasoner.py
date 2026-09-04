@@ -7,6 +7,7 @@ from cke.experiments import run_experiment
 import demo
 
 
+@pytest.mark.needs_model
 def test_demo_cli_runs_strict_and_answers(monkeypatch, capsys):
     """The demo has one path and every component on it is strict.
 

@@ -13,14 +13,7 @@ import inspect
 
 import pytest
 
-from cke.diagnostics import DegradedComponentError, clear_runtime_state
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
+from cke.diagnostics import DegradedComponentError
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +48,9 @@ def test_the_two_classes_that_used_to_slip_through_can_now_answer():
 # ---------------------------------------------------------------------------
 
 
-def test_a_strict_orchestrator_refuses_a_non_strict_injected_component():
+def test_a_strict_orchestrator_refuses_a_non_strict_injected_component(
+    offline_embedder,
+):
     """It accepted eight prebuilt collaborators and checked none of them,
     while reporting itself strict."""
     from cke.graph_engine.graph_engine import KnowledgeGraphEngine
@@ -72,7 +67,7 @@ def test_a_strict_orchestrator_refuses_a_non_strict_injected_component():
         )
 
 
-def test_a_strict_orchestrator_accepts_a_strict_one():
+def test_a_strict_orchestrator_accepts_a_strict_one(offline_embedder):
     from cke.graph_engine.graph_engine import KnowledgeGraphEngine
     from cke.pipeline.query_orchestrator import QueryOrchestrator
     from cke.reasoning.path_reasoner import PathReasoner
@@ -100,7 +95,7 @@ def test_the_conversational_orchestrator_takes_strict():
     assert "strict" in inspect.signature(ConversationalOrchestrator.__init__).parameters
 
 
-def test_strict_reaches_the_ingestion_pipeline_and_the_embedder():
+def test_strict_reaches_the_ingestion_pipeline_and_the_embedder(offline_embedder):
     """Two components inside the chain dropped it: the store built its
     ingestion pipeline without strict, and the retriever built its candidate
     generator without strict, so the embedder was never strict either."""

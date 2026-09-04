@@ -8,13 +8,14 @@ one, and records what it loaded so a results file can state it.
 
 from __future__ import annotations
 
+import pathlib
+
 import logging
 
 import pytest
 
 from cke.diagnostics import (
     DegradedComponentError,
-    clear_runtime_state,
     environment_report,
     revision_pin_problem,
 )
@@ -22,13 +23,6 @@ from cke.diagnostics import (
 #: A revision with the shape of a pin. Stubbed models have no Hub page.
 _A_COMMIT = "a" * 40
 _ANOTHER_COMMIT = "b" * 40
-
-
-@pytest.fixture(autouse=True)
-def _clean_runtime_state():
-    clear_runtime_state()
-    yield
-    clear_runtime_state()
 
 
 class _StubModel:
@@ -90,7 +84,7 @@ def test_the_two_pinned_loaders_share_one_check():
 
     for module in (llm_qa, embedding_model):
         source = (module.__file__ or "").replace(".pyc", ".py")
-        text = open(source, encoding="utf-8").read()
+        text = pathlib.Path(source).read_text(encoding="utf-8")
         assert "[0-9a-fA-F]{40}" not in text, f"{module.__name__} re-states the rule"
         assert "revision_pin_problem" in text
 

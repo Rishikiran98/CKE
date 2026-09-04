@@ -1,6 +1,6 @@
 """Alias resolution and relation-targeted retrieval through the orchestrator."""
 
-from dataclasses import dataclass, field
+import pytest
 
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.models import Statement
@@ -9,58 +9,7 @@ from cke.pipeline.query_orchestrator import QueryOrchestrator
 from cke.pipeline.types import ReasonerOutcome
 from cke.retrieval.chunk_fact_store import ChunkFactStore
 from cke.retrieval.evidence_retriever import EvidenceRetriever
-
-
-@dataclass
-class StubQueryPlan:
-    reasoning_route: str = "advanced_reasoner"
-    decomposition: list[dict[str, str | float]] = field(default_factory=list)
-    operator_hint: str | None = None
-    target_relations: list[str] = field(default_factory=list)
-
-
-class StubRouter:
-    def route(self, query: str) -> StubQueryPlan:
-        lowered = query.lower()
-        decomposition = []
-        target_relations: list[str] = []
-        operator_hint = None
-
-        if "nationality" in lowered or "citizenship" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "nationality", "confidence": 1.0}
-            )
-            target_relations.append("nationality")
-        if "direct" in lowered:
-            decomposition.append(
-                {"type": "relation", "value": "directed", "confidence": 1.0}
-            )
-            target_relations.append("directed")
-            operator_hint = "existence"
-        if "same nationality" in lowered:
-            operator_hint = "equality"
-            if "nationality" not in target_relations:
-                target_relations.append("nationality")
-
-        return StubQueryPlan(
-            decomposition=decomposition,
-            operator_hint=operator_hint,
-            target_relations=target_relations,
-        )
-
-    def detect_entities(self, query: str) -> list[str]:
-        entities = []
-        for candidate in [
-            "Albert Einstein",
-            "Christopher Nolan",
-            "Inception",
-            "Scott Derrickson",
-            "Ed Wood",
-            "Unknown Alias",
-        ]:
-            if candidate.lower() in query.lower():
-                entities.append(candidate)
-        return entities
+from cke.router.query_router import QueryRouter
 
 
 class StubRAGRetriever:
@@ -104,7 +53,7 @@ def _build_orchestrator(docs, fact_map, resolver_aliases=None) -> QueryOrchestra
     entity_resolver = EntityResolver(aliases=resolver_aliases or {})
     return QueryOrchestrator(
         graph_engine=None,
-        router=StubRouter(),
+        router=QueryRouter(),
         retriever=EvidenceRetriever(StubRAGRetriever(docs), store),
         assembler=EvidenceAssembler(),
         reasoner=StubReasoner(),
@@ -145,9 +94,24 @@ def test_alias_resolution_us_citizenship():
         for e in orchestrator.last_context.resolved_entities
     )
     assert any(f.statement.relation == "nationality" for f in result.evidence_facts)
-    assert result.answer in {"United States", "INSUFFICIENT_EVIDENCE"}
+    assert result.answer == "United States"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "query_orchestrator.py:109-110 registers every entity the router "
+        "detected as an alias for itself, which overwrites the configured "
+        "alias: 'Chris Nolan' -> 'Christopher Nolan' becomes 'Chris Nolan' -> "
+        "'Chris Nolan' on every query. Alias resolution in the orchestrator "
+        "is therefore dead in any real run. This passed against StubRouter "
+        "only because that stub matched entities by substring and so never "
+        "detected 'Chris Nolan' at all — the stub's failure to route is what "
+        "made the assertion green. Fixing it is a change to answering "
+        "behaviour and belongs in its own change, not in a test cleanup; "
+        "strict=True so this fails loudly the moment it is fixed."
+    ),
+)
 def test_canonical_alias_director_lookup():
     docs = [
         {
@@ -174,7 +138,10 @@ def test_canonical_alias_director_lookup():
         e.canonical_name == "Christopher Nolan"
         for e in orchestrator.last_context.resolved_entities
     )
-    assert result.answer in {"yes", "INSUFFICIENT_EVIDENCE"}
+    # Was `in {"yes", "INSUFFICIENT_EVIDENCE"}`, which accepted the right
+    # answer and a refusal as equally correct, so a regression from answering
+    # to abstaining was invisible.
+    assert result.answer == "yes"
 
 
 def test_relation_targeted_retrieval_prioritizes_nationality():
@@ -209,7 +176,7 @@ def test_relation_targeted_retrieval_prioritizes_nationality():
 
     top_relations = [f.statement.relation for f in result.evidence_facts[:2]]
     assert "nationality" in top_relations
-    assert result.answer in {"German", "INSUFFICIENT_EVIDENCE"}
+    assert result.answer == "German"
 
 
 def test_dual_entity_comparison_retains_both_sides():
