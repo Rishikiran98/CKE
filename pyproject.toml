@@ -116,12 +116,19 @@ branch = true
 # counting branches both add uncovered ground; the number went down because
 # it now describes more of the repository, which is the point.
 #
-# 78.0 -> 80.0 when the source-text assertions were replaced by behavioural
+# 78.0 -> 78.5 when the source-text assertions were replaced by behavioural
 # ones: a test that greps an implementation executes none of it, so the
-# replacements moved the measured figure to 80.13 without a line of cke/ or
-# scripts/ being written. The floor follows the measurement; slack in a floor
-# is room for a regression to fit through.
-fail_under = 80.0
+# replacements raise the measured figure without a line of cke/ or scripts/
+# being written. The floor follows the measurement; slack in a floor is room
+# for a regression to fit through.
+#
+# I first set this to 80.0 from a figure measured on a container with data/
+# populated, where a test that runs the benchmark driver got further than it
+# does on a fresh clone. CI reported 78.80 and the floor failed. The figure
+# is 78.80 either way now, because that test names dataset paths that do not
+# exist and asserts the run stopped looking for them — a coverage number that
+# moves with the checkout is not a number a gate can hold.
+fail_under = 78.5
 precision = 2
 skip_covered = true
 

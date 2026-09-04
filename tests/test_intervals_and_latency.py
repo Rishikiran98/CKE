@@ -7,7 +7,6 @@ second.
 
 from __future__ import annotations
 
-import contextlib
 import importlib.util
 import sys
 import time
@@ -480,7 +479,9 @@ def test_a_key_present_in_only_one_run_is_reported(tmp_path):
     assert bench.compare_runs(first, second) == ["b: only in the first run"]
 
 
-def test_the_git_state_is_read_before_the_run_writes_anything(tmp_path, monkeypatch):
+def test_the_git_state_is_read_before_the_run_writes_anything(
+    tmp_path, monkeypatch, capsys
+):
     """With --output-dir inside the repository, the run's own files were in
     the tree by the time the state was read, so a run that started clean
     recorded itself dirty because of the artifacts it had just produced.
@@ -512,14 +513,39 @@ def test_the_git_state_is_read_before_the_run_writes_anything(tmp_path, monkeypa
             "--skip-download",
             "--output-dir",
             str(output_dir),
+            # Dataset paths that do not exist, so the run stops at the same
+            # place on every machine. Left to the defaults it reads data/,
+            # which is populated on a development container and empty on a
+            # fresh checkout — so how far main() got, and therefore the
+            # measured coverage, depended on the machine. The floor is a gate
+            # on that number; it cannot be allowed to move with the checkout.
+            "--hotpot-path",
+            str(tmp_path / "absent-hotpot.json"),
+            "--wiki2-path",
+            str(tmp_path / "absent-wiki2.json"),
+            "--musique-path",
+            str(tmp_path / "absent-musique.json"),
             "--limit",
             "1",
         ],
     )
 
-    with contextlib.suppress(BaseException):
+    stopped_with = None
+    try:
         bench.main()
+    except BaseException as exc:  # noqa: BLE001 - the run is meant to stop
+        stopped_with = exc
 
+    # The run must stop because a dataset file is missing, not because it
+    # found the repository's data/ and got further. Asserting where it
+    # stopped is what keeps the executed path — and so the coverage figure
+    # the floor gates — the same on a populated container and a fresh clone.
+    assert stopped_with is not None, "the run was expected to stop and did not"
+    printed = capsys.readouterr().out
+    assert "absent-hotpot.json" in printed, (
+        "the run did not look for the dataset this test named, so it found "
+        "whatever the machine had and got further than it does elsewhere"
+    )
     assert observed, "the run never read the git state at all"
     assert observed["output_dir_existed"] is False, (
         "the state was read after the output directory existed, so a run "
