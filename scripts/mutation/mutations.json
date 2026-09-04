@@ -360,8 +360,8 @@
     {
       "label": "a name the resolver cannot place scores as high as an alias hit",
       "path": "cke/entity_resolution/entity_resolver.py",
-      "old": "        return ResolutionResult(\n            canonical=canonical,\n            confidence=max(best_fuzzy, best_emb, 0.50),\n        )",
-      "new": "        return ResolutionResult(\n            canonical=canonical,\n            confidence=max(best_fuzzy, best_emb, 0.95),\n        )",
+      "old": "        return self._remember(\n            name,\n            ResolutionResult(\n                canonical=canonical,\n                confidence=max(best_fuzzy, best_emb, 0.50),\n            ),\n        )",
+      "new": "        return self._remember(\n            name,\n            ResolutionResult(\n                canonical=canonical,\n                confidence=max(best_fuzzy, best_emb, 0.95),\n            ),\n        )",
       "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
     },
     {
@@ -369,6 +369,20 @@
       "path": "cke/entity_resolution/entity_resolver.py",
       "old": "        resolved = self.registry.resolve(name)\n        if resolved:\n            return ResolutionResult(canonical=resolved, confidence=0.90)",
       "new": "        resolved = None\n        if resolved:\n            return ResolutionResult(canonical=resolved, confidence=0.90)",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "a repeated mention is scored by the canonical rung instead of the one that resolved it",
+      "path": "cke/entity_resolution/entity_resolver.py",
+      "old": "        remembered = self._resolution_cache.get(name)\n        if remembered is not None:\n            return remembered\n",
+      "new": "",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "the cache outlives an alias the caller registered afterwards",
+      "path": "cke/entity_resolution/entity_resolver.py",
+      "old": "        self._resolution_cache.pop(canonical_name, None)\n        for alias in aliases:\n            self._resolution_cache.pop(str(alias).strip(), None)",
+      "new": "        pass",
       "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
     }
   ],
