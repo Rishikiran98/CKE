@@ -15,7 +15,15 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
-from cke.diagnostics import DegradationMixin, record_loaded_model
+from cke.diagnostics import (
+    DegradationMixin,
+    record_loaded_model,
+    revision_pin_problem,
+)
+from cke.retrieval.embedding_model import (
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_REVISION,
+)
 from cke.entity_resolution.alias_registry import AliasRegistry
 
 if TYPE_CHECKING:
@@ -41,7 +49,12 @@ except ImportError:  # pragma: no cover
     SentenceTransformer = None
 
 
-_EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+#: The same embedder, at the same commit, as :mod:`cke.retrieval.embedding_model`
+#: loads. It used to be named here without the organisation prefix and without a
+#: revision, which made it a second, separately-resolved copy of the same
+#: weights whose identity no run could state.
+_EMBEDDING_MODEL_NAME = DEFAULT_EMBEDDING_MODEL
+_EMBEDDING_MODEL_REVISION = DEFAULT_EMBEDDING_REVISION
 
 #: Loaded models, keyed by name, shared across every resolver in the process.
 #: A resolver is constructed per GraphRetriever, and a benchmark builds one per
@@ -709,6 +722,13 @@ class EntityResolver(DegradationMixin):
             )
             return None
 
+        pin_problem = revision_pin_problem(
+            _EMBEDDING_MODEL_NAME, _EMBEDDING_MODEL_REVISION
+        )
+        if pin_problem is not None:  # pragma: no cover - the pin is a constant
+            self._degrade(pin_problem)
+            return None
+
         cached = _MODEL_CACHE.get(_EMBEDDING_MODEL_NAME)
         if cached is not None:
             return cached
@@ -719,7 +739,9 @@ class EntityResolver(DegradationMixin):
             return None
 
         try:
-            model = SentenceTransformer(_EMBEDDING_MODEL_NAME)
+            model = SentenceTransformer(
+                _EMBEDDING_MODEL_NAME, revision=_EMBEDDING_MODEL_REVISION
+            )
         except Exception as exc:  # noqa: BLE001 - download/runtime failures vary
             reason = (
                 f"sentence-transformers could not load "
@@ -733,7 +755,9 @@ class EntityResolver(DegradationMixin):
 
         _MODEL_CACHE[_EMBEDDING_MODEL_NAME] = model
         record_loaded_model(
-            "EntityResolver", _EMBEDDING_MODEL_NAME, _EMBEDDING_MODEL_NAME
+            "EntityResolver",
+            _EMBEDDING_MODEL_NAME,
+            f"{_EMBEDDING_MODEL_NAME}@{_EMBEDDING_MODEL_REVISION}",
         )
         return model
 

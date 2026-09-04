@@ -140,12 +140,40 @@ def test_a_scored_row_keeps_the_truncation_the_pipeline_recorded():
     assert row["em"] == 1.0
 
 
-def test_a_scored_row_defaults_truncation_when_the_answerer_has_none():
-    raw = {"answer": "x", "prompt_tokens": 5, "latency_ms": 1.0}
+def test_an_answerer_that_cannot_truncate_records_that_nothing_was_cut():
+    """The span baseline reads the whole context, so False there is a fact."""
+    truncated, dropped = bench._truncation_of(SpanExtractiveQA())
+
+    assert truncated is False
+    assert dropped == 0
+
+    raw = {
+        "answer": "x",
+        "prompt_tokens": 5,
+        "latency_ms": 1.0,
+        "answer_truncated": truncated,
+        "answer_dropped_tokens": dropped,
+    }
     row = bench._score_row(raw, "x")
 
     assert row["answer_truncated"] is False
     assert row["answer_dropped_tokens"] == 0
+
+
+def test_an_answerer_that_cannot_measure_records_no_figure_at_all():
+    """False here would travel into every aggregate as a measured zero."""
+    truncated, dropped = bench._truncation_of(_UnmeasuringAnswerer())
+
+    assert truncated is None
+    assert dropped is None
+
+
+def test_a_row_that_never_recorded_truncation_does_not_claim_none_was_cut():
+    raw = {"answer": "x", "prompt_tokens": 5, "latency_ms": 1.0}
+    row = bench._score_row(raw, "x")
+
+    assert row["answer_truncated"] is None
+    assert row["answer_dropped_tokens"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -202,3 +230,207 @@ def test_a_strict_run_refuses_a_dataset_that_drops_entries(
     # The opt-out still loads, with the item thinned and the drop declared.
     items = getattr(bench, loader)(path, 10, False)
     assert items[0]["documents"] == []
+
+
+# ---------------------------------------------------------------------------
+# The summary says what produced the answers
+# ---------------------------------------------------------------------------
+
+
+class _StubTruncation:
+    calls = 12
+    truncated = 4
+    rate = 4 / 12
+    dropped_tokens: list = []
+
+
+class _MeasuringAnswerer:
+    description = "a model that fits the context itself"
+    uses_language_model = True
+    truncation_measured = True
+    truncation = _StubTruncation()
+
+
+class _UnmeasuringAnswerer(_MeasuringAnswerer):
+    description = "a model behind an endpoint"
+    truncation_measured = False
+
+
+def test_the_summary_records_whether_a_model_read_the_context():
+    """Without it the accuracy columns could be a lexical baseline's own."""
+    from cke.evaluation.span_qa import SpanExtractiveQA
+
+    counter = TokenCounter()
+    combined = {"rag_k10": {"em": 0.3}, "cke_n12": {"em": 0.1}}
+
+    with_model = bench.produce_summary(combined, counter, _MeasuringAnswerer())
+    without = bench.produce_summary(combined, counter, SpanExtractiveQA())
+
+    assert with_model["generator_in_the_loop"] is True
+    assert without["generator_in_the_loop"] is False
+
+
+def test_an_answerer_that_cannot_measure_truncation_reports_that():
+    """A zero here would be a substituted value where a measurement belongs.
+
+    The api backend sends the context whole because it has no tokeniser for
+    the model behind the endpoint, so its truncated count stays zero whatever
+    the endpoint did with an over-long prompt.
+    """
+    counter = TokenCounter()
+    combined = {"rag_k10": {"truncated_items": 0, "truncation_rate": 0.0}}
+
+    reported = bench.produce_summary(combined, counter, _UnmeasuringAnswerer())
+    truncation = reported["answer_truncation"]
+
+    assert truncation["measured"] is False
+    assert truncation["calls"] == 12
+    assert "rate" not in truncation
+    assert "by_arm" not in truncation
+    assert "tokeniser" in truncation["reason"]
+
+
+def test_an_answerer_that_measures_truncation_reports_the_figures():
+    counter = TokenCounter()
+    combined = {
+        "rag_k10": {"truncated_items": 3, "truncation_rate": 0.5},
+        "cke_n12": {"truncated_items": 0, "truncation_rate": 0.0},
+    }
+
+    truncation = bench.produce_summary(combined, counter, _MeasuringAnswerer())[
+        "answer_truncation"
+    ]
+
+    assert truncation["measured"] is True
+    assert truncation["truncated"] == 4
+    assert truncation["by_arm"]["rag_k10"]["truncated_items"] == 3
+    assert truncation["by_arm"]["cke_n12"]["rate"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# What produced the numbers
+# ---------------------------------------------------------------------------
+
+
+def test_the_summary_records_the_identity_of_every_model_loaded():
+    """A results file that names no commit cannot be reproduced from itself.
+
+    The environment report printed at the start of a run cannot carry this:
+    nothing has been constructed yet, so its model list is empty. The summary
+    is written after the work, which is the only point at which the question
+    "which weights produced these numbers" has an answer.
+    """
+    from cke.diagnostics import clear_runtime_state, record_loaded_model
+
+    clear_runtime_state()
+    try:
+        record_loaded_model("EmbeddingModel", "some/model", "some/model@" + "a" * 40)
+
+        summary = bench.produce_summary({}, TokenCounter(), SpanExtractiveQA())
+        environment = summary["environment"]
+
+        assert {
+            "component": "EmbeddingModel",
+            "requested": "some/model",
+            "loaded": "some/model@" + "a" * 40,
+        } in environment["loaded_models"]
+        assert environment["python_version"]
+        assert environment["platform"]
+        # The libraries around the model move too, and their versions are as
+        # much a part of a number's provenance as the weights are.
+        assert any(dep["import_name"] for dep in environment["dependencies"])
+    finally:
+        clear_runtime_state()
+
+
+def test_the_summary_carries_what_degraded_beside_the_figures():
+    """A degradation printed only to a console is lost the moment it scrolls."""
+    from cke.diagnostics import clear_runtime_state, record_degradation
+
+    clear_runtime_state()
+    try:
+        record_degradation("EmbeddingModel", "it hashed tokens instead")
+
+        summary = bench.produce_summary({}, TokenCounter(), SpanExtractiveQA())
+
+        assert summary["environment"]["degradations"] == [
+            {"component": "EmbeddingModel", "reason": "it hashed tokens instead"}
+        ]
+    finally:
+        clear_runtime_state()
+
+
+# ---------------------------------------------------------------------------
+# An unmeasured zero must not reach any output
+# ---------------------------------------------------------------------------
+
+
+def _rows(truncated):
+    """Two items on one arm, each carrying *truncated* as its cut flag."""
+    return [
+        {
+            "rag_k10": {
+                "em": 1.0,
+                "f1": 1.0,
+                "prompt_tokens": 100,
+                "latency_ms": 1.0,
+                "answer_truncated": truncated,
+                "answer_dropped_tokens": None if truncated is None else 0,
+            }
+        }
+        for _ in range(2)
+    ]
+
+
+def test_unmeasured_items_produce_no_truncation_aggregate():
+    """ablation.json published truncation_rate 0.0 for a backend that had
+    measured nothing, contradicting the summary written from the same run."""
+    metrics = bench.aggregate_metrics(_rows(None))["rag_k10"]
+
+    assert "truncated_items" not in metrics
+    assert "truncation_rate" not in metrics
+    assert metrics["n"] == 2, "the arm is still aggregated, only the cut is not"
+
+
+def test_measured_items_still_produce_the_truncation_aggregate():
+    metrics = bench.aggregate_metrics(_rows(True))["rag_k10"]
+
+    assert metrics["truncated_items"] == 2
+    assert metrics["truncation_rate"] == 1.0
+
+
+def test_the_comparison_table_says_not_measured_rather_than_zero():
+    """The table printed "Items with context truncated | 0 | 0 | ..." for a
+    backend that never looked."""
+    counter = TokenCounter()
+    per_dataset = {"hotpotqa": bench.aggregate_metrics(_rows(None))}
+    combined = bench.aggregate_metrics(_rows(None))
+
+    table = bench.produce_comparison_table(
+        per_dataset, combined, counter, _UnmeasuringAnswerer()
+    )
+
+    assert "Items with context truncated" in table
+    assert "not measured" in table
+    truncation_rows = [
+        line for line in table.splitlines() if "Items with context truncated" in line
+    ]
+    assert truncation_rows, "the row must not vanish in silence"
+    for line in truncation_rows:
+        assert "| 0 |" not in line
+
+
+def test_the_comparison_table_still_counts_what_was_measured():
+    counter = TokenCounter()
+    per_dataset = {"hotpotqa": bench.aggregate_metrics(_rows(True))}
+    combined = bench.aggregate_metrics(_rows(True))
+
+    table = bench.produce_comparison_table(
+        per_dataset, combined, counter, _MeasuringAnswerer()
+    )
+
+    assert "not measured" not in table
+    assert any(
+        "Items with context truncated" in line and "| 2 |" in line
+        for line in table.splitlines()
+    )

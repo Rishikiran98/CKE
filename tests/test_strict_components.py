@@ -13,6 +13,10 @@ import pytest
 
 from cke.diagnostics import DegradedComponentError, clear_runtime_state
 
+#: A revision with the shape of a pin, for stubbed models that have no Hub
+#: page. Loaders refuse anything that is not a full commit hash.
+_A_COMMIT = "0" * 40
+
 
 @pytest.fixture(autouse=True)
 def _clean_runtime_state():
@@ -60,7 +64,7 @@ def test_a_failed_model_load_is_not_cached_as_the_fallback(monkeypatch):
     cache: dict = {}
     monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", cache)
 
-    def _fail(name):
+    def _fail(name, revision=None):
         raise OSError("network unreachable")
 
     monkeypatch.setattr(module, "SentenceTransformer", _fail)
@@ -88,8 +92,8 @@ def test_empty_input_uses_the_real_dimension(monkeypatch):
 
             return np.zeros((len(texts), 384), dtype="float32")
 
-    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {"m": FakeModel()})
-    model = module.EmbeddingModel(model_name="m")
+    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {("m", _A_COMMIT): FakeModel()})
+    model = module.EmbeddingModel(model_name="m", model_revision=_A_COMMIT)
 
     assert model.embed_texts([]).shape == (0, 384)
 
@@ -445,8 +449,8 @@ def test_failed_model_load_is_attempted_once_per_process(monkeypatch):
 
     attempts = []
 
-    def _fail(name):
-        attempts.append(name)
+    def _fail(name, revision=None):
+        attempts.append((name, revision))
         raise OSError("network unreachable")
 
     monkeypatch.setattr(module, "SentenceTransformer", _fail)
@@ -456,7 +460,9 @@ def test_failed_model_load_is_attempted_once_per_process(monkeypatch):
     for _ in range(20):
         module.EmbeddingModel()
 
-    assert len(attempts) == 1
+    assert attempts == [
+        (module.DEFAULT_EMBEDDING_MODEL, module.DEFAULT_EMBEDDING_REVISION)
+    ]
 
     # The recorded cause is still available to a later strict construction.
     with pytest.raises(DegradedComponentError, match="network unreachable"):
@@ -476,10 +482,13 @@ def test_dimension_is_measured_when_a_healthy_model_reports_none(monkeypatch):
         def encode(self, texts, **kwargs):
             return np.zeros((len(texts), 512), dtype="float32")
 
-    monkeypatch.setattr(module, "_GLOBAL_MODEL_CACHE", {"quiet": QuietModel()})
+    monkeypatch.setattr(
+        module, "_GLOBAL_MODEL_CACHE", {("quiet", _A_COMMIT): QuietModel()}
+    )
     monkeypatch.setattr(module, "_FAILED_MODEL_LOADS", {})
 
-    assert module.EmbeddingModel(model_name="quiet").dimension == 512
+    quiet = module.EmbeddingModel(model_name="quiet", model_revision=_A_COMMIT)
+    assert quiet.dimension == 512
 
 
 def test_a_strict_pipeline_refuses_a_non_strict_injected_reasoner(monkeypatch):

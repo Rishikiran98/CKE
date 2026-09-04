@@ -176,6 +176,11 @@ class SpanExtractiveQA:
     #: answerer exposes the same property; the benchmark prints whichever ran.
     description = "SpanExtractiveQA — lexical span baseline, no language model"
 
+    #: No model reads the context here, so a figure produced with this
+    #: answerer is the baseline's own. A summary carries this so that the
+    #: distinction survives into the results file.
+    uses_language_model = False
+
     def answer(self, question: str, context: str) -> str:
         if not context.strip() or not question.strip():
             return ""

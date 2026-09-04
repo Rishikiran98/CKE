@@ -29,17 +29,28 @@ and must say so rather than produce a number.
 Truncation is a measurement, not a nuisance. A model has a context window, a
 dense arm's prose can exceed it, and dropping the tail of the context changes
 what the model was shown. It is counted per call, per arm, and reported.
+
+Only the local backend can count it. Fitting a context to a window means
+tokenising it with the model's own tokeniser, and an endpoint does not lend
+one out. The api backend therefore sends the context whole and reports that
+truncation was not measured, rather than reporting that none occurred: what a
+remote endpoint does with an over-long prompt is not visible from here, and a
+zero in that column would be a substituted value standing where a measurement
+belongs.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from urllib import request
 
-from cke.diagnostics import DegradationMixin, record_loaded_model
+from cke.diagnostics import (
+    DegradationMixin,
+    record_loaded_model,
+    revision_pin_problem,
+)
 
 __all__ = ["LLMAnswerer", "PROMPT"]
 
@@ -64,14 +75,6 @@ _DEFAULT_LOCAL_MODEL = "google/flan-t5-base"
 #: This is the commit both measurements in the pull request resolved to.
 _DEFAULT_LOCAL_REVISION = "7bcac572ce56db69c1ea7c8af255c5d7c9672fc2"
 
-#: What a pin is: a full commit hash. The Hub also accepts a branch or a tag
-#: as a ``revision``, and both move — "main" names whatever was pushed last,
-#: and a tag can be re-pointed — so a run given one would load different
-#: weights on a different day while reporting itself pinned. A short hash is
-#: refused too: it is a prefix, and resolves to whatever the Hub matches it
-#: against.
-_COMMIT_HASH = re.compile(r"[0-9a-fA-F]{40}")
-
 
 @dataclass
 class TruncationLog:
@@ -88,6 +91,10 @@ class TruncationLog:
 
 class LLMAnswerer(DegradationMixin):
     """Answer with a language model, or refuse."""
+
+    #: A model reads the context here. The span baseline sets this False, and
+    #: a summary carries it so that a figure can be told from a lexical one.
+    uses_language_model = True
 
     def __init__(
         self,
@@ -139,6 +146,15 @@ class LLMAnswerer(DegradationMixin):
             )
             self.api_key = api_key or os.getenv("CKE_LLM_API_KEY")
             self.timeout_s = timeout_s
+            if max_input_tokens is not None:
+                self._degrade(
+                    f"a {max_input_tokens}-token window was requested for the "
+                    f"api backend, which cannot honour one: fitting a context "
+                    f"to a window needs the model's own tokeniser and an "
+                    f"endpoint does not lend one out, so the context is sent "
+                    f"whole and the window is ignored. Drop it, or use the "
+                    f"local backend, which measures truncation"
+                )
             if not self.api_key:
                 self._degrade(
                     "no API key is configured; set CKE_LLM_API_KEY or pass "
@@ -161,22 +177,9 @@ class LLMAnswerer(DegradationMixin):
                 f"transformers torch`"
             )
             return
-        if not self.model_revision:
-            self._degrade(
-                f"no revision is pinned for {self.model_name!r}, so which "
-                f"weights would load depends on what the Hub serves at the "
-                f"moment of loading, and no figure produced would be "
-                f"reproducible. Pass model_revision=<commit sha>"
-            )
-            return
-        if not _COMMIT_HASH.fullmatch(self.model_revision):
-            self._degrade(
-                f"revision {self.model_revision!r} for {self.model_name!r} is "
-                f"not a full commit hash. A branch or tag names whatever the "
-                f"Hub holds under it today and something else tomorrow, so "
-                f"weights loaded through it cannot be reproduced. Pass the "
-                f"40-character commit sha from the model's Hub page"
-            )
+        pin_problem = revision_pin_problem(self.model_name, self.model_revision)
+        if pin_problem is not None:
+            self._degrade(pin_problem)
             return
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(
@@ -202,6 +205,17 @@ class LLMAnswerer(DegradationMixin):
         record_loaded_model(
             "LLMAnswerer", self.model_name, f"{self.model_name}@{self.model_revision}"
         )
+
+    @property
+    def truncation_measured(self) -> bool:
+        """Whether ``truncation`` counts anything, or only calls.
+
+        The local backend fits every context to the window and counts what it
+        dropped. The api backend cannot, so its truncated count stays zero
+        whatever the endpoint did with the prompt; reporting that zero as a
+        rate would state a measurement that was never taken.
+        """
+        return self.backend == "local"
 
     @property
     def available(self) -> bool:
