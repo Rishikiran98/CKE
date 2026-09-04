@@ -140,12 +140,40 @@ def test_a_scored_row_keeps_the_truncation_the_pipeline_recorded():
     assert row["em"] == 1.0
 
 
-def test_a_scored_row_defaults_truncation_when_the_answerer_has_none():
-    raw = {"answer": "x", "prompt_tokens": 5, "latency_ms": 1.0}
+def test_an_answerer_that_cannot_truncate_records_that_nothing_was_cut():
+    """The span baseline reads the whole context, so False there is a fact."""
+    truncated, dropped = bench._truncation_of(SpanExtractiveQA())
+
+    assert truncated is False
+    assert dropped == 0
+
+    raw = {
+        "answer": "x",
+        "prompt_tokens": 5,
+        "latency_ms": 1.0,
+        "answer_truncated": truncated,
+        "answer_dropped_tokens": dropped,
+    }
     row = bench._score_row(raw, "x")
 
     assert row["answer_truncated"] is False
     assert row["answer_dropped_tokens"] == 0
+
+
+def test_an_answerer_that_cannot_measure_records_no_figure_at_all():
+    """False here would travel into every aggregate as a measured zero."""
+    truncated, dropped = bench._truncation_of(_UnmeasuringAnswerer())
+
+    assert truncated is None
+    assert dropped is None
+
+
+def test_a_row_that_never_recorded_truncation_does_not_claim_none_was_cut():
+    raw = {"answer": "x", "prompt_tokens": 5, "latency_ms": 1.0}
+    row = bench._score_row(raw, "x")
+
+    assert row["answer_truncated"] is None
+    assert row["answer_dropped_tokens"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -330,3 +358,79 @@ def test_the_summary_carries_what_degraded_beside_the_figures():
         ]
     finally:
         clear_runtime_state()
+
+
+# ---------------------------------------------------------------------------
+# An unmeasured zero must not reach any output
+# ---------------------------------------------------------------------------
+
+
+def _rows(truncated):
+    """Two items on one arm, each carrying *truncated* as its cut flag."""
+    return [
+        {
+            "rag_k10": {
+                "em": 1.0,
+                "f1": 1.0,
+                "prompt_tokens": 100,
+                "latency_ms": 1.0,
+                "answer_truncated": truncated,
+                "answer_dropped_tokens": None if truncated is None else 0,
+            }
+        }
+        for _ in range(2)
+    ]
+
+
+def test_unmeasured_items_produce_no_truncation_aggregate():
+    """ablation.json published truncation_rate 0.0 for a backend that had
+    measured nothing, contradicting the summary written from the same run."""
+    metrics = bench.aggregate_metrics(_rows(None))["rag_k10"]
+
+    assert "truncated_items" not in metrics
+    assert "truncation_rate" not in metrics
+    assert metrics["n"] == 2, "the arm is still aggregated, only the cut is not"
+
+
+def test_measured_items_still_produce_the_truncation_aggregate():
+    metrics = bench.aggregate_metrics(_rows(True))["rag_k10"]
+
+    assert metrics["truncated_items"] == 2
+    assert metrics["truncation_rate"] == 1.0
+
+
+def test_the_comparison_table_says_not_measured_rather_than_zero():
+    """The table printed "Items with context truncated | 0 | 0 | ..." for a
+    backend that never looked."""
+    counter = TokenCounter()
+    per_dataset = {"hotpotqa": bench.aggregate_metrics(_rows(None))}
+    combined = bench.aggregate_metrics(_rows(None))
+
+    table = bench.produce_comparison_table(
+        per_dataset, combined, counter, _UnmeasuringAnswerer()
+    )
+
+    assert "Items with context truncated" in table
+    assert "not measured" in table
+    truncation_rows = [
+        line for line in table.splitlines() if "Items with context truncated" in line
+    ]
+    assert truncation_rows, "the row must not vanish in silence"
+    for line in truncation_rows:
+        assert "| 0 |" not in line
+
+
+def test_the_comparison_table_still_counts_what_was_measured():
+    counter = TokenCounter()
+    per_dataset = {"hotpotqa": bench.aggregate_metrics(_rows(True))}
+    combined = bench.aggregate_metrics(_rows(True))
+
+    table = bench.produce_comparison_table(
+        per_dataset, combined, counter, _MeasuringAnswerer()
+    )
+
+    assert "not measured" not in table
+    assert any(
+        "Items with context truncated" in line and "| 2 |" in line
+        for line in table.splitlines()
+    )

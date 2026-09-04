@@ -80,6 +80,32 @@ class SeedEntityExtractor:
 # ---------------------------------------------------------------------------
 
 
+#: Why a truncation figure can be missing. An answerer behind an endpoint has
+#: no tokeniser for the model on the other side, so it sends the context whole
+#: and its truncated count stays zero whatever the endpoint did with an
+#: over-long prompt. Every output states this rather than printing that zero.
+UNMEASURED_TRUNCATION = (
+    "the api backend has no tokeniser for the model behind the endpoint, so "
+    "the context is sent whole and what was cut, if anything, is not visible "
+    "from here"
+)
+
+
+def _truncation_of(answerer) -> tuple[bool | None, int | None]:
+    """What the answerer cut on its last call, or ``None`` when it cannot tell.
+
+    ``None`` travels through the per-item rows, the aggregates and the tables
+    as "not measured". Recording ``False`` here instead put a substituted zero
+    into every file downstream, indistinguishable from a measured zero.
+    """
+    if not getattr(answerer, "truncation_measured", True):
+        return None, None
+    return (
+        bool(getattr(answerer, "last_truncated", False)),
+        int(getattr(answerer, "last_dropped_tokens", 0)),
+    )
+
+
 def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
     """Normalise HotpotQA and 2WikiMultiHopQA item formats to a doc list."""
     if "documents" in item:
@@ -132,8 +158,7 @@ class RAGPipeline:
         context = "\n".join(retrieved_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
-        truncated = bool(getattr(self._qa, "last_truncated", False))
-        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
+        truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
@@ -220,8 +245,7 @@ class CKELitePipeline:
         context = "\n".join(stmt_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
-        truncated = bool(getattr(self._qa, "last_truncated", False))
-        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
+        truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
@@ -327,8 +351,7 @@ class HybridPipeline:
         context = "\n".join(all_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
-        truncated = bool(getattr(self._qa, "last_truncated", False))
-        dropped = int(getattr(self._qa, "last_dropped_tokens", 0))
+        truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
@@ -366,8 +389,8 @@ def _score_row(r: dict[str, Any], gold: str, *extra: str) -> dict[str, Any]:
         "answer": r["answer"],
         "prompt_tokens": r["prompt_tokens"],
         "latency_ms": r["latency_ms"],
-        "answer_truncated": bool(r.get("answer_truncated", False)),
-        "answer_dropped_tokens": int(r.get("answer_dropped_tokens", 0)),
+        "answer_truncated": r.get("answer_truncated"),
+        "answer_dropped_tokens": r.get("answer_dropped_tokens"),
         "em": EvaluationMetrics.exact_match(r["answer"], gold),
         "f1": EvaluationMetrics.f1_score(r["answer"], gold),
     }
@@ -471,7 +494,7 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
                 continue
             d = row[cfg]
             agg[cfg]["em"].append(d.get("em", 0.0))
-            agg[cfg]["truncated"].append(bool(d.get("answer_truncated", False)))
+            agg[cfg]["truncated"].append(d.get("answer_truncated"))
             agg[cfg]["f1"].append(d.get("f1", 0.0))
             agg[cfg]["tokens"].append(d.get("prompt_tokens", 0))
             agg[cfg]["latency_ms"].append(d.get("latency_ms", 0.0))
@@ -486,11 +509,17 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             "median_tokens": round(statistics.median(lists["tokens"]), 1),
             "median_latency_ms": round(statistics.median(lists["latency_ms"]), 2),
             "n": len(lists["em"]),
-            # Which arm the answerer's window cut. One answerer serves every
-            # arm, so its shared totals cannot say; this can.
-            "truncated_items": sum(lists["truncated"]),
-            "truncation_rate": round(sum(lists["truncated"]) / len(lists["em"]), 4),
         }
+        # Which arm the answerer's window cut. One answerer serves every arm,
+        # so its shared totals cannot say; this can — but only when the
+        # answerer measured. An unmeasured item carries None, and a count
+        # taken over those would read as a measured zero in ablation.json.
+        cut = lists["truncated"]
+        if all(item is not None for item in cut):
+            result[cfg]["truncated_items"] = sum(bool(item) for item in cut)
+            result[cfg]["truncation_rate"] = round(
+                sum(bool(item) for item in cut) / len(cut), 4
+            )
     return result
 
 
@@ -540,9 +569,16 @@ def produce_comparison_table(
         lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
         lines.append(row("Median latency (ms)", "median_latency_ms", "{:.1f}"))
         if hasattr(answerer, "truncation"):
-            lines.append(
-                row("Items with context truncated", "truncated_items", "{:.0f}")
-            )
+            if any("truncated_items" in metrics.get(c, {}) for c in CONFIGS):
+                lines.append(
+                    row("Items with context truncated", "truncated_items", "{:.0f}")
+                )
+            else:
+                # The figures are missing, so the row says why. Dropping it in
+                # silence reads as "nothing to report", and printing the zeros
+                # the aggregate no longer holds read as a measured nothing.
+                cells = " | ".join("not measured" for _ in CONFIGS)
+                lines.append(f"| Items with context truncated | {cells} |")
         lines.append("")
         # The ratio row that used to sit here was the source of the retracted
         # headline figure. It divided one word-count estimate by another, and
@@ -813,11 +849,7 @@ def _truncation_summary(answerer, combined: dict[str, dict[str, float]]):
         return {
             "measured": False,
             "calls": answerer.truncation.calls,
-            "reason": (
-                "the api backend has no tokeniser for the model behind the "
-                "endpoint, so the context is sent whole and what was cut, if "
-                "anything, is not visible from here"
-            ),
+            "reason": UNMEASURED_TRUNCATION,
         }
 
     return {
@@ -827,13 +859,15 @@ def _truncation_summary(answerer, combined: dict[str, dict[str, float]]):
         "rate": round(answerer.truncation.rate, 4),
         # Per arm, because the shared total cannot say which arm was cut,
         # and that is the whole question about a context window.
+        # An arm whose figures were not measured is absent rather than zero,
+        # for the same reason the rate above is.
         "by_arm": {
             cfg: {
-                "truncated_items": combined.get(cfg, {}).get("truncated_items", 0),
-                "rate": combined.get(cfg, {}).get("truncation_rate", 0.0),
+                "truncated_items": combined[cfg]["truncated_items"],
+                "rate": combined[cfg]["truncation_rate"],
             }
             for cfg in CONFIGS
-            if cfg in combined
+            if "truncated_items" in combined.get(cfg, {})
         },
     }
 
