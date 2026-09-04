@@ -437,3 +437,56 @@ def test_a_key_present_in_only_one_run_is_reported(tmp_path):
     second.write_text(json.dumps({"a": 1}), encoding="utf-8")
 
     assert bench.compare_runs(first, second) == ["b: only in the first run"]
+
+
+def test_the_git_state_is_read_before_the_run_writes_anything():
+    """With --output-dir inside the repository, the run's own files were in
+    the tree by the time the state was read, so a run that started clean
+    recorded itself dirty because of the artifacts it had just produced."""
+    source = (ROOT / "scripts" / "run_cke_benchmark.py").read_text(encoding="utf-8")
+    read_at = source.index("git_state = _git_description()")
+    made_at = source.index("output_dir.mkdir(")
+
+    assert read_at < made_at, "the state must be read before the directory exists"
+
+
+def test_the_provenance_says_whether_the_file_was_a_whole_split(tmp_path):
+    """A sample of a capped prefix is still a sample of a prefix."""
+    import json
+
+    from cke.datasets.hotpot_loader import HotpotDataset
+
+    record = {"_id": "a", "question": "Q?", "answer": "A", "context": [["T", ["s"]]]}
+    path = tmp_path / "hotpotqa_dev.json"
+    path.write_text(json.dumps([record]), encoding="utf-8")
+
+    _, without = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
+    assert without["complete_split"] is None, "no note is not a good note"
+
+    path.with_name(path.name + ".source.json").write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
+    _, with_note = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
+    assert with_note["complete_split"] is True
+
+
+def test_a_note_that_outlived_its_file_does_not_vouch_for_it(tmp_path):
+    """A note survives the file being truncated or replaced, and under
+    --skip-download the note is the only check there is."""
+    import json
+
+    from cke.datasets.hotpot_loader import HotpotDataset
+
+    record = {"_id": "a", "question": "Q?", "answer": "A", "context": [["T", ["s"]]]}
+    path = tmp_path / "hotpotqa_dev.json"
+    path.write_text(json.dumps([record, record]), encoding="utf-8")
+    path.with_name(path.name + ".source.json").write_text(
+        json.dumps({"complete_split": True, "records": 2417}), encoding="utf-8"
+    )
+
+    _, provenance = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
+
+    assert (
+        provenance["complete_split"] is False
+    ), "a note claiming 2417 records beside a file of 2 vouches for nothing"
+    assert provenance["records_in_file"] == 2

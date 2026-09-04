@@ -122,13 +122,64 @@ def test_musique_missing_raises_and_writes_nothing(tmp_path, monkeypatch):
     assert dl.MUSIQUE_SOURCE in str(excinfo.value)
 
 
-def test_musique_reuses_a_real_existing_file(tmp_path):
+def test_a_file_recorded_as_a_complete_split_is_reused(tmp_path):
     out = tmp_path / "musique_dev.json"
     _write(out, [_musique_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
 
     dl.download_musique(out)
 
     assert json.loads(out.read_text(encoding="utf-8"))[0]["id"] == "2hop__1_2"
+
+
+def test_a_file_that_may_be_a_capped_prefix_is_not_reused(tmp_path, monkeypatch):
+    """The cap is gone from this script, but a checkout upgraded into it still
+    holds the file the old one wrote: the first N records of a split ordered
+    by hop count. Reusing that runs the two-hop experiment this stopped."""
+    out = tmp_path / "musique_dev.json"
+    _write(out, [_musique_row()])  # no sidecar: written by the old downloader
+
+    attempted: list[str] = []
+
+    def _refuse(out_path, reasons=None):
+        attempted.append(str(out_path))
+        return False
+
+    monkeypatch.setattr(dl, "_try_hf_musique", _refuse)
+
+    with pytest.raises(dl.DatasetUnavailableError):
+        dl.download_musique(out)
+
+    assert attempted, "the file must be fetched again rather than reused"
+
+
+def test_a_file_edited_since_it_was_fetched_is_not_reused(tmp_path, monkeypatch):
+    out = tmp_path / "musique_dev.json"
+    _write(out, [_musique_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 999}), encoding="utf-8"
+    )
+    monkeypatch.setattr(dl, "_try_hf_musique", lambda out_path, reasons=None: False)
+
+    with pytest.raises(dl.DatasetUnavailableError):
+        dl.download_musique(out)
+
+
+def test_a_downloaded_split_records_that_it_is_complete(tmp_path, monkeypatch):
+    body = json.dumps(_locomo_conversations(2)).encode("utf-8")
+    monkeypatch.setattr(dl, "urlopen", _fake_urlopen([(body, None)]))
+    out = tmp_path / "locomo.json"
+
+    dl.download_locomo(out)
+
+    note = json.loads(dl.sidecar_path(out).read_text(encoding="utf-8"))
+    assert note["complete_split"] is True
+    assert note["records"] == 2
+    assert note["source"] == dl.LOCOMO_SOURCE
+    # And the file it describes is now reusable without another fetch.
+    assert dl.incomplete_reason(out, _locomo_conversations(2)) is None
 
 
 def test_unreadable_existing_file_is_rejected(tmp_path):
@@ -148,12 +199,46 @@ def test_empty_existing_file_is_rejected(tmp_path):
 
 
 def test_real_existing_file_is_reused(tmp_path):
+    """A file the downloader vouched for is reused without a fetch.
+
+    The note is what it is vouched by. Without one this test used to pass by
+    silently downloading the whole split over the network, which is not what
+    "reused" means and is not available on a CI runner.
+    """
     out = tmp_path / "hotpotqa_dev.json"
     _write(out, [_real_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
 
     dl.download_hotpotqa(out)
 
     assert json.loads(out.read_text(encoding="utf-8"))[0]["_id"] == _real_row()["_id"]
+
+
+def test_no_reuse_test_can_pass_by_downloading(monkeypatch, tmp_path):
+    """The guard for the miss above: every fetcher is made to fail, so a test
+    that believes it is exercising reuse cannot quietly reach the network."""
+    for name in (
+        "_try_hf_hotpotqa",
+        "_try_official_wiki2",
+        "_try_hf_musique",
+        "_try_official_locomo",
+    ):
+        monkeypatch.setattr(dl, name, lambda out_path, reasons=None: False)
+
+    out = tmp_path / "hotpotqa_dev.json"
+    _write(out, [_real_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
+
+    dl.download_hotpotqa(out)  # reuse: no fetcher is called at all
+
+    out_unnoted = tmp_path / "musique_dev.json"
+    _write(out_unnoted, [_musique_row()])
+    with pytest.raises(dl.DatasetUnavailableError):
+        dl.download_musique(out_unnoted)
 
 
 # ---------------------------------------------------------------------------

@@ -1341,6 +1341,30 @@ def select_indices(
     return sorted(int(index) for index in drawn)
 
 
+def _split_is_complete(path: Path, records: int) -> bool | None:
+    """Whether the downloader vouched for this file, as it stands now.
+
+    ``None`` when there is no note beside it: an unknown provenance is not a
+    good one, and a file this harness did not fetch cannot be vouched for
+    either way.
+
+    The count is compared, not merely required to exist. A note outlives the
+    file it describes: truncate or replace the data and the note still sits
+    there claiming 2417 records beside 300. Under --skip-download this is the
+    only check there is, so a note that is not checked against the file is
+    not a safeguard.
+    """
+    sidecar = path.with_name(path.name + ".source.json")
+    if not sidecar.exists():
+        return None
+    try:
+        with open(sidecar, encoding="utf-8") as handle:
+            note = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return bool(note.get("complete_split")) and note.get("records") == records
+
+
 def load_selected(
     dataset, path: Path, limit: int, seed: int, method: str
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1357,6 +1381,10 @@ def load_selected(
     provenance = {
         "path": str(path),
         "sha256": file_digest(path),
+        # Whether the downloader recorded this file as the whole published
+        # split. A file it cannot vouch for may be a capped prefix, and a
+        # sample of a prefix is still a sample of a prefix.
+        "complete_split": _split_is_complete(path, len(raw)),
         "bytes": path.stat().st_size,
         "records_in_file": len(raw),
         "items_evaluated": len(items),
@@ -1418,6 +1446,7 @@ def run_provenance(
     datasets: dict[str, dict[str, Any]],
     answerer,
     token_counter: TokenCounter,
+    git: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Everything a second run needs to produce these numbers again.
 
@@ -1428,7 +1457,7 @@ def run_provenance(
     diffing two runs.
     """
     return {
-        "cke": _git_description(),
+        "cke": git if git is not None else _git_description(),
         "command": list(sys.argv),
         "seeds": {
             "item_sample": args.sample_seed,
@@ -1723,6 +1752,12 @@ def main() -> None:
         answerer = SpanExtractiveQA()
     print(f"[answerer] {answerer.description}", flush=True)
 
+    # Read before anything is written. An --output-dir inside the repository
+    # holds this run's own files by the time the results are assembled, and a
+    # run that started from a clean tree would otherwise record itself dirty
+    # because of the artifacts it had just produced.
+    git_state = _git_description()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     data_dir = ROOT / "data"
@@ -1882,7 +1917,9 @@ def main() -> None:
     print(f"[output] failure_analysis.json ({len(failure_samples)} samples)")
 
     # --- Summary ---
-    provenance = run_provenance(args, dataset_provenance, answerer, token_counter)
+    provenance = run_provenance(
+        args, dataset_provenance, answerer, token_counter, git=git_state
+    )
     (output_dir / "provenance.json").write_text(
         json.dumps(provenance, indent=2), encoding="utf-8"
     )

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from urllib.request import urlopen
@@ -132,9 +133,7 @@ def _try_hf_hotpotqa(out_path: Path, reasons: list[str] | None = None) -> bool:
         log.append("HuggingFace returned an empty validation split")
         return False
 
-    out_path.write_text(
-        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _write_split(out_path, rows, "HotpotQA (distractor dev)", HOTPOTQA_SOURCE)
     print(f"[download] HotpotQA: {len(rows)} items → {out_path}")
     return True
 
@@ -221,9 +220,7 @@ def _try_official_wiki2(out_path: Path, reasons: list[str] | None = None) -> boo
         return False
 
     rows = raw
-    out_path.write_text(
-        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _write_split(out_path, rows, "2WikiMultiHopQA (dev)", WIKI2_SOURCE)
     print(f"[download] 2WikiMultiHopQA: {len(rows)} items \u2192 {out_path}")
     return True
 
@@ -278,9 +275,7 @@ def _try_hf_musique(out_path: Path, reasons: list[str] | None = None) -> bool:
         log.append("HuggingFace returned an empty validation split")
         return False
 
-    out_path.write_text(
-        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _write_split(out_path, rows, "MuSiQue (dev)", MUSIQUE_SOURCE)
     print(f"[download] MuSiQue: {len(rows)} items \u2192 {out_path}")
     return True
 
@@ -311,15 +306,74 @@ def _try_official_locomo(out_path: Path, reasons: list[str] | None = None) -> bo
         return False
 
     rows = raw
-    out_path.write_text(
-        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _write_split(out_path, rows, "LoCoMo", LOCOMO_SOURCE)
     questions = sum(len(row.get("qa") or []) for row in rows if isinstance(row, dict))
     print(
         f"[download] LoCoMo: {len(rows)} conversations, "
         f"{questions} questions \u2192 {out_path}"
     )
     return True
+
+
+def sidecar_path(out_path: Path) -> Path:
+    """Where the note about a downloaded file lives."""
+    return out_path.with_name(out_path.name + ".source.json")
+
+
+def _write_split(out_path: Path, rows: list, dataset: str, source_url: str) -> None:
+    """Write a split and the note that says it is the whole of one.
+
+    The note is what makes a cached file reusable. Without it a file is just
+    some records: this script used to cap downloads, so a file written by an
+    older version holds the first N of the split and is indistinguishable, by
+    looking at it, from a small dataset.
+    """
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    sidecar_path(out_path).write_text(
+        json.dumps(
+            {
+                "dataset": dataset,
+                "source": source_url,
+                "records": len(rows),
+                "complete_split": True,
+                "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def incomplete_reason(out_path: Path, rows: list) -> str | None:
+    """Why the file on disk cannot be shown to hold the whole split.
+
+    ``None`` means it can. Anything else is a reason to fetch it again: a
+    truncated split reused as if it were the dataset is the defect this
+    guards, and MuSiQue is the sharp case — its dev split is ordered by hop
+    count, so a capped file is entirely two-hop and no seed downstream can
+    undo that.
+    """
+    sidecar = sidecar_path(out_path)
+    if not sidecar.exists():
+        return (
+            f"{out_path} has no {sidecar.name} beside it, so it cannot be shown "
+            f"to be the whole split. Files written before this script stopped "
+            f"capping downloads hold only the first N records"
+        )
+    try:
+        note = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"{sidecar} could not be read as JSON: {exc}"
+    if not note.get("complete_split"):
+        return f"{sidecar} does not record the file as a complete split"
+    if note.get("records") != len(rows):
+        return (
+            f"{sidecar} records {note.get('records')} items and {out_path} holds "
+            f"{len(rows)}, so the file has changed since it was fetched"
+        )
+    return None
 
 
 def _load_existing(path: Path, dataset: str, source_url: str) -> list:
@@ -381,10 +435,12 @@ def download_hotpotqa(out_path: Path) -> None:
         existing = _load_existing(
             out_path, "HotpotQA (distractor dev)", HOTPOTQA_SOURCE
         )
-        print(
-            f"[download] HotpotQA already exists: {len(existing)} items at {out_path}"
-        )
-        return
+        stale = incomplete_reason(out_path, existing)
+        if stale is None:
+            n = len(existing)
+            print(f"[download] HotpotQA already exists: {n} items at {out_path}")
+            return
+        print(f"[download] re-fetching HotpotQA: {stale}")
 
     reasons: list[str] = []
     if _try_hf_hotpotqa(out_path, reasons=reasons):
@@ -397,9 +453,12 @@ def download_wiki2(out_path: Path) -> None:
     """Ensure 2WikiMultiHopQA is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(out_path, "2WikiMultiHopQA (dev)", WIKI2_SOURCE)
-        n = len(existing)
-        print(f"[download] 2WikiMultiHopQA already exists: {n} items at {out_path}")
-        return
+        stale = incomplete_reason(out_path, existing)
+        if stale is None:
+            n = len(existing)
+            print(f"[download] 2WikiMultiHopQA already exists: {n} items at {out_path}")
+            return
+        print(f"[download] re-fetching 2WikiMultiHopQA: {stale}")
 
     reasons: list[str] = []
     if _try_official_wiki2(out_path, reasons=reasons):
@@ -412,9 +471,12 @@ def download_musique(out_path: Path) -> None:
     """Ensure MuSiQue is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(out_path, "MuSiQue (dev)", MUSIQUE_SOURCE)
-        n = len(existing)
-        print(f"[download] MuSiQue already exists: {n} items at {out_path}")
-        return
+        stale = incomplete_reason(out_path, existing)
+        if stale is None:
+            n = len(existing)
+            print(f"[download] MuSiQue already exists: {n} items at {out_path}")
+            return
+        print(f"[download] re-fetching MuSiQue: {stale}")
 
     reasons: list[str] = []
     if _try_hf_musique(out_path, reasons=reasons):
@@ -427,9 +489,12 @@ def download_locomo(out_path: Path) -> None:
     """Ensure LoCoMo is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(out_path, "LoCoMo", LOCOMO_SOURCE)
-        n = len(existing)
-        print(f"[download] LoCoMo already exists: {n} conversations at {out_path}")
-        return
+        stale = incomplete_reason(out_path, existing)
+        if stale is None:
+            n = len(existing)
+            print(f"[download] LoCoMo already exists: {n} conversations at {out_path}")
+            return
+        print(f"[download] re-fetching LoCoMo: {stale}")
 
     reasons: list[str] = []
     if _try_official_locomo(out_path, reasons=reasons):
