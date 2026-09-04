@@ -6,32 +6,30 @@ import json
 from typing import Any
 
 from cke.datasets.base_loader import DatasetLoader
+from cke.diagnostics import DegradationMixin
 from cke.utils.text_cleaning import merge_sentences, normalize_whitespace
 
 
-def flatten_contexts(contexts: list[list[Any]]) -> list[str]:
-    """Convert nested context entries into extraction-ready paragraphs."""
-    paragraphs: list[str] = []
-    for ctx in contexts or []:
-        if len(ctx) != 2:
-            continue
-        title, text_or_sentences = ctx
-        if isinstance(text_or_sentences, list):
-            body = merge_sentences([str(s) for s in text_or_sentences])
-        else:
-            body = str(text_or_sentences)
-        paragraph = normalize_whitespace(f"{title}: {body}")
-        paragraphs.append(paragraph)
-    return paragraphs
+class WikiMultiHopDataset(DatasetLoader, DegradationMixin):
+    """Loads 2WikiMultiHopQA JSON into the normalized CKE format.
 
+    This carried no degradation contract while its two siblings did, so a
+    malformed context entry was dropped in silence: an item could load with
+    zero documents, be scored against them, and say nothing. The same fault
+    in HotpotQA and MuSiQue is declared and refused under strict, and now so
+    is this one.
+    """
 
-class WikiMultiHopDataset(DatasetLoader):
-    """Loads 2WikiMultiHopQA JSON into the normalized CKE format."""
+    def __init__(self, strict: bool = False) -> None:
+        super().__init__()
+        self._init_degradation(strict)
 
     def _context_to_documents(self, context: list[list[Any]]) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
+        malformed = 0
         for idx, ctx in enumerate(context or []):
             if len(ctx) != 2:
+                malformed += 1
                 continue
             title, text_or_sentences = ctx
             title_str = str(title)
@@ -46,6 +44,12 @@ class WikiMultiHopDataset(DatasetLoader):
                     "title": title_str,
                     "text": text,
                 }
+            )
+        if malformed:
+            self._degrade(
+                f"{malformed} of {len(context or [])} context entries were not "
+                "[title, sentences] pairs and were dropped, so this item is "
+                "evaluated against fewer documents than it carries"
             )
         return documents
 

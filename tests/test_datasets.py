@@ -326,3 +326,31 @@ def test_musique_is_in_the_registry(tmp_path):
     dataset = load_dataset("musique", str(path))
 
     assert len(dataset.items) == 2
+
+
+def test_wiki2_declares_context_entries_it_drops(tmp_path):
+    """It dropped them in silence while both its siblings declared them."""
+    from cke.datasets.wiki2_loader import WikiMultiHopDataset
+    from cke.diagnostics import DegradedComponentError
+
+    path = tmp_path / "wiki2.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "_id": "w1",
+                    "question": "Q?",
+                    "answer": "A",
+                    "context": [["Kept", ["Text."]], ["malformed"]],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DegradedComponentError, match="context entries"):
+        WikiMultiHopDataset(strict=True).load(str(path))
+
+    loader = WikiMultiHopDataset(strict=False).load(str(path))
+    assert loader.degraded is True
+    assert len(loader.items[0]["documents"]) == 1

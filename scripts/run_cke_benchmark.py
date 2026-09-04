@@ -817,20 +817,24 @@ def produce_summary(
 # ---------------------------------------------------------------------------
 
 
-def _load_hotpotqa(path: Path, limit: int) -> list[dict[str, Any]]:
-    ds = HotpotDataset()
+# Each loader takes the run's strictness. Without it a strict run loaded its
+# data non-strict: a dataset that dropped malformed entries declared the
+# degradation and the run carried on to report metrics computed over fewer
+# documents than the items hold, which is what strict exists to refuse.
+def _load_hotpotqa(path: Path, limit: int, strict: bool) -> list[dict[str, Any]]:
+    ds = HotpotDataset(strict=strict)
     ds.load(str(path))
     return ds.items[:limit]
 
 
-def _load_musique(path: Path, limit: int) -> list[dict[str, Any]]:
-    ds = MuSiQueDataset()
+def _load_musique(path: Path, limit: int, strict: bool) -> list[dict[str, Any]]:
+    ds = MuSiQueDataset(strict=strict)
     ds.load(str(path))
     return ds.items[:limit]
 
 
-def _load_wiki2(path: Path, limit: int) -> list[dict[str, Any]]:
-    ds = WikiMultiHopDataset()
+def _load_wiki2(path: Path, limit: int, strict: bool) -> list[dict[str, Any]]:
+    ds = WikiMultiHopDataset(strict=strict)
     ds.load(str(path))
     # wiki2 items have 'contexts' (list of str) not 'documents'
     return ds.items[:limit]
@@ -1045,7 +1049,7 @@ def main() -> None:
     datasets: dict[str, list[dict[str, Any]]] = {}
     if hotpot_path.exists():
         try:
-            datasets["hotpotqa"] = _load_hotpotqa(hotpot_path, args.limit)
+            datasets["hotpotqa"] = _load_hotpotqa(hotpot_path, args.limit, strict)
             print(f"[load] HotpotQA: {len(datasets['hotpotqa'])} items")
         except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
             # Continuing here computed the report over whichever datasets
@@ -1059,7 +1063,7 @@ def main() -> None:
 
     if wiki2_path.exists():
         try:
-            datasets["wiki2"] = _load_wiki2(wiki2_path, args.limit)
+            datasets["wiki2"] = _load_wiki2(wiki2_path, args.limit, strict)
             print(f"[load] 2WikiMultiHopQA: {len(datasets['wiki2'])} items")
         except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
             raise RuntimeError(
@@ -1071,7 +1075,7 @@ def main() -> None:
 
     if musique_path.exists():
         try:
-            datasets["musique"] = _load_musique(musique_path, args.limit)
+            datasets["musique"] = _load_musique(musique_path, args.limit, strict)
             print(f"[load] MuSiQue: {len(datasets['musique'])} items")
         except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
             raise RuntimeError(
