@@ -19,8 +19,11 @@ import re
 import statistics
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -88,6 +91,19 @@ UNMEASURED_TRUNCATION = (
     "the api backend has no tokeniser for the model behind the endpoint, so "
     "the context is sent whole and what was cut, if anything, is not visible "
     "from here"
+)
+
+
+#: What a latency figure here covers. Each arm is timed from an empty index
+#: or graph to an answer, so the figure includes building that arm's structure
+#: over the item's own documents and the answerer's own time. A deployed
+#: system builds its index once and would not pay that per query. Both arms
+#: pay their own construction, so the columns are comparable to each other and
+#: not to a production query.
+LATENCY_INCLUDES = (
+    "per item, from an empty index or graph to an answer: building this arm's "
+    "structure over the item's documents, retrieval, and the answerer. A "
+    "deployed system builds its index once and would not pay that per query"
 )
 
 
@@ -596,6 +612,130 @@ def run_dataset(
 CONFIGS = ["rag_k5", "rag_k10", "cke_n8", "cke_n12", "cke_n20", "hybrid_n12"]
 
 
+#: Resamples drawn when estimating an interval. Enough that the interval is
+#: stable to the fourth decimal the tables print, few enough to run in a
+#: second on a dev-set-sized run.
+BOOTSTRAP_REPLICATES = 2000
+
+#: The seed the resampling starts from. Fixed and reported, so two runs of the
+#: same command produce the same interval and a reader can reproduce it.
+BOOTSTRAP_SEED = 20260904
+
+#: Which headline figures get an interval, and how each is computed over a
+#: resample. Every number the tables lead with is here.
+_BOOTSTRAP_STATISTICS: dict[str, tuple[str, str]] = {
+    "em": ("em", "mean"),
+    "f1": ("f1", "mean"),
+    "median_tokens": ("prompt_tokens", "median"),
+    "median_completion_tokens": ("completion_tokens", "median"),
+    "median_latency_ms": ("latency_ms", "median"),
+    "retrieval_recall": ("retrieval_recall", "mean"),
+}
+
+
+def bootstrap_intervals(
+    rows: list[dict[str, Any]],
+    replicates: int = BOOTSTRAP_REPLICATES,
+    seed: int = BOOTSTRAP_SEED,
+) -> dict[str, dict[str, dict[str, float]]]:
+    """Percentile intervals for each arm's headline figures.
+
+    A point estimate over fifteen items and one over fifteen thousand print
+    identically, and the tables here have shown the first while reading like
+    the second. This resamples the items with replacement and reports the
+    2.5th and 97.5th percentiles of each figure, so an interval that spans
+    half the scale says so.
+
+    One resample of the items is drawn and every arm and figure is computed
+    over it, so the arms stay paired: they answered the same items, and
+    resampling them independently would break the only thing that makes
+    their columns comparable.
+
+    A figure is estimated over the items that reported it — recall over the
+    items whose supporting facts resolved — so a resample can miss them all.
+    Those replicates are dropped and counted in ``replicates_used``, which is
+    below ``replicates`` exactly when the estimate rests on fewer draws than
+    it asked for. A figure fewer than two items reported gets no interval: a
+    resample of one item is that item.
+    """
+    if replicates < 1:
+        raise ValueError(f"replicates must be at least 1, got {replicates}")
+
+    columns: dict[str, dict[str, np.ndarray]] = {}
+    for cfg in CONFIGS:
+        for name, (key, _) in _BOOTSTRAP_STATISTICS.items():
+            values = [
+                (
+                    float(row[cfg][key])
+                    if cfg in row and row[cfg].get(key) is not None
+                    else float("nan")
+                )
+                for row in rows
+            ]
+            column = np.asarray(values, dtype=float)
+            if np.count_nonzero(np.isfinite(column)) >= 2:
+                columns.setdefault(cfg, {})[name] = column
+    if not columns:
+        return {}
+
+    # Drawn once, over the items, and shared by every arm and figure below.
+    draws = np.random.default_rng(seed).integers(
+        0, len(rows), size=(replicates, len(rows))
+    )
+
+    intervals: dict[str, dict[str, dict[str, float]]] = {}
+    for cfg, figures in columns.items():
+        cfg_intervals: dict[str, dict[str, float]] = {}
+        for name, column in figures.items():
+            sample = column[draws]
+            _, how = _BOOTSTRAP_STATISTICS[name]
+            with warnings.catch_warnings():
+                # A resample that drew none of the items reporting this
+                # figure yields nan here, and is dropped below rather than
+                # counted as a value. numpy warns about that slice; the
+                # empty slice is the expected case, not a defect.
+                warnings.filterwarnings("ignore", "Mean of empty slice", RuntimeWarning)
+                warnings.filterwarnings(
+                    "ignore", "All-NaN slice encountered", RuntimeWarning
+                )
+                statistic = (
+                    np.nanmean(sample, axis=1)
+                    if how == "mean"
+                    else np.nanmedian(sample, axis=1)
+                )
+            usable = statistic[np.isfinite(statistic)]
+            if usable.size == 0:
+                continue
+            low, high = np.percentile(usable, [2.5, 97.5])
+            cfg_intervals[name] = {
+                "low": round(float(low), 4),
+                "high": round(float(high), 4),
+                "replicates_used": int(usable.size),
+            }
+        if cfg_intervals:
+            intervals[cfg] = cfg_intervals
+    return intervals
+
+
+def with_intervals(
+    metrics: dict[str, dict[str, Any]],
+    rows: list[dict[str, Any]],
+    replicates: int = BOOTSTRAP_REPLICATES,
+    seed: int = BOOTSTRAP_SEED,
+) -> dict[str, dict[str, Any]]:
+    """Attach each arm's intervals to the arm's own figures.
+
+    Kept beside the point estimates rather than in a file of their own, so
+    every output that already carries a figure carries its interval, and a
+    reader cannot pick up one without the other.
+    """
+    intervals = bootstrap_intervals(rows, replicates=replicates, seed=seed)
+    for cfg, figures in intervals.items():
+        if cfg in metrics:
+            metrics[cfg]["intervals"] = figures
+    return metrics
+
+
 def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     """Compute mean EM, mean F1, median tokens, median latency per config."""
     agg: dict[str, dict[str, list[Any]]] = {
@@ -735,6 +875,38 @@ def produce_comparison_table(
                 cells = " | ".join("not measured" for _ in CONFIGS)
                 lines.append(f"| Items with context truncated | {cells} |")
         lines.append("")
+        interval_rows = [
+            (label, name)
+            for label, name in (
+                ("Answer EM", "em"),
+                ("Answer F1", "f1"),
+                ("Median prompt tokens", "median_tokens"),
+                ("Median completion tokens", "median_completion_tokens"),
+                ("Recall of supporting docs", "retrieval_recall"),
+                ("Median latency (ms)", "median_latency_ms"),
+            )
+            if any(name in metrics.get(c, {}).get("intervals", {}) for c in CONFIGS)
+        ]
+        if interval_rows:
+            lines.append(
+                f"95% bootstrap intervals, {BOOTSTRAP_REPLICATES} resamples of "
+                f"the items with replacement, seed {BOOTSTRAP_SEED}. One "
+                f"resample is shared by every arm, so the columns stay paired. "
+                f"A wide interval is the point: it says how little the figure "
+                f"beside it settles."
+            )
+            lines.append("")
+            lines += [header, sep]
+            for label, name in interval_rows:
+                cells = []
+                for cfg in CONFIGS:
+                    bounds = metrics.get(cfg, {}).get("intervals", {}).get(name)
+                    if bounds is None:
+                        cells.append("not measured" if cfg in metrics else "not run")
+                        continue
+                    cells.append(f"{bounds['low']:.4g}–{bounds['high']:.4g}")
+                lines.append(f"| {label} | " + " | ".join(cells) + " |")
+            lines.append("")
         # The ratio row that used to sit here was the source of the retracted
         # headline figure. It divided one word-count estimate by another, and
         # that arithmetic objection is now gone: both arms are counted by one
@@ -747,6 +919,7 @@ def produce_comparison_table(
         lines.append(
             f"Prompt tokens counted by {token_counter.description}. A count is "
             f"only comparable to another count made with the same encoding. "
+            f"Latency is {LATENCY_INCLUDES}. "
             f"Answers on every arm come from {answerer.description}."
         )
         lines.append("")
@@ -974,6 +1147,24 @@ def produce_summary(
         # ask. Absent rather than zero when an arm did not report it.
         "rag_k10_median_completion_tokens": rag.get("median_completion_tokens"),
         "cke_n12_median_completion_tokens": cke.get("median_completion_tokens"),
+        # Reported beside the token counts in the tables, and missing from the
+        # file the tables are summarised into.
+        "rag_k10_median_latency_ms": rag.get("median_latency_ms"),
+        "cke_n12_median_latency_ms": cke.get("median_latency_ms"),
+        "latency_includes": LATENCY_INCLUDES,
+        # Every figure above, with the range the items support. A point
+        # estimate over fifteen items and one over fifteen thousand print
+        # identically; these do not.
+        "intervals": {
+            cfg: combined[cfg]["intervals"]
+            for cfg in CONFIGS
+            if "intervals" in combined.get(cfg, {})
+        },
+        "interval_method": (
+            f"95% percentile bootstrap, {BOOTSTRAP_REPLICATES} resamples of "
+            f"the items with replacement, seed {BOOTSTRAP_SEED}, one resample "
+            f"shared by every arm"
+        ),
         # Whether the context held the documents the dataset says the answer
         # needs. An answer scored right from the wrong documents and an
         # answer scored wrong while holding the right ones read alike in EM
@@ -1334,7 +1525,7 @@ def main() -> None:
             verbose=args.verbose,
             strict=strict,
         )
-        metrics = aggregate_metrics(rows)
+        metrics = with_intervals(aggregate_metrics(rows), rows)
         per_dataset_metrics[ds_name] = metrics
         all_rows.extend(rows)
 
@@ -1344,7 +1535,7 @@ def main() -> None:
         print(f"[output] full_results_{ds_name}.json ({len(rows)} items)")
 
     # --- Combined metrics ---
-    combined_metrics = aggregate_metrics(all_rows)
+    combined_metrics = with_intervals(aggregate_metrics(all_rows), all_rows)
 
     # --- Comparison table ---
     comparison_md = produce_comparison_table(

@@ -1,0 +1,226 @@
+"""What a figure is worth, and what its latency covers.
+
+A point estimate over fifteen items and one over fifteen thousand print
+identically, and every table here has shown the first while reading like the
+second.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+from cke.evaluation.span_qa import SpanExtractiveQA
+from cke.evaluation.token_counter import TokenCounter
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_module():
+    path = ROOT / "scripts" / "run_cke_benchmark.py"
+    spec = importlib.util.spec_from_file_location("run_cke_benchmark_ci", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+bench = _load_module()
+
+
+def _item(em, tokens=100, completion=2, latency=5.0, recall=1.0):
+    return {
+        "em": em,
+        "f1": em,
+        "prompt_tokens": tokens,
+        "completion_tokens": completion,
+        "latency_ms": latency,
+        "answer_truncated": False,
+        "retrieval_recall": recall,
+    }
+
+
+def _rows(ems, arms=("rag_k10",), **kwargs):
+    return [{arm: _item(em, **kwargs) for arm in arms} for em in ems]
+
+
+# ---------------------------------------------------------------------------
+# The interval itself
+# ---------------------------------------------------------------------------
+
+
+def test_an_interval_brackets_the_figure_it_qualifies():
+    rows = _rows([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0])
+    point = bench.aggregate_metrics(rows)["rag_k10"]
+    bounds = bench.bootstrap_intervals(rows)["rag_k10"]["em"]
+
+    assert bounds["low"] <= point["em"] <= bounds["high"]
+    assert bounds["low"] < bounds["high"], "eight coin flips do not pin a mean"
+
+
+def test_more_of_the_same_evidence_narrows_the_interval():
+    """The whole reason to print one: it must respond to how much was seen."""
+    few = bench.bootstrap_intervals(_rows([1.0, 0.0] * 5))["rag_k10"]["em"]
+    many = bench.bootstrap_intervals(_rows([1.0, 0.0] * 200))["rag_k10"]["em"]
+
+    assert (many["high"] - many["low"]) < (few["high"] - few["low"])
+
+
+#: Latencies spread finely enough that a percentile moves when the draw does.
+#: A coarse sample — five items of 1.0 and 0.0 — lands on the same bounds
+#: whatever it draws, and a test built on one cannot see an ignored seed.
+_SPREAD = [{"rag_k10": _item(1.0, latency=float(i))} for i in range(40)]
+
+
+def test_the_same_seed_gives_the_same_interval():
+    """Two runs of the same command must produce the same interval."""
+    first = bench.bootstrap_intervals(_SPREAD, replicates=200)
+    second = bench.bootstrap_intervals(_SPREAD, replicates=200)
+
+    assert first == second
+    assert first["rag_k10"]["median_latency_ms"]["low"] < (
+        first["rag_k10"]["median_latency_ms"]["high"]
+    ), "the fixture must be able to show a difference at all"
+
+
+def test_a_different_seed_gives_a_different_draw():
+    """Otherwise the seed is decoration and the interval is not resampled."""
+    first = bench.bootstrap_intervals(_SPREAD, replicates=200, seed=1)
+    second = bench.bootstrap_intervals(_SPREAD, replicates=200, seed=2)
+
+    assert first != second
+
+
+def test_one_resample_is_shared_by_every_arm():
+    """The arms answered the same items. Resampling them independently would
+    break the only thing that makes their columns comparable."""
+    rows = _rows([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0], arms=("rag_k5", "rag_k10"))
+
+    intervals = bench.bootstrap_intervals(rows, replicates=300)
+
+    assert intervals["rag_k5"] == intervals["rag_k10"], (
+        "identical per-item values under one shared resample must produce "
+        "identical intervals"
+    )
+
+
+def test_a_single_item_gets_no_interval():
+    """A resample of one item is that item, and an interval of zero width
+    over one observation reads as certainty."""
+    assert bench.bootstrap_intervals(_rows([1.0])) == {}
+
+
+def test_a_figure_only_one_item_reported_gets_no_interval():
+    """Per figure, not per run: an arm can have plenty of items and one
+    observation of a particular figure."""
+    rows = _rows([1.0, 0.0, 1.0, 0.0])
+    for row in rows[1:]:
+        row["rag_k10"]["retrieval_recall"] = None
+
+    bounds = bench.bootstrap_intervals(rows, replicates=200)["rag_k10"]
+
+    assert "retrieval_recall" not in bounds
+    assert "em" in bounds, "the figures every item reported still get one"
+
+
+def test_a_figure_only_some_items_reported_is_estimated_on_those():
+    rows = _rows([1.0] * 10)
+    for row in rows[2:]:
+        row["rag_k10"]["retrieval_recall"] = None
+
+    bounds = bench.bootstrap_intervals(rows, replicates=500)["rag_k10"]
+
+    assert bounds["retrieval_recall"]["low"] == 1.0
+    assert (
+        bounds["retrieval_recall"]["replicates_used"] < 500
+    ), "some resamples draw none of the two items that reported it"
+    assert bounds["em"]["replicates_used"] == 500
+
+
+def test_asking_for_no_replicates_is_refused():
+    with pytest.raises(ValueError, match="at least 1"):
+        bench.bootstrap_intervals(_rows([1.0, 0.0]), replicates=0)
+
+
+# ---------------------------------------------------------------------------
+# Where the interval has to appear
+# ---------------------------------------------------------------------------
+
+
+def test_the_interval_travels_with_the_figure():
+    rows = _rows([1.0, 0.0, 1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    assert "em" in metrics["rag_k10"]["intervals"]
+    assert "median_tokens" in metrics["rag_k10"]["intervals"]
+
+
+def test_the_table_prints_the_intervals_and_names_the_method():
+    rows = _rows([1.0, 0.0, 1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    table = bench.produce_comparison_table(
+        {"hotpotqa": metrics}, metrics, TokenCounter(), SpanExtractiveQA()
+    )
+
+    assert "bootstrap intervals" in table
+    assert str(bench.BOOTSTRAP_SEED) in table
+    assert str(bench.BOOTSTRAP_REPLICATES) in table
+    bounds = metrics["rag_k10"]["intervals"]["em"]
+    assert f"{bounds['low']:.4g}–{bounds['high']:.4g}" in table
+
+
+def test_the_summary_carries_the_intervals_and_the_method():
+    rows = _rows([1.0, 0.0, 1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    summary = bench.produce_summary(metrics, TokenCounter(), SpanExtractiveQA())
+
+    assert summary["intervals"]["rag_k10"]["em"]["low"] is not None
+    assert "bootstrap" in summary["interval_method"]
+    assert str(bench.BOOTSTRAP_SEED) in summary["interval_method"]
+
+
+# ---------------------------------------------------------------------------
+# Latency, and what it covers
+# ---------------------------------------------------------------------------
+
+
+def test_the_summary_reports_latency_beside_the_token_counts():
+    """It was in the tables and missing from the file they summarise."""
+    rows = _rows([1.0, 0.0], latency=12.5)
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    summary = bench.produce_summary(metrics, TokenCounter(), SpanExtractiveQA())
+
+    assert summary["rag_k10_median_latency_ms"] == 12.5
+    assert "rag_k10_median_tokens" in summary
+
+
+def test_the_outputs_say_what_a_latency_figure_covers():
+    """Read as a query latency it is wrong: each arm builds its index or
+    graph over the item's documents inside the timed region."""
+    rows = _rows([1.0, 0.0])
+    metrics = bench.with_intervals(bench.aggregate_metrics(rows), rows)
+
+    summary = bench.produce_summary(metrics, TokenCounter(), SpanExtractiveQA())
+    table = bench.produce_comparison_table(
+        {"hotpotqa": metrics}, metrics, TokenCounter(), SpanExtractiveQA()
+    )
+
+    for text in (summary["latency_includes"], table):
+        assert "builds its index once" in text
+
+
+def test_the_timed_region_covers_building_the_arms_structure():
+    """The claim above must match the code: the clock starts before the
+    index is built, not after."""
+    source = (ROOT / "scripts" / "run_cke_benchmark.py").read_text(encoding="utf-8")
+    rag = source[
+        source.index("class RAGPipeline") : source.index("class CKELitePipeline")
+    ]
+    start = rag.index("t0 = time.perf_counter()")
+
+    assert "build_index" in rag[start:], "the index build must fall inside the clock"
