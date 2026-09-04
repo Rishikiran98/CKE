@@ -67,13 +67,15 @@ These are stated here rather than left for a reader to discover.
   authentication and does not use the main query pipeline (next bullet).
 - `cke.api.server` has no authentication and does not use the main query
   pipeline. It is importable without FastAPI, but `create_app()` needs it.
-- Dependencies in `requirements.txt` are unpinned.
 - There is no evaluation harness that can produce a trustworthy number. Building
   one is prerequisite work before any result is reported here. Prompt-token
-  counts in `scripts/run_cke_benchmark.py` are now real counts from `tiktoken`
-  under a named encoding, and the benchmark refuses to run without it, but
-  confidence values are in places substituted constants rather than scores, and
-  no language model answers on either arm.
+  counts in `scripts/run_cke_benchmark.py` are real counts from `tiktoken`
+  under a named encoding, and the benchmark refuses to run without it. A
+  language model answers on both arms only when `--answerer llm` is given (a
+  pinned local `flan-t5-base`, or an OpenAI-compatible endpoint); the default
+  answerer is a lexical span baseline. Confidence values are in places
+  substituted constants rather than scores: `ReasonerAdapter` reports 0.8 for
+  the path reasoner, which reports none, and refuses to do so under strict.
 - `cke/experiments/retrieval_eval_pipeline.py` measures Recall@k by matching
   retrieved MS MARCO titles against HotpotQA and LoCoMo relevance hints. That
   is a title-matching proxy, not a judged relevance set, and it needs the MS
