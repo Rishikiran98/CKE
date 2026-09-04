@@ -86,5 +86,56 @@
       "new": "        if False:",
       "tests": "tests/test_strict_reaches_everything.py"
     }
+  ],
+  "substitutions": [
+    {
+      "label": "no evidence counts as perfect agreement again",
+      "path": "cke/trust/calibration.py",
+      "old": "            if not texts:\n                continue",
+      "new": "            if not texts:\n                evidenced += 1\n                agreeing += 1\n                continue",
+      "tests": "tests/test_undeclared_substitutions.py"
+    },
+    {
+      "label": "an unmeasurable agreement is fitted anyway",
+      "path": "cke/trust/calibration.py",
+      "old": "        if evidence_agreement is None:",
+      "new": "        if False:",
+      "tests": "tests/test_undeclared_substitutions.py"
+    },
+    {
+      "label": "an absent weighted signal is read as zero in silence",
+      "path": "cke/trust/confidence_calibrator.py",
+      "old": "        if absent:",
+      "new": "        if False:",
+      "tests": "tests/test_undeclared_substitutions.py"
+    },
+    {
+      "label": "a non-numeric signal becomes zero without a word",
+      "path": "cke/trust/confidence_calibrator.py",
+      "old": "            self._degrade(\n                f\"a confidence signal was not a number ({value!r}), so it was \"",
+      "new": "            _unused = (\n                f\"a confidence signal was not a number ({value!r}), so it was \"",
+      "tests": "tests/test_undeclared_substitutions.py"
+    },
+    {
+      "label": "the comparison direction is assumed again",
+      "path": "cke/reasoning/operator_executor.py",
+      "old": "        else:\n            # \">\" used to be assumed here",
+      "new": "        elif True:\n            comparator = \">\"\n        elif False:\n            # \">\" used to be assumed here",
+      "tests": "tests/test_undeclared_substitutions.py"
+    },
+    {
+      "label": "the verifier goes back to skipping the selection",
+      "path": "cke/reasoning/verifier.py",
+      "old": "            if operator_name == \"compare_selection\":",
+      "new": "            if False:",
+      "tests": "tests/test_undeclared_substitutions.py"
+    },
+    {
+      "label": "unscored evidence facts enter the confidence in silence",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "        if unscored:",
+      "new": "        if False:",
+      "tests": "tests/test_undeclared_substitutions.py tests/test_substituted_values.py"
+    }
   ]
 }

@@ -504,16 +504,28 @@ class QueryOrchestrator(DegradationMixin):
         query_plan,
         resolved_entities,
     ) -> dict[str, object]:
-        evidence_scores = [
-            max(
+        evidence_scores = []
+        unscored = 0
+        for fact in context.evidence_facts:
+            scores = [
                 float(getattr(fact, "trust_score", 0.0) or 0.0),
                 float(getattr(fact, "retrieval_score", 0.0) or 0.0),
                 float(
                     getattr(getattr(fact, "statement", None), "confidence", 0.0) or 0.0
                 ),
+            ]
+            if not any(scores):
+                # None of the three was set. A zero here is fed to the
+                # calibrator as top_evidence_score, where it is
+                # indistinguishable from a fact measured as worthless.
+                unscored += 1
+            evidence_scores.append(max(scores))
+        if unscored:
+            self._degrade(
+                f"{unscored} of {len(context.evidence_facts)} evidence facts "
+                f"carry no trust, retrieval or statement confidence, so they "
+                f"enter the calibrated confidence as measured zeros"
             )
-            for fact in context.evidence_facts
-        ]
         entity_confidences = [entity.link_confidence for entity in resolved_entities]
         verification_issues: list[str] = []
         signals = {

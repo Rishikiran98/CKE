@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from cke.diagnostics import DegradationMixin
+
 
 @dataclass(slots=True)
 class ConfidenceCalibrationConfig:
@@ -20,15 +22,41 @@ class ConfidenceCalibrationConfig:
     abstain_threshold: float = 0.4
 
 
-@dataclass(slots=True)
-class ConfidenceCalibrator:
+#: The signals the weighted sum reads. A caller that omits one is not saying
+#: it measured zero; it is saying nothing, and the two must not look alike.
+_WEIGHTED_SIGNALS = (
+    "path_score",
+    "operator_confidence",
+    "route_confidence",
+)
+
+
+# Not slots=True: the degradation contract sets its own attributes, and a
+# calibrator that cannot record having degraded is the defect this closes.
+@dataclass
+class ConfidenceCalibrator(DegradationMixin):
     """Interpretably combine structured confidence signals into final confidence."""
 
     config: ConfidenceCalibrationConfig = field(
         default_factory=ConfidenceCalibrationConfig
     )
+    strict: bool = False
+
+    def __post_init__(self) -> None:
+        self._init_degradation(self.strict)
 
     def calibrate(self, signals: dict[str, Any]) -> float:
+        absent = [name for name in _WEIGHTED_SIGNALS if name not in signals]
+        if absent:
+            # Each of these carries a weight in the sum below. Reading an
+            # absent one as 0.0 pulls the final confidence down by that
+            # weight and reports the result as a calibrated number.
+            self._degrade(
+                f"the calibrator was given no {', '.join(absent)}, and each "
+                f"carries a weight in the confidence it returns, so the "
+                f"figure is computed as though those signals were measured "
+                f"at zero"
+            )
         normalized_evidence_score = self._normalized_evidence_score(signals)
         path_score = self._clip(signals.get("path_score", 0.0))
         operator_confidence = self._clip(signals.get("operator_confidence", 0.0))
@@ -82,11 +110,17 @@ class ConfidenceCalibrator:
             return True
         return confidence < threshold
 
-    @staticmethod
-    def _clip(value: Any) -> float:
+    def _clip(self, value: Any) -> float:
         try:
             return max(0.0, min(1.0, float(value)))
         except (TypeError, ValueError):
+            # Returning 0.0 here made a malformed signal indistinguishable
+            # from a measured zero, inside the number the pipeline reports as
+            # its confidence.
+            self._degrade(
+                f"a confidence signal was not a number ({value!r}), so it was "
+                f"read as zero in the weighted sum"
+            )
             return 0.0
 
     def _normalized_evidence_score(self, signals: dict[str, Any]) -> float:
