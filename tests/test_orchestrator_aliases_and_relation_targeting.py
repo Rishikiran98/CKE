@@ -1,7 +1,5 @@
 """Alias resolution and relation-targeted retrieval through the orchestrator."""
 
-import pytest
-
 from cke.entity_resolution.entity_resolver import EntityResolver
 from cke.models import Statement
 from cke.pipeline.evidence_assembler import EvidenceAssembler
@@ -97,21 +95,6 @@ def test_alias_resolution_us_citizenship():
     assert result.answer == "United States"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "query_orchestrator.py:109-110 registers every entity the router "
-        "detected as an alias for itself, which overwrites the configured "
-        "alias: 'Chris Nolan' -> 'Christopher Nolan' becomes 'Chris Nolan' -> "
-        "'Chris Nolan' on every query. Alias resolution in the orchestrator "
-        "is therefore dead in any real run. This passed against StubRouter "
-        "only because that stub matched entities by substring and so never "
-        "detected 'Chris Nolan' at all — the stub's failure to route is what "
-        "made the assertion green. Fixing it is a change to answering "
-        "behaviour and belongs in its own change, not in a test cleanup; "
-        "strict=True so this fails loudly the moment it is fixed."
-    ),
-)
 def test_canonical_alias_director_lookup():
     docs = [
         {
@@ -142,6 +125,10 @@ def test_canonical_alias_director_lookup():
     # answer and a refusal as equally correct, so a regression from answering
     # to abstaining was invisible.
     assert result.answer == "yes"
+    assert [e.canonical_name for e in orchestrator.last_context.resolved_entities] == [
+        "Christopher Nolan",
+        "Inception",
+    ]
 
 
 def test_relation_targeted_retrieval_prioritizes_nationality():
@@ -238,3 +225,38 @@ def test_missing_alias_fallback_abstains_cleanly():
     assert all(e.canonical_name for e in orchestrator.last_context.resolved_entities)
     assert result.answer == "INSUFFICIENT_EVIDENCE"
     assert result.failure_mode == "no_evidence"
+
+
+def test_the_entity_confidence_is_not_manufactured_by_the_orchestrator():
+    """0.95 for every detected entity was a round trip, not a measurement.
+
+    The orchestrator registered each surface form the router detected as its
+    own canonical name, then asked the resolver whether it was a canonical
+    name. resolve_with_score scores an exact canonical match 0.95, so every
+    detected entity scored 0.95 whatever the resolver actually knew about it,
+    and that figure is averaged into entity_resolution_confidence and weighted
+    into the confidence the pipeline reports.
+
+    Now an entity the resolver can place scores higher than one it cannot.
+    """
+    from cke.entity_resolution.entity_resolver import EntityResolver
+
+    resolver = EntityResolver(aliases={"Chris Nolan": "Christopher Nolan"})
+
+    resolved = {
+        entity.surface_form: entity
+        for entity in resolver.resolve_mentions(
+            "Did Chris Nolan direct Inception?",
+            candidate_entities=["Chris Nolan", "Inception"],
+        )
+    }
+
+    known = resolved["Chris Nolan"]
+    unknown = resolved["Inception"]
+
+    assert known.canonical_name == "Christopher Nolan"
+    assert unknown.canonical_name == "Inception"
+    assert known.link_confidence > unknown.link_confidence, (
+        "an entity resolved through the alias registry must not score the "
+        "same as one the resolver knows nothing about"
+    )
