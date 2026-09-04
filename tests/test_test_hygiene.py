@@ -231,11 +231,49 @@ MAY_READ_SOURCE = {
         "source. The synthetic generator that was deleted must stay deleted, "
         "and absence of a definition has no runtime witness."
     ),
-    "test_model_pinning.py": (
-        "Resolves a module's __file__ only to name it in a message; the "
-        "assertions themselves construct both loaders and compare refusals."
-    ),
 }
+
+
+def _source_reads(path: pathlib.Path) -> list[str]:
+    """Every call in *path* that reads Python source, found in the AST.
+
+    Not a substring scan. Matching the three spellings I first wrote here
+    missed a path stored in a variable and read later, a read through open(),
+    and any whitespace variant — which made the guard against source-text
+    assertions a source-text assertion. Codex pointed that out on #104.
+    """
+    tree = ast.parse(path.read_text())
+
+    #: Locals assigned from an expression naming a .py file, so that
+    #: `target = ROOT / "x.py"` followed by `target.read_text()` is seen.
+    python_paths = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and ".py" in ast.unparse(node.value):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    python_paths.add(target.id)
+
+    def _names_python_source(node: ast.AST) -> bool:
+        text = ast.unparse(node)
+        return ".py" in text or any(name in python_paths for name in (text,))
+
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        qualified = ast.unparse(func)
+        if qualified.endswith("getsource") or qualified.endswith("getsourcelines"):
+            found.append(qualified)
+        elif qualified.endswith("ast.parse") or qualified == "parse":
+            found.append("ast.parse")
+        elif qualified.endswith("read_text") and isinstance(func, ast.Attribute):
+            if _names_python_source(func.value):
+                found.append("read_text on a .py path")
+        elif qualified == "open" and node.args:
+            if _names_python_source(node.args[0]):
+                found.append("open on a .py path")
+    return sorted(set(found))
 
 
 def test_no_test_asserts_on_source_text():
@@ -244,25 +282,30 @@ def test_no_test_asserts_on_source_text():
     `assert "self._degrade" in inspect.getsource(...)` passes on a comment,
     on a dead branch and on a call that is never reached, and fails on a
     rename that changes nothing. Every one of those has been replaced by a
-    test that runs the thing. The few files below read the parse tree instead,
-    and each says why.
+    test that runs the thing. The few files below read the parse tree
+    instead, and each says why.
     """
-    offenders = []
-    for path in _test_files():
-        source = path.read_text()
-        # Path(__file__) to locate the repository root is not reading source;
-        # getsource, parsing a module, and slicing a .py file's text are.
-        reads_source = [
-            marker
-            for marker in ("inspect.getsource", "ast.parse(", '.py").read_text(')
-            if marker in source
-        ]
-        if reads_source and path.name not in MAY_READ_SOURCE:
-            offenders.append(f"{path.name}: {', '.join(reads_source)}")
-    assert offenders == [], (
-        "these assert on source text; run the behaviour instead, or add the "
+    offenders = {
+        path.name: reads
+        for path in _test_files()
+        if (reads := _source_reads(path)) and path.name not in MAY_READ_SOURCE
+    }
+    assert offenders == {}, (
+        "these read Python source; run the behaviour instead, or add the "
         "file to MAY_READ_SOURCE with the reason absence cannot be observed"
     )
+
+
+def test_the_exemption_list_holds_no_stale_entries():
+    """A file that stopped reading source must stop being exempt.
+
+    test_model_pinning.py was listed here after its source check had already
+    been replaced by one that asks both loaders the same questions, which
+    would have let a future getsource into that file through unchallenged.
+    """
+    listed = set(MAY_READ_SOURCE)
+    actually_reading = {path.name for path in _test_files() if _source_reads(path)}
+    assert listed == actually_reading
 
 
 def test_every_source_reading_file_states_why():
