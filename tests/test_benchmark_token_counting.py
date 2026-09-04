@@ -146,3 +146,59 @@ def test_a_scored_row_defaults_truncation_when_the_answerer_has_none():
 
     assert row["answer_truncated"] is False
     assert row["answer_dropped_tokens"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The run's strictness reaches the datasets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "loader, filename, records",
+    [
+        (
+            "_load_hotpotqa",
+            "hotpotqa_dev.json",
+            [{"_id": "h", "question": "Q?", "answer": "A", "context": [["only"]]}],
+        ),
+        (
+            "_load_wiki2",
+            "wiki2_dev.json",
+            [{"_id": "w", "question": "Q?", "answer": "A", "context": [["only"]]}],
+        ),
+        (
+            "_load_musique",
+            "musique_dev.json",
+            [
+                {
+                    "id": "2hop__1",
+                    "question": "Q?",
+                    "answer": "A",
+                    "paragraphs": [{"idx": 0, "title": "T", "paragraph_text": "  "}],
+                }
+            ],
+        ),
+    ],
+)
+def test_a_strict_run_refuses_a_dataset_that_drops_entries(
+    tmp_path, loader, filename, records
+):
+    """Every loader built itself non-strict, whatever the run was.
+
+    A strict run therefore loaded its data non-strict: the dataset declared
+    that it had dropped malformed entries and the run carried on to report
+    metrics computed over fewer documents than the items hold.
+    """
+    import json
+
+    from cke.diagnostics import DegradedComponentError
+
+    path = tmp_path / filename
+    path.write_text(json.dumps(records), encoding="utf-8")
+
+    with pytest.raises(DegradedComponentError):
+        getattr(bench, loader)(path, 10, True)
+
+    # The opt-out still loads, with the item thinned and the drop declared.
+    items = getattr(bench, loader)(path, 10, False)
+    assert items[0]["documents"] == []

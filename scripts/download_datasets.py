@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download HotpotQA and 2WikiMultiHopQA dev splits into the data/ directory.
+"""Download the multi-hop QA dev splits into the data/ directory.
 
 Datasets are fetched from HuggingFace through the `datasets` library. There is
 no fallback. If a dataset cannot be obtained, this script raises
@@ -10,13 +10,34 @@ evaluation can run against substitute data.
 from __future__ import annotations
 
 import json
+import tempfile
+import zipfile
 from pathlib import Path
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 
 HOTPOTQA_SOURCE = "https://huggingface.co/datasets/hotpotqa/hotpot_qa"
-WIKI2_SOURCE = "https://huggingface.co/datasets/xanhho/2WikiMultihopQA"
+WIKI2_SOURCE = "https://github.com/Alab-NII/2wikimultihop"
+
+#: The dataset archive the 2WikiMultiHopQA authors publish from that
+#: repository. Their own release rather than a mirror: a third-party copy
+#: cannot be told from a copy someone has edited, and several on the Hub
+#: carry model-generated questions in place of the originals.
+_WIKI2_ARCHIVE_URL = "https://www.dropbox.com/s/npidmtadreo6df2/data.zip?dl=1"
+
+#: How many times to fetch an archive before giving up. Transfers of this one
+#: are intermittently truncated: of three consecutive attempts here, two
+#: stopped 19 MB and 12 MB short and the third completed.
+_ARCHIVE_ATTEMPTS = 3
+MUSIQUE_SOURCE = "https://huggingface.co/datasets/dgslibisey/MuSiQue"
+LOCOMO_SOURCE = "https://github.com/snap-research/locomo"
+
+#: The conversation file published from that repository.
+_LOCOMO_URL = (
+    "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
+)
 
 # Item ids written by the synthetic generator that this script used to carry.
 # data/ is gitignored, so a checkout that ran the old downloader still holds
@@ -123,10 +144,106 @@ def _try_hf_hotpotqa(
     return True
 
 
-def _try_hf_wiki2(
+def _stream_archive(url: str, handle, log: list[str]) -> bool:
+    """Copy ``url`` into ``handle``, true only if the whole body arrived.
+
+    ``urlopen``'s ``read`` returns empty on a dropped connection rather than
+    raising, so a truncated body is indistinguishable from a complete one
+    until something downstream chokes on it. Comparing what arrived against
+    ``Content-Length`` is what makes the difference visible; without it a
+    short read becomes a corrupt file, and a corrupt file that happens to
+    parse becomes evaluation data.
+    """
+    handle.seek(0)
+    handle.truncate()
+    with urlopen(url, timeout=600) as response:  # noqa: S310
+        declared = int(response.headers.get("Content-Length") or 0)
+        written = 0
+        while True:
+            chunk = response.read(1 << 20)
+            if not chunk:
+                break
+            handle.write(chunk)
+            written += len(chunk)
+    handle.flush()
+
+    if declared and written != declared:
+        log.append(
+            f"transfer of {url} stopped {declared - written} bytes short "
+            f"of the {declared} it declared"
+        )
+        return False
+    return True
+
+
+def _try_official_wiki2(
     out_path: Path, limit: int | None = None, reasons: list[str] | None = None
 ) -> bool:
-    """Download the 2WikiMultiHopQA dev split via HuggingFace datasets."""
+    """Download the 2WikiMultiHopQA dev split from the authors' release.
+
+    This replaces a HuggingFace attempt that could never have succeeded: it
+    tried one dataset id, ``2wikimultihop``, which does not exist on the Hub,
+    while the source URL it printed on failure named ``xanhho/2WikiMultihopQA``
+    and never tried it. That copy is a loading script, which ``datasets`` 5
+    refuses to execute, so the path was dead at both ends.
+
+    The archive is 246 MB and holds the train, dev and test splits. Only the
+    dev split is read, and it is read from inside the zip so the 682 MB train
+    file is never written to disk.
+
+    Transfers of it are intermittently truncated, so each attempt is checked
+    against the declared length and a short one is retried rather than
+    unpacked.
+    """
+    log = reasons if reasons is not None else []
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".zip") as archive:
+            for attempt in range(1, _ARCHIVE_ATTEMPTS + 1):
+                if _stream_archive(_WIKI2_ARCHIVE_URL, archive, log):
+                    break
+                log.append(f"  (attempt {attempt} of {_ARCHIVE_ATTEMPTS})")
+            else:
+                return False
+
+            with zipfile.ZipFile(archive.name) as bundle:
+                names = [
+                    name
+                    for name in bundle.namelist()
+                    if name.endswith("dev.json") and not name.startswith("__MACOSX")
+                ]
+                if not names:
+                    log.append(
+                        f"archive at {_WIKI2_ARCHIVE_URL} holds no dev.json "
+                        f"(members: {bundle.namelist()[:6]})"
+                    )
+                    return False
+                with bundle.open(names[0]) as handle:
+                    raw = json.load(handle)
+    except Exception as exc:  # noqa: BLE001 - network and archive errors vary
+        log.append(f"download of {_WIKI2_ARCHIVE_URL} failed: {exc}")
+        return False
+
+    if not isinstance(raw, list) or not raw:
+        log.append("the archive's dev.json is not a non-empty JSON list")
+        return False
+
+    rows = raw[:limit] if limit else raw
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"[download] 2WikiMultiHopQA: {len(rows)} items \u2192 {out_path}")
+    return True
+
+
+def _try_hf_musique(
+    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
+) -> bool:
+    """Download the MuSiQue answerable dev split via HuggingFace datasets.
+
+    Paragraphs are written whole, including the ``is_supporting`` flag: it is
+    the dataset's own label for which documents an answer needs, and a
+    retrieval recall figure has nothing to measure against without it.
+    """
     log = reasons if reasons is not None else []
     try:
         from datasets import load_dataset  # type: ignore
@@ -135,45 +252,35 @@ def _try_hf_wiki2(
         return False
 
     ds = None
-    for name, cfg in [("2wikimultihop", None)]:
+    for name in ("dgslibisey/MuSiQue", "musique"):
         try:
-            kwargs: dict = {"trust_remote_code": True}
-            if cfg:
-                kwargs["name"] = cfg
-            ds = load_dataset(name, split="validation", **kwargs)
+            ds = load_dataset(name, split="validation")
             break
         except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
             log.append(f"HuggingFace load of {name!r} failed: {exc}")
+            ds = None
 
     if ds is None:
         return False
 
     rows = []
     for item in ds:
-        context = []
-        titles = (
-            item.get("context", {}).get("title", [])
-            if isinstance(item.get("context"), dict)
-            else []
-        )
-        sentences_list = (
-            item.get("context", {}).get("sentences", [])
-            if isinstance(item.get("context"), dict)
-            else []
-        )
-        if not titles and isinstance(item.get("context"), list):
-            context = item["context"]
-        else:
-            for title, sents in zip(titles, sentences_list):
-                context.append([title, list(sents)])
         rows.append(
             {
-                "_id": str(item.get("id", item.get("_id", ""))),
+                "id": item.get("id", ""),
                 "question": item.get("question", ""),
                 "answer": item.get("answer", ""),
-                "context": context,
-                "supporting_facts": item.get("supporting_facts", []),
-                "type": item.get("type", ""),
+                "answer_aliases": list(item.get("answer_aliases") or []),
+                "answerable": item.get("answerable"),
+                "paragraphs": [
+                    {
+                        "idx": p.get("idx"),
+                        "title": p.get("title", ""),
+                        "paragraph_text": p.get("paragraph_text", ""),
+                        "is_supporting": bool(p.get("is_supporting")),
+                    }
+                    for p in item.get("paragraphs", [])
+                ],
             }
         )
         if limit and len(rows) >= limit:
@@ -186,7 +293,46 @@ def _try_hf_wiki2(
     out_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    print(f"[download] 2WikiMultiHopQA: {len(rows)} items → {out_path}")
+    print(f"[download] MuSiQue: {len(rows)} items \u2192 {out_path}")
+    return True
+
+
+def _try_official_locomo(
+    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
+) -> bool:
+    """Download the LoCoMo conversations from the authors' repository.
+
+    ``limit`` caps conversations, not questions: a conversation is the unit
+    the file publishes, and its questions cannot be answered without it.
+    """
+    log = reasons if reasons is not None else []
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".json") as handle:
+            for attempt in range(1, _ARCHIVE_ATTEMPTS + 1):
+                if _stream_archive(_LOCOMO_URL, handle, log):
+                    break
+                log.append(f"  (attempt {attempt} of {_ARCHIVE_ATTEMPTS})")
+            else:
+                return False
+            handle.seek(0)
+            raw = json.load(handle)
+    except Exception as exc:  # noqa: BLE001 - network and parse errors vary
+        log.append(f"download of {_LOCOMO_URL} failed: {exc}")
+        return False
+
+    if not isinstance(raw, list) or not raw:
+        log.append(f"{_LOCOMO_URL} is not a non-empty JSON list of conversations")
+        return False
+
+    rows = raw[:limit] if limit else raw
+    out_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    questions = sum(len(row.get("qa") or []) for row in rows if isinstance(row, dict))
+    print(
+        f"[download] LoCoMo: {len(rows)} conversations, "
+        f"{questions} questions \u2192 {out_path}"
+    )
     return True
 
 
@@ -270,10 +416,40 @@ def download_wiki2(out_path: Path, limit: int = 500) -> None:
         return
 
     reasons: list[str] = []
-    if _try_hf_wiki2(out_path, limit=limit, reasons=reasons):
+    if _try_official_wiki2(out_path, limit=limit, reasons=reasons):
         return
 
     raise DatasetUnavailableError("2WikiMultiHopQA (dev)", WIKI2_SOURCE, reasons)
+
+
+def download_musique(out_path: Path, limit: int = 500) -> None:
+    """Ensure MuSiQue is present at ``out_path`` or raise."""
+    if out_path.exists():
+        existing = _load_existing(out_path, "MuSiQue (dev)", MUSIQUE_SOURCE)
+        n = len(existing)
+        print(f"[download] MuSiQue already exists: {n} items at {out_path}")
+        return
+
+    reasons: list[str] = []
+    if _try_hf_musique(out_path, limit=limit, reasons=reasons):
+        return
+
+    raise DatasetUnavailableError("MuSiQue (dev)", MUSIQUE_SOURCE, reasons)
+
+
+def download_locomo(out_path: Path, limit: int | None = None) -> None:
+    """Ensure LoCoMo is present at ``out_path`` or raise."""
+    if out_path.exists():
+        existing = _load_existing(out_path, "LoCoMo", LOCOMO_SOURCE)
+        n = len(existing)
+        print(f"[download] LoCoMo already exists: {n} conversations at {out_path}")
+        return
+
+    reasons: list[str] = []
+    if _try_official_locomo(out_path, limit=limit, reasons=reasons):
+        return
+
+    raise DatasetUnavailableError("LoCoMo", LOCOMO_SOURCE, reasons)
 
 
 def main() -> None:
@@ -288,6 +464,9 @@ def main() -> None:
 
     download_hotpotqa(args.data_dir / "hotpotqa_dev.json", limit=args.limit)
     download_wiki2(args.data_dir / "wiki2_dev.json", limit=args.limit)
+    download_musique(args.data_dir / "musique_dev.json", limit=args.limit)
+    # No limit: ten conversations is the whole published set.
+    download_locomo(args.data_dir / "locomo.json")
 
     print("[download] Done.")
 

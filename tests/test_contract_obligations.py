@@ -76,6 +76,8 @@ def _cases(tmp: pathlib.Path):
     """(name, build(strict), trigger_or_None) for every contract component."""
     from cke.datasets.hotpot_loader import HotpotDataset
     from cke.datasets.locomo_loader import LoCoMoDataset
+    from cke.datasets.musique_loader import MuSiQueDataset
+    from cke.datasets.wiki2_loader import WikiMultiHopDataset
     from cke.entity_resolution.entity_resolver import EntityResolver
     from cke.evaluation.ablation_runner import AblationRunner
     from cke.evaluation.token_counter import TokenCounter
@@ -151,7 +153,19 @@ def _cases(tmp: pathlib.Path):
         (
             "LoCoMoDataset",
             lambda s: LoCoMoDataset(strict=s),
-            lambda o: o._extract_turns({"unrecognised": []}),
+            lambda o: o._conversation_documents({"speaker_a": "A"}),
+        ),
+        (
+            "WikiMultiHopDataset",
+            lambda s: WikiMultiHopDataset(strict=s),
+            lambda o: o._context_to_documents([["T", ["s"]], ["malformed"]]),
+        ),
+        (
+            "MuSiQueDataset",
+            lambda s: MuSiQueDataset(strict=s),
+            lambda o: o._paragraphs_to_documents(
+                [{"idx": 0, "title": "T", "paragraph_text": "text"}, "malformed"]
+            ),
         ),
         (
             "AblationRunner",
