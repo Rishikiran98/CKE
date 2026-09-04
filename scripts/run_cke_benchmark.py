@@ -14,9 +14,11 @@ Produces:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import statistics
+import subprocess  # nosec B404 - only `git`, argv list, no shell
 import sys
 import time
 import warnings
@@ -26,6 +28,9 @@ from typing import Any
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+
+#: Read once, so every file this run writes carries the same timestamp.
+_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -1276,23 +1281,246 @@ def _truncation_summary(answerer, combined: dict[str, dict[str, float]]):
 # data non-strict: a dataset that dropped malformed entries declared the
 # degradation and the run carried on to report metrics computed over fewer
 # documents than the items hold, which is what strict exists to refuse.
-def _load_hotpotqa(path: Path, limit: int, strict: bool) -> list[dict[str, Any]]:
-    ds = HotpotDataset(strict=strict)
-    ds.load(str(path))
-    return ds.items[:limit]
+#: How the evaluated items are chosen from a file. "sample" draws them with a
+#: seed; "prefix" takes the first N, which is what this driver always did and
+#: what makes a capped run a run on whatever the file happens to list first.
+#: MuSiQue's dev split is ordered by hop count, so every capped run of it was
+#: a two-hop run reported as a MuSiQue run.
+SELECTION_METHODS = ("sample", "prefix")
+
+#: The seed the item sample is drawn from. Fixed and reported, so two runs of
+#: one command evaluate the same items.
+SAMPLE_SEED = 20260904
 
 
-def _load_musique(path: Path, limit: int, strict: bool) -> list[dict[str, Any]]:
-    ds = MuSiQueDataset(strict=strict)
-    ds.load(str(path))
-    return ds.items[:limit]
+def _positive_int(value: str) -> int:
+    """argparse type for a count that must be at least one.
+
+    ``--limit 0`` evaluated nothing and reported the empty result as a run.
+    """
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from exc
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {number}")
+    return number
 
 
-def _load_wiki2(path: Path, limit: int, strict: bool) -> list[dict[str, Any]]:
-    ds = WikiMultiHopDataset(strict=strict)
-    ds.load(str(path))
-    # wiki2 items have 'contexts' (list of str) not 'documents'
-    return ds.items[:limit]
+def file_digest(path: Path) -> str:
+    """The sha256 of a file, read in chunks so a large corpus fits in memory.
+
+    A results file that names its dataset by path says nothing: the path can
+    hold different bytes tomorrow. The digest is what makes "the same data"
+    checkable rather than asserted.
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def select_indices(
+    total: int, limit: int, seed: int = SAMPLE_SEED, method: str = "sample"
+) -> list[int]:
+    """Which records of a file this run evaluates, in file order.
+
+    Returned sorted rather than in draw order, so the items are evaluated and
+    written in the order they appear in the file. The seed decides which
+    records are chosen; nothing should depend on the order they were drawn in.
+    """
+    if method not in SELECTION_METHODS:
+        raise ValueError(f"unknown selection method {method!r}")
+    if limit < 1:
+        raise ValueError(f"limit must be at least 1, got {limit}")
+    take = min(limit, total)
+    if method == "prefix" or take == total:
+        return list(range(take))
+    drawn = np.random.default_rng(seed).choice(total, size=take, replace=False)
+    return sorted(int(index) for index in drawn)
+
+
+def load_selected(
+    dataset, path: Path, limit: int, seed: int, method: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Normalise only the records this run evaluates, and say which they were.
+
+    The driver used to normalise the whole file and slice the result. Two
+    costs: a malformed record this run never evaluates declared a degradation
+    and refused a strict run, and the slice made the cap a prefix.
+    """
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+    chosen = select_indices(len(raw), limit, seed, method)
+    items = [dataset.normalize_record(index, raw[index]) for index in chosen]
+    provenance = {
+        "path": str(path),
+        "sha256": file_digest(path),
+        "bytes": path.stat().st_size,
+        "records_in_file": len(raw),
+        "items_evaluated": len(items),
+        "selection": {"method": method, "seed": seed if method == "sample" else None},
+        "item_ids": [str(item.get("id")) for item in items],
+    }
+    return items, provenance
+
+
+#: Fields of the results that cannot repeat, and why. A run is reproducible
+#: everywhere else; naming the exceptions is what lets "run it twice and diff"
+#: be a check rather than a hope.
+NON_REPRODUCIBLE_FIELDS = {
+    "started_at": "the wall clock reads differently on the second run",
+    "median_latency_ms": "a timing, which no seed fixes",
+    "rag_k10_median_latency_ms": "a timing, which no seed fixes",
+    "cke_n12_median_latency_ms": "a timing, which no seed fixes",
+    "latency_ms": "a timing, which no seed fixes",
+}
+
+
+def _git_description() -> dict[str, Any]:
+    """The commit this ran from, and whether the tree was clean.
+
+    A commit alone does not determine the code when the tree is dirty, and a
+    results file that names a commit while the working tree differed from it
+    is claiming a provenance it does not have.
+    """
+
+    def _git(*command: str) -> str | None:
+        try:
+            done = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+                ["git", *command],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    commit = _git("rev-parse", "HEAD")
+    status = _git("status", "--porcelain")
+    return {
+        "commit": commit,
+        # None, not False: an unknown tree state is not a clean one.
+        "clean_tree": (status == "") if status is not None else None,
+        "uncommitted_files": (
+            len([line for line in status.splitlines() if line.strip()])
+            if status
+            else 0 if status == "" else None
+        ),
+    }
+
+
+def run_provenance(
+    args: argparse.Namespace,
+    datasets: dict[str, dict[str, Any]],
+    answerer,
+    token_counter: TokenCounter,
+) -> dict[str, Any]:
+    """Everything a second run needs to produce these numbers again.
+
+    The question this answers is not "what happened" but "what would I have
+    to hold fixed to get this again": the code, the data, the weights, the
+    seeds, and the command. Anything that cannot be held fixed is named in
+    NON_REPRODUCIBLE_FIELDS rather than left for a reader to discover by
+    diffing two runs.
+    """
+    return {
+        "cke": _git_description(),
+        "command": list(sys.argv),
+        "seeds": {
+            "item_sample": args.sample_seed,
+            "bootstrap": BOOTSTRAP_SEED,
+            "bootstrap_replicates": BOOTSTRAP_REPLICATES,
+        },
+        "selection_method": args.select,
+        "limit": args.limit,
+        "strict": not args.allow_degraded,
+        "datasets": datasets,
+        "answerer": answerer.description,
+        "prompt_token_counter": token_counter.description,
+        "environment": environment_report().as_dict(),
+        "started_at": _STARTED_AT,
+        "non_reproducible_fields": NON_REPRODUCIBLE_FIELDS,
+    }
+
+
+def compare_runs(first: Path, second: Path) -> list[str]:
+    """Where two runs' results disagree on anything a seed should have fixed.
+
+    The gate for this work is "run it twice and diff". Diffing the files
+    themselves always reports a difference, because they carry timings and a
+    timestamp, so the useful comparison is of what NON_REPRODUCIBLE_FIELDS
+    does not exclude. An empty list is the pass.
+    """
+
+    def _walk(left: Any, right: Any, path: str) -> list[str]:
+        if isinstance(left, dict) and isinstance(right, dict):
+            differences: list[str] = []
+            for key in sorted(set(left) | set(right)):
+                where = f"{path}.{key}" if path else key
+                if key not in left:
+                    differences.append(f"{where}: only in the second run")
+                elif key not in right:
+                    differences.append(f"{where}: only in the first run")
+                else:
+                    differences += _walk(left[key], right[key], where)
+            return differences
+        if isinstance(left, list) and isinstance(right, list):
+            if len(left) != len(right):
+                return [f"{path}: {len(left)} entries then {len(right)}"]
+            return [
+                difference
+                for index, (a, b) in enumerate(zip(left, right))
+                for difference in _walk(a, b, f"{path}[{index}]")
+            ]
+        if left != right:
+            return [f"{path}: {left!r} then {right!r}"]
+        return []
+
+    with open(first, encoding="utf-8") as handle:
+        left = deterministic_view(json.load(handle))
+    with open(second, encoding="utf-8") as handle:
+        right = deterministic_view(json.load(handle))
+    return _walk(left, right, "")
+
+
+def deterministic_view(payload: Any) -> Any:
+    """The part of a results payload that two runs must agree on exactly.
+
+    Drops the fields NON_REPRODUCIBLE_FIELDS names, at any depth. Two runs of
+    one command whose deterministic views differ have a defect in this
+    harness, not noise.
+    """
+    if isinstance(payload, dict):
+        return {
+            key: deterministic_view(value)
+            for key, value in payload.items()
+            if key not in NON_REPRODUCIBLE_FIELDS
+        }
+    if isinstance(payload, list):
+        return [deterministic_view(value) for value in payload]
+    return payload
+
+
+def _load_hotpotqa(
+    path: Path, limit: int, strict: bool, seed: int, method: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    return load_selected(HotpotDataset(strict=strict), path, limit, seed, method)
+
+
+def _load_musique(
+    path: Path, limit: int, strict: bool, seed: int, method: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    return load_selected(MuSiQueDataset(strict=strict), path, limit, seed, method)
+
+
+def _load_wiki2(
+    path: Path, limit: int, strict: bool, seed: int, method: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    return load_selected(WikiMultiHopDataset(strict=strict), path, limit, seed, method)
 
 
 # ---------------------------------------------------------------------------
@@ -1394,7 +1622,29 @@ def run_retrieval_mode_ablation(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CKE benchmark: RAG vs CKE-lite")
-    parser.add_argument("--limit", type=int, default=500, help="Items per dataset")
+    parser.add_argument(
+        "--limit",
+        type=_positive_int,
+        default=500,
+        help="Items evaluated per dataset",
+    )
+    parser.add_argument(
+        "--select",
+        choices=SELECTION_METHODS,
+        default="sample",
+        help=(
+            "how those items are chosen: 'sample' draws them with --sample-seed, "
+            "'prefix' takes the first N. A prefix of a file ordered by anything "
+            "-- MuSiQue's dev split is ordered by hop count -- is a run on that "
+            "ordering rather than on the dataset."
+        ),
+    )
+    parser.add_argument(
+        "--sample-seed",
+        type=int,
+        default=SAMPLE_SEED,
+        help="seed the item sample is drawn from; recorded in provenance.json",
+    )
     parser.add_argument("--output-dir", default="results")
     parser.add_argument("--hotpot-path", default=None)
     parser.add_argument("--wiki2-path", default=None)
@@ -1486,9 +1736,14 @@ def main() -> None:
         spec = importlib.util.spec_from_file_location("download_datasets", dl_script)
         dl_mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(dl_mod)  # type: ignore[union-attr]
-        dl_mod.download_hotpotqa(data_dir / "hotpotqa_dev.json", limit=args.limit)
-        dl_mod.download_wiki2(data_dir / "wiki2_dev.json", limit=args.limit)
-        dl_mod.download_musique(data_dir / "musique_dev.json", limit=args.limit)
+        # No cap: the file is the published split, and the run samples from
+        # it with a seed. A capped download made the file a prefix of the
+        # split, and no seed downstream can undo an ordering already baked
+        # into the data — MuSiQue's dev split is ordered by hop count, so
+        # every capped run of it was a two-hop run reported as MuSiQue.
+        dl_mod.download_hotpotqa(data_dir / "hotpotqa_dev.json")
+        dl_mod.download_wiki2(data_dir / "wiki2_dev.json")
+        dl_mod.download_musique(data_dir / "musique_dev.json")
 
     hotpot_path = (
         Path(args.hotpot_path) if args.hotpot_path else data_dir / "hotpotqa_dev.json"
@@ -1502,10 +1757,17 @@ def main() -> None:
 
     # --- Load datasets ---
     datasets: dict[str, list[dict[str, Any]]] = {}
+    dataset_provenance: dict[str, dict[str, Any]] = {}
     if hotpot_path.exists():
         try:
-            datasets["hotpotqa"] = _load_hotpotqa(hotpot_path, args.limit, strict)
-            print(f"[load] HotpotQA: {len(datasets['hotpotqa'])} items")
+            datasets["hotpotqa"], dataset_provenance["hotpotqa"] = _load_hotpotqa(
+                hotpot_path, args.limit, strict, args.sample_seed, args.select
+            )
+            print(
+                f"[load] HotpotQA: {len(datasets['hotpotqa'])} of "
+                f"{dataset_provenance['hotpotqa']['records_in_file']} records, "
+                f"{args.select}"
+            )
         except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
             # Continuing here computed the report over whichever datasets
             # happened to load, with no note of the one that did not.
@@ -1518,8 +1780,14 @@ def main() -> None:
 
     if wiki2_path.exists():
         try:
-            datasets["wiki2"] = _load_wiki2(wiki2_path, args.limit, strict)
-            print(f"[load] 2WikiMultiHopQA: {len(datasets['wiki2'])} items")
+            datasets["wiki2"], dataset_provenance["wiki2"] = _load_wiki2(
+                wiki2_path, args.limit, strict, args.sample_seed, args.select
+            )
+            print(
+                f"[load] 2WikiMultiHopQA: {len(datasets['wiki2'])} of "
+                f"{dataset_provenance['wiki2']['records_in_file']} records, "
+                f"{args.select}"
+            )
         except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
             raise RuntimeError(
                 f"2WikiMultiHopQA failed to load from {wiki2_path}: "
@@ -1530,8 +1798,14 @@ def main() -> None:
 
     if musique_path.exists():
         try:
-            datasets["musique"] = _load_musique(musique_path, args.limit, strict)
-            print(f"[load] MuSiQue: {len(datasets['musique'])} items")
+            datasets["musique"], dataset_provenance["musique"] = _load_musique(
+                musique_path, args.limit, strict, args.sample_seed, args.select
+            )
+            print(
+                f"[load] MuSiQue: {len(datasets['musique'])} of "
+                f"{dataset_provenance['musique']['records_in_file']} records, "
+                f"{args.select}"
+            )
         except Exception as exc:  # noqa: BLE001 - loaders raise varied errors
             raise RuntimeError(
                 f"MuSiQue failed to load from {musique_path}: "
@@ -1608,7 +1882,24 @@ def main() -> None:
     print(f"[output] failure_analysis.json ({len(failure_samples)} samples)")
 
     # --- Summary ---
+    provenance = run_provenance(args, dataset_provenance, answerer, token_counter)
+    (output_dir / "provenance.json").write_text(
+        json.dumps(provenance, indent=2), encoding="utf-8"
+    )
+    print("[output] provenance.json")
+    if provenance["cke"]["clean_tree"] is False:
+        # Not a warning about tidiness: the commit named above does not
+        # describe the code that produced these numbers.
+        print(
+            f"[provenance] the working tree had "
+            f"{provenance['cke']['uncommitted_files']} uncommitted file(s), so "
+            f"commit {provenance['cke']['commit']} does not fully describe this "
+            f"run",
+            flush=True,
+        )
+
     summary = produce_summary(combined_metrics, token_counter, answerer)
+    summary["provenance"] = provenance
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )

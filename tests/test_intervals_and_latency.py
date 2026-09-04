@@ -277,3 +277,163 @@ def test_the_figure_cell_states_an_absence_rather_than_a_number():
         )
         == "0.5000 (0.25–0.75)"
     )
+
+
+# ---------------------------------------------------------------------------
+# What determines a run
+# ---------------------------------------------------------------------------
+
+
+def test_a_capped_run_samples_rather_than_taking_a_prefix():
+    """A prefix carries whatever ordering the file has. MuSiQue's dev split
+    is ordered by hop count, so every capped run of it was a two-hop run."""
+    chosen = bench.select_indices(1000, 10)
+
+    assert chosen != list(range(10))
+    assert len(set(chosen)) == 10, "sampled without replacement"
+    assert chosen == sorted(chosen), "evaluated in file order whatever was drawn"
+    assert all(0 <= index < 1000 for index in chosen)
+
+
+def test_the_same_seed_selects_the_same_items():
+    assert bench.select_indices(1000, 25) == bench.select_indices(1000, 25)
+
+
+def test_a_different_seed_selects_different_items():
+    first = bench.select_indices(1000, 25, seed=1)
+    second = bench.select_indices(1000, 25, seed=2)
+
+    assert first != second
+
+
+def test_a_prefix_is_still_reachable_and_named():
+    """Kept so the old behaviour can be reproduced deliberately, and it is
+    recorded in the provenance when it is."""
+    assert bench.select_indices(1000, 5, method="prefix") == [0, 1, 2, 3, 4]
+
+
+def test_a_cap_at_or_above_the_file_takes_everything():
+    assert bench.select_indices(5, 5) == [0, 1, 2, 3, 4]
+    assert bench.select_indices(5, 50) == [0, 1, 2, 3, 4]
+
+
+def test_an_unknown_selection_method_is_refused():
+    with pytest.raises(ValueError, match="unknown selection method"):
+        bench.select_indices(10, 2, method="whatever")
+
+
+def test_a_cap_below_one_is_refused():
+    with pytest.raises(ValueError, match="at least 1"):
+        bench.select_indices(10, 0)
+
+
+def test_only_the_evaluated_records_are_normalised(tmp_path):
+    """A malformed record this run never evaluates declared a degradation and
+    refused a strict run. The driver loaded the whole file and sliced."""
+    import json
+
+    from cke.datasets.hotpot_loader import HotpotDataset
+
+    good = {"_id": "good", "question": "Q?", "answer": "A", "context": [["T", ["s"]]]}
+    broken = {"_id": "bad", "question": "Q?", "answer": "A", "context": [["only"]]}
+    path = tmp_path / "hotpotqa_dev.json"
+    path.write_text(json.dumps([good, broken]), encoding="utf-8")
+
+    items, provenance = bench.load_selected(
+        HotpotDataset(strict=True), path, 1, bench.SAMPLE_SEED, "prefix"
+    )
+
+    assert [item["id"] for item in items] == ["good"]
+    assert provenance["records_in_file"] == 2
+    assert provenance["items_evaluated"] == 1
+
+
+def test_the_provenance_names_the_file_by_its_contents(tmp_path):
+    """A path says nothing: it can hold different bytes tomorrow."""
+    import json
+
+    from cke.datasets.hotpot_loader import HotpotDataset
+
+    record = {"_id": "a", "question": "Q?", "answer": "A", "context": [["T", ["s"]]]}
+    path = tmp_path / "hotpotqa_dev.json"
+    path.write_text(json.dumps([record]), encoding="utf-8")
+    _, first = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
+
+    path.write_text(json.dumps([record, record]), encoding="utf-8")
+    _, second = bench.load_selected(HotpotDataset(), path, 1, 1, "prefix")
+
+    assert first["sha256"] != second["sha256"]
+    assert len(first["sha256"]) == 64
+    assert first["item_ids"] == ["a"]
+
+
+def test_the_deterministic_view_drops_only_what_cannot_repeat():
+    payload = {
+        "rag_k10_em": 0.5,
+        "rag_k10_median_latency_ms": 12.0,
+        "provenance": {"started_at": "now", "seeds": {"item_sample": 1}},
+        "rows": [{"latency_ms": 3.0, "em": 1.0}],
+    }
+
+    view = bench.deterministic_view(payload)
+
+    assert view == {
+        "rag_k10_em": 0.5,
+        "provenance": {"seeds": {"item_sample": 1}},
+        "rows": [{"em": 1.0}],
+    }
+
+
+def test_every_dropped_field_says_why_it_cannot_repeat():
+    assert bench.NON_REPRODUCIBLE_FIELDS
+    for field, reason in bench.NON_REPRODUCIBLE_FIELDS.items():
+        assert reason and not reason.endswith("."), field
+
+
+def test_two_runs_that_agree_compare_clean(tmp_path):
+    import json
+
+    payload = {
+        "rag_k10_em": 0.5,
+        "provenance": {"seeds": {"item_sample": 1}},
+    }
+    first = tmp_path / "a.json"
+    second = tmp_path / "b.json"
+    first.write_text(json.dumps({**payload, "started_at": "one"}), encoding="utf-8")
+    second.write_text(json.dumps({**payload, "started_at": "two"}), encoding="utf-8")
+
+    assert (
+        bench.compare_runs(first, second) == []
+    ), "a timestamp is not a disagreement about a result"
+
+
+def test_a_figure_that_moved_between_runs_is_reported(tmp_path):
+    import json
+
+    first = tmp_path / "a.json"
+    second = tmp_path / "b.json"
+    first.write_text(
+        json.dumps({"rag_k10_em": 0.5, "rag_k10_median_latency_ms": 1.0}),
+        encoding="utf-8",
+    )
+    second.write_text(
+        json.dumps({"rag_k10_em": 0.6, "rag_k10_median_latency_ms": 99.0}),
+        encoding="utf-8",
+    )
+
+    differences = bench.compare_runs(first, second)
+
+    assert differences == [
+        "rag_k10_em: 0.5 then 0.6"
+    ], "the latency moved too, and that is expected rather than a defect"
+
+
+def test_a_key_present_in_only_one_run_is_reported(tmp_path):
+    import json
+
+    first = tmp_path / "a.json"
+    second = tmp_path / "b.json"
+    first.write_text(json.dumps({"a": 1, "b": 2}), encoding="utf-8")
+    second.write_text(json.dumps({"a": 1}), encoding="utf-8")
+
+    assert bench.compare_runs(first, second) == ["b: only in the first run"]

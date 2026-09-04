@@ -73,9 +73,7 @@ class DatasetUnavailableError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-def _try_hf_hotpotqa(
-    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
-) -> bool:
+def _try_hf_hotpotqa(out_path: Path, reasons: list[str] | None = None) -> bool:
     """Download the HotpotQA distractor dev split via HuggingFace datasets."""
     log = reasons if reasons is not None else []
     try:
@@ -130,9 +128,6 @@ def _try_hf_hotpotqa(
                 "level": item.get("level", ""),
             }
         )
-        if limit and len(rows) >= limit:
-            break
-
     if not rows:
         log.append("HuggingFace returned an empty validation split")
         return False
@@ -176,9 +171,7 @@ def _stream_archive(url: str, handle, log: list[str]) -> bool:
     return True
 
 
-def _try_official_wiki2(
-    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
-) -> bool:
+def _try_official_wiki2(out_path: Path, reasons: list[str] | None = None) -> bool:
     """Download the 2WikiMultiHopQA dev split from the authors' release.
 
     This replaces a HuggingFace attempt that could never have succeeded: it
@@ -227,7 +220,7 @@ def _try_official_wiki2(
         log.append("the archive's dev.json is not a non-empty JSON list")
         return False
 
-    rows = raw[:limit] if limit else raw
+    rows = raw
     out_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -235,9 +228,7 @@ def _try_official_wiki2(
     return True
 
 
-def _try_hf_musique(
-    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
-) -> bool:
+def _try_hf_musique(out_path: Path, reasons: list[str] | None = None) -> bool:
     """Download the MuSiQue answerable dev split via HuggingFace datasets.
 
     Paragraphs are written whole, including the ``is_supporting`` flag: it is
@@ -283,9 +274,6 @@ def _try_hf_musique(
                 ],
             }
         )
-        if limit and len(rows) >= limit:
-            break
-
     if not rows:
         log.append("HuggingFace returned an empty validation split")
         return False
@@ -297,12 +285,10 @@ def _try_hf_musique(
     return True
 
 
-def _try_official_locomo(
-    out_path: Path, limit: int | None = None, reasons: list[str] | None = None
-) -> bool:
+def _try_official_locomo(out_path: Path, reasons: list[str] | None = None) -> bool:
     """Download the LoCoMo conversations from the authors' repository.
 
-    ``limit`` caps conversations, not questions: a conversation is the unit
+    A conversation is the unit
     the file publishes, and its questions cannot be answered without it.
     """
     log = reasons if reasons is not None else []
@@ -324,7 +310,7 @@ def _try_official_locomo(
         log.append(f"{_LOCOMO_URL} is not a non-empty JSON list of conversations")
         return False
 
-    rows = raw[:limit] if limit else raw
+    rows = raw
     out_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -389,7 +375,7 @@ def _load_existing(path: Path, dataset: str, source_url: str) -> list:
 # ---------------------------------------------------------------------------
 
 
-def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
+def download_hotpotqa(out_path: Path) -> None:
     """Ensure HotpotQA is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(
@@ -401,13 +387,13 @@ def download_hotpotqa(out_path: Path, limit: int = 500) -> None:
         return
 
     reasons: list[str] = []
-    if _try_hf_hotpotqa(out_path, limit=limit, reasons=reasons):
+    if _try_hf_hotpotqa(out_path, reasons=reasons):
         return
 
     raise DatasetUnavailableError("HotpotQA (distractor dev)", HOTPOTQA_SOURCE, reasons)
 
 
-def download_wiki2(out_path: Path, limit: int = 500) -> None:
+def download_wiki2(out_path: Path) -> None:
     """Ensure 2WikiMultiHopQA is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(out_path, "2WikiMultiHopQA (dev)", WIKI2_SOURCE)
@@ -416,13 +402,13 @@ def download_wiki2(out_path: Path, limit: int = 500) -> None:
         return
 
     reasons: list[str] = []
-    if _try_official_wiki2(out_path, limit=limit, reasons=reasons):
+    if _try_official_wiki2(out_path, reasons=reasons):
         return
 
     raise DatasetUnavailableError("2WikiMultiHopQA (dev)", WIKI2_SOURCE, reasons)
 
 
-def download_musique(out_path: Path, limit: int = 500) -> None:
+def download_musique(out_path: Path) -> None:
     """Ensure MuSiQue is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(out_path, "MuSiQue (dev)", MUSIQUE_SOURCE)
@@ -431,13 +417,13 @@ def download_musique(out_path: Path, limit: int = 500) -> None:
         return
 
     reasons: list[str] = []
-    if _try_hf_musique(out_path, limit=limit, reasons=reasons):
+    if _try_hf_musique(out_path, reasons=reasons):
         return
 
     raise DatasetUnavailableError("MuSiQue (dev)", MUSIQUE_SOURCE, reasons)
 
 
-def download_locomo(out_path: Path, limit: int | None = None) -> None:
+def download_locomo(out_path: Path) -> None:
     """Ensure LoCoMo is present at ``out_path`` or raise."""
     if out_path.exists():
         existing = _load_existing(out_path, "LoCoMo", LOCOMO_SOURCE)
@@ -446,7 +432,7 @@ def download_locomo(out_path: Path, limit: int | None = None) -> None:
         return
 
     reasons: list[str] = []
-    if _try_official_locomo(out_path, limit=limit, reasons=reasons):
+    if _try_official_locomo(out_path, reasons=reasons):
         return
 
     raise DatasetUnavailableError("LoCoMo", LOCOMO_SOURCE, reasons)
@@ -456,16 +442,15 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Download benchmark datasets")
-    parser.add_argument("--limit", type=int, default=500, help="Max items per dataset")
+
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
     args = parser.parse_args()
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
 
-    download_hotpotqa(args.data_dir / "hotpotqa_dev.json", limit=args.limit)
-    download_wiki2(args.data_dir / "wiki2_dev.json", limit=args.limit)
-    download_musique(args.data_dir / "musique_dev.json", limit=args.limit)
-    # No limit: ten conversations is the whole published set.
+    download_hotpotqa(args.data_dir / "hotpotqa_dev.json")
+    download_wiki2(args.data_dir / "wiki2_dev.json")
+    download_musique(args.data_dir / "musique_dev.json")
     download_locomo(args.data_dir / "locomo.json")
 
     print("[download] Done.")

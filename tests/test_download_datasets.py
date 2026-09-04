@@ -228,11 +228,11 @@ def test_wiki2_reads_the_dev_split_out_of_the_official_archive(tmp_path, monkeyp
     monkeypatch.setattr(dl, "urlopen", _fake_urlopen([(archive, None)]))
     out = tmp_path / "wiki2_dev.json"
 
-    dl.download_wiki2(out, limit=3)
+    dl.download_wiki2(out)
 
     rows = json.loads(out.read_text(encoding="utf-8"))
-    # The dev split, capped, and neither the test split nor the resource forks.
-    assert [r["_id"] for r in rows] == ["0", "1", "2"]
+    # The whole dev split, and neither the test split nor the resource forks.
+    assert [r["_id"] for r in rows] == ["0", "1", "2", "3", "4"]
     assert rows[0]["evidences"] == _wiki2_row()["evidences"]
 
 
@@ -250,7 +250,7 @@ def test_wiki2_retries_a_truncated_transfer(tmp_path, monkeypatch):
     )
     out = tmp_path / "wiki2_dev.json"
 
-    dl.download_wiki2(out, limit=1)
+    dl.download_wiki2(out)
 
     assert json.loads(out.read_text(encoding="utf-8"))[0]["_id"] == _wiki2_row()["_id"]
 
@@ -317,14 +317,37 @@ def test_locomo_downloads_the_published_conversations(tmp_path, monkeypatch):
     assert [r["sample_id"] for r in rows] == ["conv-0", "conv-1", "conv-2"]
 
 
-def test_locomo_limit_caps_conversations_not_questions(tmp_path, monkeypatch):
+def test_every_published_conversation_is_written(tmp_path, monkeypatch):
+    """This replaces a test of the download cap, which is gone.
+
+    The cap made a downloaded file a prefix of the published split, and a
+    prefix carries whatever ordering the publisher used: MuSiQue's dev split
+    is ordered by hop count, so every capped run of it was a two-hop run
+    reported as a MuSiQue run. No seed downstream can undo an ordering
+    already baked into the file, so the file is now the whole split and the
+    benchmark samples from it with a seed.
+    """
     body = json.dumps(_locomo_conversations(3)).encode("utf-8")
     monkeypatch.setattr(dl, "urlopen", _fake_urlopen([(body, None)]))
     out = tmp_path / "locomo.json"
 
-    dl.download_locomo(out, limit=2)
+    dl.download_locomo(out)
 
-    assert len(json.loads(out.read_text(encoding="utf-8"))) == 2
+    assert len(json.loads(out.read_text(encoding="utf-8"))) == 3
+
+
+def test_no_downloader_accepts_a_cap():
+    """A cap on any of them reintroduces the prefix, so none takes one."""
+    import inspect
+
+    for name in (
+        "download_hotpotqa",
+        "download_wiki2",
+        "download_musique",
+        "download_locomo",
+    ):
+        parameters = inspect.signature(getattr(dl, name)).parameters
+        assert "limit" not in parameters, f"{name} takes a cap again"
 
 
 def test_locomo_retries_a_truncated_transfer(tmp_path, monkeypatch):
