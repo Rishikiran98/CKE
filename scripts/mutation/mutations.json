@@ -218,5 +218,56 @@
       "new": "    \"cke/datasets/hotpot_loader.py\",",
       "tests": "tests/test_typecheck_ratchet.py"
     }
+  ],
+  "census": [
+    {
+      "label": "a component sets its strict flag by hand again, so it cannot report degradation",
+      "path": "cke/retrieval/graph_retriever.py",
+      "old": "class GraphRetriever(DegradationMixin):",
+      "new": "class GraphRetriever:",
+      "tests": "tests/test_contract_census.py"
+    },
+    {
+      "label": "the degraded check in require_strict_component goes back to being vacuous",
+      "path": "cke/diagnostics.py",
+      "old": "    if getattr(supplied, \"degraded\", False):",
+      "new": "    if False:",
+      "tests": "tests/test_contract_census.py"
+    },
+    {
+      "label": "require_strict_component refuses every collaborator, degraded or not",
+      "path": "cke/diagnostics.py",
+      "old": "    if not strict or supplied is None:\n        return",
+      "new": "    if supplied is None:\n        return",
+      "tests": "tests/test_contract_census.py"
+    },
+    {
+      "label": "the deduplicator stops guarding the trust engine it was handed",
+      "path": "cke/graph/deduplicator.py",
+      "old": "        require_strict_component(\n            type(self).__name__, trust_engine, \"trust engine\", self.strict\n        )\n",
+      "new": "",
+      "tests": "tests/test_contract_census.py"
+    },
+    {
+      "label": "ConfidenceCalibrator stops declaring the signals it was not given",
+      "path": "cke/trust/confidence_calibrator.py",
+      "old": "        absent = [name for name in _WEIGHTED_SIGNALS if name not in signals]",
+      "new": "        absent = []",
+      "tests": "tests/test_contract_obligations.py"
+    },
+    {
+      "label": "the metric guard stops flagging a metric it could not record",
+      "path": "cke/observability/system_monitor.py",
+      "old": "            self._degrade(\n                f\"metric {getattr(func, '__name__', '<unknown>')} was not \"",
+      "new": "            self._noop_degrade(\n                f\"metric {getattr(func, '__name__', '<unknown>')} was not \"",
+      "tests": "tests/test_contract_obligations.py"
+    },
+    {
+      "label": "the LLMReasoner case goes back to refusing through its fallback's embedder",
+      "path": "tests/test_contract_obligations.py",
+      "old": "            lambda s: LLMReasoner(fallback=TemplateReasoner(), strict=s),",
+      "new": "            lambda s: LLMReasoner(strict=s),",
+      "tests": "tests/test_contract_obligations.py"
+    }
   ]
 }
