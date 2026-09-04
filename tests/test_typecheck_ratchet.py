@@ -23,12 +23,46 @@ FLOOR = {
     "cke/pipeline/types.py",
     "cke/retrieval/path_types.py",
     "cke/schema",
+    "cke/diagnostics.py",
+    "cke/datasets/hotpot_loader.py",
+    "cke/datasets/locomo_loader.py",
+    "cke/datasets/musique_loader.py",
+    "cke/datasets/wiki2_loader.py",
+    "cke/evaluation/span_qa.py",
+    "cke/evaluation/token_counter.py",
+    "cke/observability/token_tracker.py",
+    "cke/reasoning/reasoner_adapter.py",
+    "cke/reasoning/verifier.py",
+    "cke/trust/confidence_calibrator.py",
+}
+
+#: Modules that decide something, as opposed to modules that only declare a
+#: shape. The list held four entries and every one was a dataclass or enum
+#: module, so mypy reported success over code that could not be wrong. A
+#: ratchet made only of those can be satisfied forever without checking
+#: anything, so at least one logic module must stay in it.
+_DECLARATION_ONLY = {
+    "cke/models.py",
+    "cke/pipeline/types.py",
+    "cke/retrieval/path_types.py",
+    "cke/schema",
 }
 
 
 def _mypy_config() -> dict:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         return tomllib.load(handle)["tool"]["mypy"]
+
+
+def test_the_list_checks_code_that_decides_something():
+    """Six files passed and all six were declaration-only, so `Success: no
+    issues found` was reported over nothing that could be wrong."""
+    listed = set(_mypy_config()["files"])
+
+    assert listed - _DECLARATION_ONLY, (
+        "every checked module only declares a shape; mypy is reporting "
+        "success over code that cannot be wrong"
+    )
 
 
 def test_the_checked_modules_are_exactly_the_recorded_floor():

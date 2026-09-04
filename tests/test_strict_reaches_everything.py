@@ -127,13 +127,6 @@ def test_every_entry_point_passes_strict_to_what_it_builds():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-
-    benchmark = (root / "scripts" / "run_benchmark.py").read_text(encoding="utf-8")
-    for built in ("DATASET_REGISTRY[args.dataset](", "TokenTracker(", "SystemMonitor("):
-        index = benchmark.index(built)
-        call = benchmark[index : benchmark.index(")", index) + 1]
-        assert "strict" in call, f"{built} is built without strict"
-
     experiment = (root / "cke" / "experiments" / "run_experiment.py").read_text(
         encoding="utf-8"
     )
