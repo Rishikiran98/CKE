@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from cke.diagnostics import DegradationMixin
 from cke.graph.assertion import Assertion
 
 
@@ -20,10 +21,15 @@ class TrustCalibrationConfig:
     low_trust_threshold: float = 0.4
 
 
-class TrustCalibrator:
+class TrustCalibrator(DegradationMixin):
     """Calibrate trust scoring from graph behavior statistics."""
 
-    def __init__(self, config: TrustCalibrationConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: TrustCalibrationConfig | None = None,
+        strict: bool = False,
+    ) -> None:
+        self._init_degradation(strict)
         self.config = config or TrustCalibrationConfig()
 
     @staticmethod
@@ -63,6 +69,19 @@ class TrustCalibrator:
 
         contradiction_rate = self._contradiction_rate(assertions)
         evidence_agreement = self._evidence_agreement(assertions)
+        if evidence_agreement is None:
+            # Nothing carried evidence, so the two weights that agreement
+            # drives are left where they are rather than fitted to a number
+            # nobody measured.
+            self._degrade(
+                f"none of the {len(assertions)} assertions in this graph carry "
+                f"evidence text, so evidence agreement could not be measured "
+                f"and w_freq and w_conf are left unfitted"
+            )
+            self.config.w_src = max(
+                0.05, self.config.w_src * (1.0 - 0.4 * contradiction_rate)
+            )
+            return self.to_dict()
 
         self.config.w_src = max(
             0.05, self.config.w_src * (1.0 - 0.4 * contradiction_rate)
@@ -103,17 +122,31 @@ class TrustCalibrator:
         total = max(len(grouped), 1)
         return contradictory_groups / total
 
-    @staticmethod
-    def _evidence_agreement(assertions: list[Assertion]) -> float:
-        if not assertions:
-            return 0.0
-        with_evidence = 0
+    def _evidence_agreement(self, assertions: list[Assertion]) -> float | None:
+        """The share of evidenced assertions whose evidence agrees with itself.
+
+        ``len(texts) <= 1`` counted an assertion with *no* evidence as
+        agreeing, so a graph of unevidenced assertions scored perfect
+        agreement and inflated w_freq and w_conf through fit_from_graph. An
+        assertion with nothing to agree about is not agreement; it is not a
+        measurement at all, so it is left out of both sides of the ratio.
+
+        ``None`` when no assertion carries evidence: there is nothing to
+        measure, and a zero there would read as total disagreement.
+        """
+        agreeing = 0
+        evidenced = 0
         for assertion in assertions:
             texts = {
                 str(item.text).strip().lower()
                 for item in assertion.evidence
                 if getattr(item, "text", "").strip()
             }
-            if len(texts) <= 1:
-                with_evidence += 1
-        return with_evidence / max(len(assertions), 1)
+            if not texts:
+                continue
+            evidenced += 1
+            if len(texts) == 1:
+                agreeing += 1
+        if not evidenced:
+            return None
+        return agreeing / evidenced

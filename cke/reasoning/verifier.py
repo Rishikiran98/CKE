@@ -147,6 +147,26 @@ class ReasoningVerifier:
                     return False, "operator_result_invalid"
                 continue
 
+            if operator_name == "compare_selection":
+                # Recomputed rather than trusted: this outcome names a winner
+                # rather than a boolean, so the branch above cannot check it,
+                # and for want of this branch it was skipped entirely.
+                if not isinstance(inputs, tuple) or len(inputs) != 6:
+                    return False, "operator_inputs_missing"
+                left, right, operator, if_true, if_false, underlying = inputs
+                try:
+                    recomputed = (
+                        date_compare(str(left), str(right), str(operator))
+                        if str(underlying) == "date_compare"
+                        else numeric_compare(float(left), float(right), str(operator))
+                    )
+                except (TypeError, ValueError):
+                    return False, "operator_result_invalid"
+                expected = if_true if recomputed else if_false
+                if str(result) != str(expected):
+                    return False, "operator_result_invalid"
+                continue
+
             if operator_name == "count":
                 if not isinstance(result, int):
                     return False, "operator_result_invalid"

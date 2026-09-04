@@ -233,12 +233,18 @@ class OperatorExecutor:
             return None
 
         lowered = query.lower()
-        comparator = ">"
-        if any(
-            token in lowered
-            for token in ["older", "earlier", "before", "smaller", "less", "first"]
-        ):
+        descending = ["older", "earlier", "before", "smaller", "less", "first"]
+        ascending = ["newer", "later", "after", "larger", "bigger", "more", "last"]
+        if any(token in lowered for token in descending):
             comparator = "<"
+        elif any(token in lowered for token in ascending):
+            comparator = ">"
+        else:
+            # ">" used to be assumed here, so a comparison whose direction the
+            # question never stated was answered under a guess. The two
+            # answers are opposite, and nothing downstream could tell that one
+            # had been chosen for the caller.
+            return None
 
         if operator_hint == "temporal_compare" or re.search(
             r"\b(19|20)\d{2}\b", matched_values[0][0]
@@ -258,9 +264,22 @@ class OperatorExecutor:
             if bool(outcome.result_value)
             else entities[1].canonical_name
         )
+        # Renaming the operator meant ReasoningVerifier, which recomputes only
+        # the names it knows, silently skipped re-checking this one, and passed
+        # was forced True on the way past. The name stays — the selection is a
+        # different operation from the bare comparison — but the inputs now
+        # carry everything needed to recompute it, and the verifier does.
+        underlying = outcome.operator_name
         outcome.operator_name = "compare_selection"
+        outcome.normalized_inputs = (
+            matched_values[0][0],
+            matched_values[1][0],
+            comparator,
+            entities[0].canonical_name,
+            entities[1].canonical_name,
+            underlying,
+        )
         outcome.result_value = winner
-        outcome.passed = True
         outcome.supporting_facts = [matched_values[0][1], matched_values[1][1]]
         outcome.summary = f"Compared values and selected '{winner}'."
         return outcome
