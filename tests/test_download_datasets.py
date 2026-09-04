@@ -199,12 +199,46 @@ def test_empty_existing_file_is_rejected(tmp_path):
 
 
 def test_real_existing_file_is_reused(tmp_path):
+    """A file the downloader vouched for is reused without a fetch.
+
+    The note is what it is vouched by. Without one this test used to pass by
+    silently downloading the whole split over the network, which is not what
+    "reused" means and is not available on a CI runner.
+    """
     out = tmp_path / "hotpotqa_dev.json"
     _write(out, [_real_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
 
     dl.download_hotpotqa(out)
 
     assert json.loads(out.read_text(encoding="utf-8"))[0]["_id"] == _real_row()["_id"]
+
+
+def test_no_reuse_test_can_pass_by_downloading(monkeypatch, tmp_path):
+    """The guard for the miss above: every fetcher is made to fail, so a test
+    that believes it is exercising reuse cannot quietly reach the network."""
+    for name in (
+        "_try_hf_hotpotqa",
+        "_try_official_wiki2",
+        "_try_hf_musique",
+        "_try_official_locomo",
+    ):
+        monkeypatch.setattr(dl, name, lambda out_path, reasons=None: False)
+
+    out = tmp_path / "hotpotqa_dev.json"
+    _write(out, [_real_row()])
+    dl.sidecar_path(out).write_text(
+        json.dumps({"complete_split": True, "records": 1}), encoding="utf-8"
+    )
+
+    dl.download_hotpotqa(out)  # reuse: no fetcher is called at all
+
+    out_unnoted = tmp_path / "musique_dev.json"
+    _write(out_unnoted, [_musique_row()])
+    with pytest.raises(dl.DatasetUnavailableError):
+        dl.download_musique(out_unnoted)
 
 
 # ---------------------------------------------------------------------------
