@@ -98,9 +98,21 @@ def run_mutation(mutation: Mutation) -> tuple[bool, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", nargs="?", help="run only this suite")
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help=(
+            "print the suite names as a JSON array and exit. The mutation "
+            "workflow builds its job matrix from this rather than repeating "
+            "the names, so a suite added here cannot go unrun in CI."
+        ),
+    )
     args = parser.parse_args()
 
     suites = load_suites()
+    if args.list:
+        print(json.dumps(sorted(suites)))
+        return 0
     if args.suite:
         if args.suite not in suites:
             parser.error(f"unknown suite {args.suite!r}; have {sorted(suites)}")

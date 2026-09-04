@@ -187,6 +187,27 @@
       "old": "name, split=\"validation\", revision=HOTPOTQA_REVISION, **kwargs",
       "new": "name, split=\"validation\", **kwargs",
       "tests": "tests/test_download_datasets.py"
+    },
+    {
+      "label": "the mutation workflow stops running the suite",
+      "path": ".github/workflows/mutation.yml",
+      "old": "        run: python scripts/mutation/mutate.py \"${{ matrix.suite }}\"",
+      "new": "        run: echo skipping \"${{ matrix.suite }}\"",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the job matrix is hardcoded instead of read from the suite file",
+      "path": ".github/workflows/mutation.yml",
+      "old": "        suite: ${{ fromJson(needs.suites.outputs.names) }}",
+      "new": "        suite: [\"reasoning\", \"strict\"]",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the mutation workflow stops running on pull requests",
+      "path": ".github/workflows/mutation.yml",
+      "old": "  push:\n    branches: [main, dev]\n  pull_request:",
+      "new": "  push:\n    branches: [main, dev]",
+      "tests": "tests/test_ci_gates.py"
     }
   ],
   "measurement": [

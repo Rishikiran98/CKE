@@ -1,0 +1,70 @@
+name: Mutation
+
+# Every pull request in this programme has ended with "every mutation was
+# caught", and until now that claim was produced by a command only its author
+# ran. A survivor was found whenever somebody next happened to run the suite.
+# This is the difference between a claim and a check.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The suite names come out of mutations.json rather than being repeated
+  # here, so a suite added to that file cannot be left unrun by forgetting to
+  # list it. Same reason the contract census reads its component list out of
+  # the package instead of holding a copy.
+  suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      names: ${{ steps.read.outputs.names }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: read
+        run: echo "names=$(python scripts/mutation/mutate.py --list)" >> "$GITHUB_OUTPUT"
+
+  mutate:
+    needs: suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # One job per suite, so a survivor names the suite in the job list
+      # rather than in the middle of a long log, and so the wall time is the
+      # slowest suite rather than the sum of all of them. Every mutation runs
+      # pytest, so the sum grows with every mutation added.
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJson(needs.suites.outputs.names) }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the package with its development tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run the ${{ matrix.suite }} mutations
+        # PYTHONDONTWRITEBYTECODE so a mutated module is never served from a
+        # .pyc after the source has been restored. The script clears the
+        # caches too; this is the belt to that pair of braces.
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/mutation/mutate.py "${{ matrix.suite }}"
