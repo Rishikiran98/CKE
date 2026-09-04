@@ -91,6 +91,81 @@ UNMEASURED_TRUNCATION = (
 )
 
 
+def _unique(values) -> list[str]:
+    """The values, in order, without repeats."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            unique.append(value)
+    return unique
+
+
+def gold_documents(item: dict[str, Any], docs: list[dict[str, str]]) -> set[str] | None:
+    """The documents a dataset says hold the answer, as doc_ids.
+
+    Every loader emits ``supporting_facts`` and nothing here read them, so
+    both arms were scored on their answers alone: an arm could reach the
+    right answer from the wrong documents, or the wrong answer while holding
+    the right ones, and the tables could not tell those apart.
+
+    A fact is resolved against the item's own documents rather than by
+    dataset name. The published shapes:
+
+    ``[title, sentence index]``   HotpotQA, 2WikiMultiHopQA
+    ``[title, paragraph index]``  MuSiQue, whose titles repeat within an item
+    ``[dia_id, session number]``  LoCoMo, where the first element is the turn
+
+    Returns ``None`` when any fact names nothing in the item. A recall
+    measured against a gold set that silently lost entries is a number about
+    the resolution failure, not about retrieval.
+    """
+    facts = item.get("supporting_facts") or []
+    if not facts:
+        return None
+
+    by_id = {str(doc.get("doc_id")): doc for doc in docs}
+    by_title: dict[str, list[str]] = {}
+    for doc in docs:
+        by_title.setdefault(str(doc.get("title", "")), []).append(
+            str(doc.get("doc_id"))
+        )
+
+    gold: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, (list, tuple)) or not fact:
+            return None
+        first = str(fact[0])
+        if first in by_id:
+            gold.add(first)
+            continue
+        keyed = f"{first}_{fact[1]}" if len(fact) > 1 else first
+        if keyed in by_id:
+            gold.add(keyed)
+            continue
+        candidates = by_title.get(first, [])
+        if len(candidates) == 1:
+            gold.add(candidates[0])
+            continue
+        # Either the title names no document in this item, or it names
+        # several and nothing here says which.
+        return None
+    return gold or None
+
+
+def _retrieval_recall(retrieved, gold_docs: set[str] | None) -> float | None:
+    """The share of the gold documents this arm's context actually held.
+
+    ``None`` when the arm cannot say which documents it retrieved, or the
+    dataset's facts did not resolve. Zero means the arm retrieved none of
+    them, which is a measurement; the two must not look alike.
+    """
+    if gold_docs is None or retrieved is None:
+        return None
+    return round(len(gold_docs & {str(doc) for doc in retrieved}) / len(gold_docs), 4)
+
+
 def _truncation_of(answerer) -> tuple[bool | None, int | None]:
     """What the answerer cut on its last call, or ``None`` when it cannot tell.
 
@@ -137,6 +212,7 @@ class RAGPipeline:
             return {
                 "answer": "",
                 "prompt_tokens": self._counter.count(question),
+                "completion_tokens": 0,
                 "latency_ms": 0.0,
                 "retrieved_texts": [],
                 "k": k,
@@ -155,9 +231,11 @@ class RAGPipeline:
             ) from exc
 
         retrieved_texts = [str(r.get("text", "")) for r in results]
+        retrieved_docs = _unique(str(r["doc_id"]) for r in results if r.get("doc_id"))
         context = "\n".join(retrieved_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        completion_tokens = self._counter.count(answer)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -166,8 +244,10 @@ class RAGPipeline:
             "answer_truncated": truncated,
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "retrieved_texts": retrieved_texts,
+            "retrieved_doc_ids": retrieved_docs,
             "k": k,
         }
 
@@ -206,6 +286,12 @@ class CKELitePipeline:
                     st.relation,
                     st.object,
                     confidence=st.confidence,
+                    # The document this statement was read out of. The graph
+                    # accepted a source all along and this loop dropped it, so
+                    # a retrieved statement could not be traced to a document
+                    # and this arm's recall against the supporting facts could
+                    # not be computed while the dense arm's could.
+                    source=doc.get("doc_id"),
                 )
                 total_statements += 1
 
@@ -242,9 +328,11 @@ class CKELitePipeline:
             f"{e.get('subject', '')} {e.get('relation', '')} {e.get('object', '')}"
             for e in evidence
         ]
+        retrieved_docs = _unique(str(e["source"]) for e in evidence if e.get("source"))
         context = "\n".join(stmt_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        completion_tokens = self._counter.count(answer)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -253,10 +341,12 @@ class CKELitePipeline:
             "answer_truncated": truncated,
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "n_statements": len(evidence),
             "total_extracted": total_statements,
             "retrieved_statements": stmt_texts,
+            "retrieved_doc_ids": retrieved_docs,
             "n": n,
         }
 
@@ -351,6 +441,7 @@ class HybridPipeline:
         context = "\n".join(all_texts)
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
+        completion_tokens = self._counter.count(answer)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -359,8 +450,16 @@ class HybridPipeline:
             "answer_truncated": truncated,
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "n_statements": n_statements,
+            # This arm cannot say which documents its context came from. Its
+            # graph half carries a source per statement, but the dense half
+            # arrives as EvidencePack.fallback_chunks, a list[str] with the
+            # doc_ids already dropped. A recall computed over the graph half
+            # alone would understate an arm that answered from a chunk, so
+            # this reports nothing rather than half a measurement.
+            "retrieved_doc_ids": None,
             "mode": mode,
             "n": n,
             "fallback_rate": (
@@ -376,7 +475,12 @@ class HybridPipeline:
 # ---------------------------------------------------------------------------
 
 
-def _score_row(r: dict[str, Any], gold: str, *extra: str) -> dict[str, Any]:
+def _score_row(
+    r: dict[str, Any],
+    gold: str,
+    *extra: str,
+    gold_docs: set[str] | None = None,
+) -> dict[str, Any]:
     """One per-configuration row, scored.
 
     Six hand-written dict literals used to do this, each copying a fixed list
@@ -388,7 +492,12 @@ def _score_row(r: dict[str, Any], gold: str, *extra: str) -> dict[str, Any]:
     scored = {
         "answer": r["answer"],
         "prompt_tokens": r["prompt_tokens"],
+        # What the answer itself cost. The token figures in every table so far
+        # counted only what went in, and a context-size comparison that
+        # ignores what comes out is half a cost.
+        "completion_tokens": r.get("completion_tokens"),
         "latency_ms": r["latency_ms"],
+        "retrieval_recall": _retrieval_recall(r.get("retrieved_doc_ids"), gold_docs),
         "answer_truncated": r.get("answer_truncated"),
         "answer_dropped_tokens": r.get("answer_dropped_tokens"),
         "em": EvaluationMetrics.exact_match(r["answer"], gold),
@@ -433,6 +542,7 @@ def run_dataset(
         question = item.get("question", "")
         gold = item.get("answer", "")
         docs = _docs_from_item(item)
+        gold_docs = gold_documents(item, docs)
 
         if verbose or (idx % 50 == 0):
             print(f"  [{idx+1}/{total}] {question[:60]}...")
@@ -443,31 +553,36 @@ def run_dataset(
             "question": question,
             "gold_answer": gold,
             "n_docs": len(docs),
+            # Named, not just counted, so a recall figure can be checked
+            # against the documents it was computed over.
+            "gold_doc_ids": sorted(gold_docs) if gold_docs else None,
         }
 
         # --- RAG k=5 ---
         r = rag_pipeline.run_item(question, docs, k=5)
-        row["rag_k5"] = _score_row(r, gold)
+        row["rag_k5"] = _score_row(r, gold, gold_docs=gold_docs)
 
         # --- RAG k=10 ---
         r = rag_pipeline.run_item(question, docs, k=10)
-        row["rag_k10"] = _score_row(r, gold)
+        row["rag_k10"] = _score_row(r, gold, gold_docs=gold_docs)
 
         # --- CKE-lite N=8 ---
         r = cke_pipeline.run_item(question, docs, n=8)
-        row["cke_n8"] = _score_row(r, gold, "n_statements")
+        row["cke_n8"] = _score_row(r, gold, "n_statements", gold_docs=gold_docs)
 
         # --- CKE-lite N=12 ---
         r = cke_pipeline.run_item(question, docs, n=12)
-        row["cke_n12"] = _score_row(r, gold, "n_statements")
+        row["cke_n12"] = _score_row(r, gold, "n_statements", gold_docs=gold_docs)
 
         # --- CKE-lite N=20 ---
         r = cke_pipeline.run_item(question, docs, n=20)
-        row["cke_n20"] = _score_row(r, gold, "n_statements")
+        row["cke_n20"] = _score_row(r, gold, "n_statements", gold_docs=gold_docs)
 
         # --- Hybrid N=12, k_fallback=3 ---
         r = hybrid_pipeline.run_item(question, docs, n=12, k_fallback=3)
-        row["hybrid_n12"] = _score_row(r, gold, "n_statements", "mode")
+        row["hybrid_n12"] = _score_row(
+            r, gold, "n_statements", "mode", gold_docs=gold_docs
+        )
 
         results.append(row)
 
@@ -483,8 +598,16 @@ CONFIGS = ["rag_k5", "rag_k10", "cke_n8", "cke_n12", "cke_n20", "hybrid_n12"]
 
 def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
     """Compute mean EM, mean F1, median tokens, median latency per config."""
-    agg: dict[str, dict[str, list[float]]] = {
-        c: {"em": [], "f1": [], "tokens": [], "latency_ms": [], "truncated": []}
+    agg: dict[str, dict[str, list[Any]]] = {
+        c: {
+            "em": [],
+            "f1": [],
+            "tokens": [],
+            "completion": [],
+            "latency_ms": [],
+            "truncated": [],
+            "recall": [],
+        }
         for c in CONFIGS
     }
 
@@ -497,7 +620,9 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             agg[cfg]["truncated"].append(d.get("answer_truncated"))
             agg[cfg]["f1"].append(d.get("f1", 0.0))
             agg[cfg]["tokens"].append(d.get("prompt_tokens", 0))
+            agg[cfg]["completion"].append(d.get("completion_tokens"))
             agg[cfg]["latency_ms"].append(d.get("latency_ms", 0.0))
+            agg[cfg]["recall"].append(d.get("retrieval_recall"))
 
     result: dict[str, dict[str, float]] = {}
     for cfg, lists in agg.items():
@@ -510,6 +635,19 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             "median_latency_ms": round(statistics.median(lists["latency_ms"]), 2),
             "n": len(lists["em"]),
         }
+        completion = [tokens for tokens in lists["completion"] if tokens is not None]
+        if len(completion) == len(lists["em"]):
+            result[cfg]["median_completion_tokens"] = round(
+                statistics.median(completion), 1
+            )
+            result[cfg]["total_completion_tokens"] = int(sum(completion))
+        # Recall over the items whose supporting facts resolved. An arm that
+        # cannot name its documents, or a dataset whose facts name nothing in
+        # the item, contributes no measurement rather than a zero.
+        measured = [value for value in lists["recall"] if value is not None]
+        if measured:
+            result[cfg]["retrieval_recall"] = round(sum(measured) / len(measured), 4)
+            result[cfg]["recall_measured_items"] = len(measured)
         # Which arm the answerer's window cut. One answerer serves every arm,
         # so its shared totals cannot say; this can — but only when the
         # answerer measured. An unmeasured item carries None, and a count
@@ -555,11 +693,19 @@ def produce_comparison_table(
         lines += [header, sep]
 
         def row(label: str, key: str, fmt: str = "{:.4f}") -> str:
-            vals = [metrics.get(c, {}).get(key, float("nan")) for c in CONFIGS]
             cells = []
-            for v in vals:
+            for cfg in CONFIGS:
+                # Two different absences, which "nan" used to render alike:
+                # an arm this run never executed, and an arm that ran without
+                # producing this particular figure.
+                if cfg not in metrics:
+                    cells.append("not run")
+                    continue
+                if key not in metrics[cfg]:
+                    cells.append("not measured")
+                    continue
                 try:
-                    cells.append(fmt.format(v))
+                    cells.append(fmt.format(metrics[cfg][key]))
                 except (ValueError, TypeError):
                     cells.append("n/a")
             return f"| {label} | " + " | ".join(cells) + " |"
@@ -567,6 +713,15 @@ def produce_comparison_table(
         lines.append(row("Answer EM", "em"))
         lines.append(row("Answer F1", "f1"))
         lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
+        if any("median_completion_tokens" in metrics.get(c, {}) for c in CONFIGS):
+            lines.append(
+                row("Median completion tokens", "median_completion_tokens", "{:.0f}")
+            )
+        if any("retrieval_recall" in metrics.get(c, {}) for c in CONFIGS):
+            lines.append(row("Recall of supporting docs", "retrieval_recall"))
+            lines.append(
+                row("Items recall measured on", "recall_measured_items", "{:.0f}")
+            )
         lines.append(row("Median latency (ms)", "median_latency_ms", "{:.1f}"))
         if hasattr(answerer, "truncation"):
             if any("truncated_items" in metrics.get(c, {}) for c in CONFIGS):
@@ -815,6 +970,22 @@ def produce_summary(
         "prompt_token_figures_are_estimates": token_counter.is_estimate,
         "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
+        # What each arm's answers cost to produce, beside what they cost to
+        # ask. Absent rather than zero when an arm did not report it.
+        "rag_k10_median_completion_tokens": rag.get("median_completion_tokens"),
+        "cke_n12_median_completion_tokens": cke.get("median_completion_tokens"),
+        # Whether the context held the documents the dataset says the answer
+        # needs. An answer scored right from the wrong documents and an
+        # answer scored wrong while holding the right ones read alike in EM
+        # and F1; this is what tells them apart.
+        "retrieval_recall": {
+            cfg: {
+                "recall": combined[cfg]["retrieval_recall"],
+                "items": combined[cfg]["recall_measured_items"],
+            }
+            for cfg in CONFIGS
+            if "retrieval_recall" in combined.get(cfg, {})
+        },
         "answers_produced_by": answerer.description,
         # What actually ran, captured after the models loaded: their identity
         # at commit level, the versions of the libraries around them, and

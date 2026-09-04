@@ -335,6 +335,11 @@ class GraphRetriever:
             "object": st.object,
             "trust": float(st.confidence),
             "trust_score": float(st.confidence),
+            # Which document this came from, when the caller recorded one.
+            # Without it a retrieved statement cannot be checked against the
+            # dataset's supporting facts, so the graph arm's recall could not
+            # be measured at all while the dense arm's could.
+            "source": st.source,
         }
 
     def _bfs_traversal(
