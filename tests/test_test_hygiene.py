@@ -234,6 +234,12 @@ MAY_READ_SOURCE = {
 }
 
 
+def _spells_python_source(node: ast.AST) -> bool:
+    """Whether *node* is an expression naming a Python file."""
+    text = ast.unparse(node)
+    return ".py" in text or "__file__" in text
+
+
 def _source_reads(path: pathlib.Path) -> list[str]:
     """Every call in *path* that reads Python source, found in the AST.
 
@@ -244,18 +250,21 @@ def _source_reads(path: pathlib.Path) -> list[str]:
     """
     tree = ast.parse(path.read_text())
 
-    #: Locals assigned from an expression naming a .py file, so that
-    #: `target = ROOT / "x.py"` followed by `target.read_text()` is seen.
+    #: Locals assigned from an expression that names Python source, so that
+    #: `target = ROOT / "x.py"` followed by `target.read_text()` is seen, and
+    #: so is `source = importlib.import_module(...).__file__` — a module's
+    #: __file__ spells no ".py" anywhere, which is how a real source-text
+    #: assertion in test_api_server_import.py walked past the first version
+    #: of this. Codex found it on #105.
     python_paths = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and ".py" in ast.unparse(node.value):
+        if isinstance(node, ast.Assign) and _spells_python_source(node.value):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     python_paths.add(target.id)
 
     def _names_python_source(node: ast.AST) -> bool:
-        text = ast.unparse(node)
-        return ".py" in text or any(name in python_paths for name in (text,))
+        return _spells_python_source(node) or ast.unparse(node) in python_paths
 
     found = []
     for node in ast.walk(tree):

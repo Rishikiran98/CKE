@@ -23,11 +23,30 @@ def test_module_imports_regardless_of_fastapi():
 
 
 def test_app_is_not_built_at_import_time():
-    """No module-scope `app` binding; it is produced on attribute access."""
-    source = importlib.import_module("cke.api.server").__file__
-    with open(source, encoding="utf-8") as handle:
-        text = handle.read()
-    assert "\napp = create_app()" not in text
+    """No module-scope `app` binding; it is produced on attribute access.
+
+    This used to read the module's own source through its __file__ and assert
+    that the string "\napp = create_app()" did not appear in it. That is an
+    assertion about a spelling: it passes on `app=create_app()` without the
+    space, on the binding being built in any other way, and on a comment
+    mentioning it. Import the module and look at what is actually bound.
+    """
+    module = importlib.reload(server)
+
+    assert "app" not in vars(module), (
+        "the app was built at import time; it must be produced by "
+        "__getattr__ on first access so the module imports without fastapi"
+    )
+
+    built = []
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(module, "get_app", lambda: built.append("app") or "an app")
+        assert module.app == "an app"
+    finally:
+        monkeypatch.undo()
+
+    assert built == ["app"], "attribute access did not build the app"
 
 
 @pytest.mark.parametrize("module", [server, cke.api])

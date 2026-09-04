@@ -456,6 +456,20 @@
       "old": "MAY_READ_SOURCE = {\n    \"test_benchmark_token_counting.py\": (",
       "new": "MAY_READ_SOURCE = {\n    \"test_orchestrator_pipeline_skeleton.py\": (\n        \"A stale entry: this file reads no source, so listing it here \"\n        \"would let a getsource into it pass unchallenged.\"\n    ),\n    \"test_benchmark_token_counting.py\": (",
       "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "a test reads source through a module's __file__, evading the guard",
+      "path": "tests/test_orchestrator_pipeline_skeleton.py",
+      "old": "def test_pipeline_skeleton_runs():",
+      "new": "def test_reads_source_via_dunder_file():\n    import importlib\n\n    source = importlib.import_module(\"cke.models\").__file__\n    with open(source, encoding=\"utf-8\") as handle:\n        assert \"class\" in handle.read()\n\n\ndef test_pipeline_skeleton_runs():",
+      "tests": "tests/test_test_hygiene.py"
+    },
+    {
+      "label": "the api app is built at import time again",
+      "path": "cke/api/server.py",
+      "old": "def __getattr__(name: str):",
+      "new": "app = None\n\n\ndef __getattr__(name: str):",
+      "tests": "tests/test_api_server_import.py"
     }
   ]
 }
