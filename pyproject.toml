@@ -60,21 +60,45 @@ ignore_missing_imports = true
 follow_imports = "silent"
 warn_unused_configs = true
 files = [
+    # Declaration-only modules, where the ratchet started.
     "cke/models.py",
     "cke/pipeline/types.py",
     "cke/retrieval/path_types.py",
     "cke/schema",
+    # Logic. The list held six files, every one of them a dataclass or enum
+    # module, so nothing that decides anything was checked. These are the
+    # modules that already pass; the rest of the package is the work ahead.
+    "cke/diagnostics.py",
+    "cke/datasets/hotpot_loader.py",
+    "cke/datasets/locomo_loader.py",
+    "cke/datasets/musique_loader.py",
+    "cke/datasets/wiki2_loader.py",
+    "cke/evaluation/span_qa.py",
+    "cke/evaluation/token_counter.py",
+    "cke/observability/token_tracker.py",
+    "cke/reasoning/reasoner_adapter.py",
+    "cke/reasoning/verifier.py",
+    "cke/trust/confidence_calibrator.py",
 ]
 
 [tool.coverage.run]
-source = ["cke"]
+# scripts/ is measured. It was not, and it holds the benchmark driver and the
+# downloaders — the code that produces every number this project reports —
+# so the floor guarded the library while the drivers went unmeasured.
+source = ["cke", "scripts"]
+branch = true
 
 [tool.coverage.report]
-# The floor. It is the value measured when coverage was first enforced,
-# and it only rises: tests/test_coverage_floor.py pins it, so lowering it
-# fails a test a reviewer can see. pytest-cov reads it, so a run under
-# `pytest --cov=cke` fails below it.
-fail_under = 82.5
+# The floor. It only rises within a scope, and tests/test_coverage_floor.py
+# pins both the floor and the scope, so lowering either fails a test a
+# reviewer can see.
+#
+# It reads lower than the 82.5 it replaced, and it is not the same
+# measurement: 82.5 was statement coverage of cke/ alone, this is branch
+# coverage of cke/ and scripts/ together. Widening what is measured and
+# counting branches both add uncovered ground; the number went down because
+# it now describes more of the repository, which is the point.
+fail_under = 78.0
 precision = 2
 skip_covered = true
 

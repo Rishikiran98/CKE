@@ -188,5 +188,35 @@
       "new": "name, split=\"validation\", **kwargs",
       "tests": "tests/test_download_datasets.py"
     }
+  ],
+  "measurement": [
+    {
+      "label": "coverage stops measuring the drivers",
+      "path": "pyproject.toml",
+      "old": "source = [\"cke\", \"scripts\"]",
+      "new": "source = [\"cke\"]",
+      "tests": "tests/test_coverage_floor.py"
+    },
+    {
+      "label": "coverage stops counting branches",
+      "path": "pyproject.toml",
+      "old": "branch = true",
+      "new": "branch = false",
+      "tests": "tests/test_coverage_floor.py"
+    },
+    {
+      "label": "the coverage floor is lowered",
+      "path": "pyproject.toml",
+      "old": "fail_under = 78.0",
+      "new": "fail_under = 40.0",
+      "tests": "tests/test_coverage_floor.py"
+    },
+    {
+      "label": "the mypy list shrinks back to declarations only",
+      "path": "pyproject.toml",
+      "old": "    \"cke/diagnostics.py\",\n    \"cke/datasets/hotpot_loader.py\",",
+      "new": "    \"cke/datasets/hotpot_loader.py\",",
+      "tests": "tests/test_typecheck_ratchet.py"
+    }
   ]
 }
