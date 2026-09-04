@@ -348,5 +348,28 @@
       "new": "def test_the_count_is_not_a_function_of_the_word_count(counter):",
       "tests": "tests/test_test_hygiene.py"
     }
+  ],
+  "aliases": [
+    {
+      "label": "the orchestrator registers detected entities as canonical again",
+      "path": "cke/pipeline/query_orchestrator.py",
+      "old": "        candidate_entities = self.router.detect_entities(query)\n",
+      "new": "        candidate_entities = self.router.detect_entities(query)\n        for _e in candidate_entities:\n            self.entity_resolver.register_alias(_e, _e)\n",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "a name the resolver cannot place scores as high as an alias hit",
+      "path": "cke/entity_resolution/entity_resolver.py",
+      "old": "        return ResolutionResult(\n            canonical=canonical,\n            confidence=max(best_fuzzy, best_emb, 0.50),\n        )",
+      "new": "        return ResolutionResult(\n            canonical=canonical,\n            confidence=max(best_fuzzy, best_emb, 0.95),\n        )",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    },
+    {
+      "label": "the alias registry stops being consulted at all",
+      "path": "cke/entity_resolution/entity_resolver.py",
+      "old": "        resolved = self.registry.resolve(name)\n        if resolved:\n            return ResolutionResult(canonical=resolved, confidence=0.90)",
+      "new": "        resolved = None\n        if resolved:\n            return ResolutionResult(canonical=resolved, confidence=0.90)",
+      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
+    }
   ]
 }

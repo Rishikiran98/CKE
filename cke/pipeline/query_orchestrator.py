@@ -107,8 +107,14 @@ class QueryOrchestrator(DegradationMixin):
         trace_id = str(uuid4())
 
         candidate_entities = self.router.detect_entities(query)
-        for entity in candidate_entities:
-            self.entity_resolver.register_alias(entity, entity)
+        # The detected surface forms are passed to resolve_mentions below and
+        # nothing else needs them. They used to be registered here as aliases
+        # for themselves first, which made each one a canonical entity —
+        # and resolve_with_score checks canonical names before it consults the
+        # alias registry, so the mention that should have triggered an alias
+        # was what shadowed it. A resolver configured with
+        # "Chris Nolan" -> "Christopher Nolan" resolved "Chris Nolan" to
+        # itself, on every query, for as long as the router detected it.
         resolved_entities = self.entity_resolver.resolve_mentions(
             query,
             candidate_entities=candidate_entities,
