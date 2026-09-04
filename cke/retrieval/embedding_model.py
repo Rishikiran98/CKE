@@ -14,7 +14,11 @@ from typing import Iterable
 
 import numpy as np
 
-from cke.diagnostics import DegradationMixin, record_loaded_model
+from cke.diagnostics import (
+    DegradationMixin,
+    record_loaded_model,
+    revision_pin_problem,
+)
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -24,13 +28,24 @@ except ImportError:  # pragma: no cover - optional runtime dependency
 
 logger = logging.getLogger(__name__)
 
-_GLOBAL_MODEL_CACHE: dict[str, object] = {}
+DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-#: Why a model failed to load, by model name. A failed load is never cached as
-#: a usable model, but it is remembered so that constructing many instances
-#: does not re-attempt a download per instance. The recorded cause is reused,
-#: so a later strict construction still raises for the original reason.
-_FAILED_MODEL_LOADS: dict[str, str] = {}
+#: The Hub commit the default embedder is pinned to. Without it the Hub
+#: serves whatever "main" points at on the day of the run, and two runs of
+#: the same command could embed with different weights while reporting the
+#: same model name. This is the commit the vectors behind every figure in
+#: this repository were produced with.
+DEFAULT_EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+
+#: Loaded models, keyed by name *and* revision. Keying on the name alone
+#: would hand a caller that asked for one commit the weights of another.
+_GLOBAL_MODEL_CACHE: dict[tuple[str, str], object] = {}
+
+#: Why a model failed to load, by name and revision. A failed load is never
+#: cached as a usable model, but it is remembered so that constructing many
+#: instances does not re-attempt a download per instance. The recorded cause is
+#: reused, so a later strict construction still raises for the original reason.
+_FAILED_MODEL_LOADS: dict[tuple[str, str], str] = {}
 
 #: Width of the hashed fallback vector. Not a semantic embedding dimension.
 FALLBACK_DIM = 128
@@ -41,6 +56,10 @@ class EmbeddingModel(DegradationMixin):
 
     Args:
         model_name: sentence-transformers model identifier.
+        model_revision: the 40-character Hub commit to load. Defaults to
+            :data:`DEFAULT_EMBEDDING_REVISION` for the default model; for any
+            other model it must be given, because a name on its own does not
+            say which weights will arrive.
         strict: when True, raise :class:`~cke.diagnostics.DegradedComponentError`
             rather than falling back to hashed vectors. Every evaluation and
             benchmark path must pass ``strict=True``.
@@ -48,13 +67,17 @@ class EmbeddingModel(DegradationMixin):
 
     def __init__(
         self,
-        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        model_name: str = DEFAULT_EMBEDDING_MODEL,
+        model_revision: str | None = None,
         strict: bool = False,
     ) -> None:
         self._init_degradation(strict)
         self.model_name = model_name
+        if model_revision is None and model_name == DEFAULT_EMBEDDING_MODEL:
+            model_revision = DEFAULT_EMBEDDING_REVISION
+        self.model_revision = model_revision
         self._measured_dimension: int | None = None
-        self.model = self._load_model(model_name)
+        self.model = self._load_model(model_name, model_revision)
 
     @property
     def dimension(self) -> int:
@@ -103,13 +126,21 @@ class EmbeddingModel(DegradationMixin):
             [self._fallback_embed(t) for t in text_list], dtype=np.float32
         )
 
-    def _load_model(self, model_name: str):
+    def _load_model(self, model_name: str, model_revision: str | None):
         """Load the sentence transformer, or declare the degradation."""
-        cached = _GLOBAL_MODEL_CACHE.get(model_name)
+        pin_problem = revision_pin_problem(model_name, model_revision)
+        if pin_problem is not None:
+            # Asked before the cache, so an unpinned request is refused rather
+            # than served whatever commit a previous caller happened to load.
+            self._degrade(pin_problem)
+            return None
+
+        key = (model_name, model_revision)
+        cached = _GLOBAL_MODEL_CACHE.get(key)
         if cached is not None:
             return cached
 
-        previous_failure = _FAILED_MODEL_LOADS.get(model_name)
+        previous_failure = _FAILED_MODEL_LOADS.get(key)
         if previous_failure is not None:
             self._degrade(previous_failure)
             return None
@@ -125,7 +156,7 @@ class EmbeddingModel(DegradationMixin):
             return None
 
         try:
-            model = SentenceTransformer(model_name)
+            model = SentenceTransformer(model_name, revision=model_revision)
         except Exception as exc:  # noqa: BLE001 - download/runtime failures vary
             # A failed load is never cached as a usable model. Its cause is
             # remembered instead, so a caller that builds one instance per
@@ -137,13 +168,14 @@ class EmbeddingModel(DegradationMixin):
                 f"tokens into a {FALLBACK_DIM}-dimension sparse vector instead "
                 "of being embedded semantically"
             )
-            _FAILED_MODEL_LOADS[model_name] = reason
+            _FAILED_MODEL_LOADS[key] = reason
             self._degrade(reason)
             return None
 
-        _GLOBAL_MODEL_CACHE[model_name] = model
-        record_loaded_model("EmbeddingModel", model_name, model_name)
-        logger.info("EmbeddingModel loaded %s", model_name)
+        loaded = f"{model_name}@{model_revision}"
+        _GLOBAL_MODEL_CACHE[key] = model
+        record_loaded_model("EmbeddingModel", model_name, loaded)
+        logger.info("EmbeddingModel loaded %s", loaded)
         return model
 
     @staticmethod

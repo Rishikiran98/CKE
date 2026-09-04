@@ -27,6 +27,7 @@ import importlib.metadata
 import importlib.util
 import logging
 import platform
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -46,6 +47,7 @@ __all__ = [
     "record_degradation",
     "record_loaded_model",
     "require_strict_component",
+    "revision_pin_problem",
 ]
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,42 @@ def record_degradation(component: str, reason: str) -> None:
     record = DegradationRecord(component=component, reason=reason)
     if record not in _DEGRADATIONS:
         _DEGRADATIONS.append(record)
+
+
+#: What a pin is: a full commit hash. The Hub also accepts a branch or a tag
+#: as a ``revision``, and both move — "main" names whatever was pushed last,
+#: and a tag can be re-pointed — so a run given one would load different
+#: weights on a different day while reporting itself pinned. A short hash is
+#: refused too: it is a prefix, and resolves to whatever the Hub matches it
+#: against.
+_COMMIT_HASH = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def revision_pin_problem(model_name: str, revision: str | None) -> str | None:
+    """Why *revision* fails to pin *model_name*, or ``None`` when it pins it.
+
+    A model name alone is not a model: the Hub can serve different weights
+    under the same name tomorrow, and a number whose weights can change
+    underneath it is not reproducible. Every component that loads weights from
+    the Hub asks this before loading, and declares the returned reason through
+    the degradation contract.
+    """
+    if not revision:
+        return (
+            f"no revision is pinned for {model_name!r}, so which weights would "
+            f"load depends on what the Hub serves at the moment of loading, "
+            f"and no figure produced would be reproducible. Pass the "
+            f"40-character commit sha from the model's Hub page"
+        )
+    if not _COMMIT_HASH.fullmatch(revision):
+        return (
+            f"revision {revision!r} for {model_name!r} is not a full commit "
+            f"hash. A branch or tag names whatever the Hub holds under it "
+            f"today and something else tomorrow, so weights loaded through it "
+            f"cannot be reproduced. Pass the 40-character commit sha from the "
+            f"model's Hub page"
+        )
+    return None
 
 
 def record_loaded_model(component: str, requested: str, loaded: str) -> None:

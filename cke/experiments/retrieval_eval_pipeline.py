@@ -53,7 +53,10 @@ from cke.diagnostics import (
     environment_report,
     require_strict_component,
 )
-from cke.retrieval.embedding_model import EmbeddingModel
+from cke.retrieval.embedding_model import (
+    DEFAULT_EMBEDDING_MODEL,
+    EmbeddingModel,
+)
 from cke.retrieval.faiss_index import FaissIndex
 
 __all__ = [
@@ -67,7 +70,7 @@ __all__ = [
     "run_pipeline",
 ]
 
-DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+DEFAULT_MODEL_NAME = DEFAULT_EMBEDDING_MODEL
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,8 @@ class DenseRetriever(DegradationMixin):
 
     Args:
         model_name: sentence-transformers model identifier.
+        model_revision: the 40-character Hub commit to load. Defaults to the
+            pin for the default model; another model needs its own.
         embedding_model: an embedder to reuse. Under ``strict`` it must
             itself be strict and not already degraded.
         strict: when True, refuse to construct on a hashed embedder or a
@@ -181,6 +186,7 @@ class DenseRetriever(DegradationMixin):
     def __init__(
         self,
         model_name: str = DEFAULT_MODEL_NAME,
+        model_revision: str | None = None,
         embedding_model: EmbeddingModel | None = None,
         strict: bool = False,
     ) -> None:
@@ -189,9 +195,12 @@ class DenseRetriever(DegradationMixin):
             type(self).__name__, embedding_model, "embedding model", strict
         )
         self.embedding_model = embedding_model or EmbeddingModel(
-            model_name, strict=strict
+            model_name, model_revision, strict=strict
         )
         self.model_name = str(getattr(self.embedding_model, "model_name", model_name))
+        #: The identity a reader of the numbers needs: a name says which model
+        #: was asked for, the commit says which weights answered.
+        self.model_revision = getattr(self.embedding_model, "model_revision", None)
         self.index = FaissIndex(strict=strict)
         self.documents: list[CorpusDocument] = []
 
@@ -417,7 +426,7 @@ def evaluate_recall_at_k(
 def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, float]:
     """Index the corpus, run both query sets, print and return Recall@k."""
     corpus = MSMARCOCorpus(args.msmarco_path, max_docs=args.max_docs, strict=strict)
-    retriever = DenseRetriever(args.model_name, strict=strict)
+    retriever = DenseRetriever(args.model_name, args.model_revision, strict=strict)
     retriever.build_index(corpus.documents, batch_size=args.batch_size)
 
     query_sets = {
@@ -442,7 +451,7 @@ def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, flo
 
     print("=== Retrieval Evaluation Summary ===")
     print(f"MS MARCO docs indexed: {len(corpus.documents)}")
-    print(f"Embedding model: {retriever.model_name}")
+    print(f"Embedding model: {retriever.model_name}@{retriever.model_revision}")
     print(f"top_k: {args.top_k}")
     for name, queries in query_sets.items():
         print(f"{name} queries: {len(queries)}")
@@ -491,6 +500,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--locomo-path", type=Path, required=True, help="Path to LoCoMo JSON/JSONL"
     )
     parser.add_argument("--model-name", type=str, default=DEFAULT_MODEL_NAME)
+    parser.add_argument(
+        "--model-revision",
+        type=str,
+        default=None,
+        help=(
+            "the 40-character Hub commit to load. Defaults to the pin for "
+            "the default model; any other model needs its own, because a "
+            "name alone does not say which weights will arrive."
+        ),
+    )
     parser.add_argument("--top-k", type=_positive_int, default=10)
     parser.add_argument("--batch-size", type=_positive_int, default=64)
     parser.add_argument(

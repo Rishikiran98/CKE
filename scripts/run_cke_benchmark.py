@@ -28,8 +28,11 @@ if str(ROOT) not in sys.path:
 
 from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
 from cke.datasets.musique_loader import MuSiQueDataset  # noqa: E402
-from cke.diagnostics import degradation_summary, environment_report  # noqa: E402
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
+from cke.diagnostics import (  # noqa: E402
+    degradation_summary,
+    environment_report,
+)
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.evaluation.llm_qa import LLMAnswerer  # noqa: E402
 from cke.evaluation.span_qa import SpanExtractiveQA  # noqa: E402
@@ -777,6 +780,12 @@ def produce_summary(
         "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
         "answers_produced_by": answerer.description,
+        # What actually ran, captured after the models loaded: their identity
+        # at commit level, the versions of the libraries around them, and
+        # anything that degraded. The report printed at the start of a run
+        # cannot carry this — nothing has been constructed yet — so a results
+        # file without it cannot say which weights produced its numbers.
+        "environment": environment_report().as_dict(),
         # Whether a model read the context at all. Without it the accuracy
         # columns are a lexical baseline's own figures, and a reader of the
         # results file alone has no way to tell.
@@ -1172,6 +1181,14 @@ def main() -> None:
         json.dumps(summary, indent=2), encoding="utf-8"
     )
     print("[output] summary.json")
+
+    loaded = summary["environment"]["loaded_models"]
+    if loaded:
+        print("[models] identity recorded in summary.json:")
+        for entry in loaded:
+            print(f"    {entry['component']}: {entry['loaded']}")
+    else:
+        print("[models] no model was loaded in this run")
 
     # Print key results
     print("\n" + "=" * 60)

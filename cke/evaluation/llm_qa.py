@@ -43,11 +43,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from urllib import request
 
-from cke.diagnostics import DegradationMixin, record_loaded_model
+from cke.diagnostics import (
+    DegradationMixin,
+    record_loaded_model,
+    revision_pin_problem,
+)
 
 __all__ = ["LLMAnswerer", "PROMPT"]
 
@@ -71,14 +74,6 @@ _DEFAULT_LOCAL_MODEL = "google/flan-t5-base"
 #: and a number whose weights can change underneath it is not reproducible.
 #: This is the commit both measurements in the pull request resolved to.
 _DEFAULT_LOCAL_REVISION = "7bcac572ce56db69c1ea7c8af255c5d7c9672fc2"
-
-#: What a pin is: a full commit hash. The Hub also accepts a branch or a tag
-#: as a ``revision``, and both move — "main" names whatever was pushed last,
-#: and a tag can be re-pointed — so a run given one would load different
-#: weights on a different day while reporting itself pinned. A short hash is
-#: refused too: it is a prefix, and resolves to whatever the Hub matches it
-#: against.
-_COMMIT_HASH = re.compile(r"[0-9a-fA-F]{40}")
 
 
 @dataclass
@@ -182,22 +177,9 @@ class LLMAnswerer(DegradationMixin):
                 f"transformers torch`"
             )
             return
-        if not self.model_revision:
-            self._degrade(
-                f"no revision is pinned for {self.model_name!r}, so which "
-                f"weights would load depends on what the Hub serves at the "
-                f"moment of loading, and no figure produced would be "
-                f"reproducible. Pass model_revision=<commit sha>"
-            )
-            return
-        if not _COMMIT_HASH.fullmatch(self.model_revision):
-            self._degrade(
-                f"revision {self.model_revision!r} for {self.model_name!r} is "
-                f"not a full commit hash. A branch or tag names whatever the "
-                f"Hub holds under it today and something else tomorrow, so "
-                f"weights loaded through it cannot be reproduced. Pass the "
-                f"40-character commit sha from the model's Hub page"
-            )
+        pin_problem = revision_pin_problem(self.model_name, self.model_revision)
+        if pin_problem is not None:
+            self._degrade(pin_problem)
             return
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(

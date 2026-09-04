@@ -277,3 +277,56 @@ def test_an_answerer_that_measures_truncation_reports_the_figures():
     assert truncation["truncated"] == 4
     assert truncation["by_arm"]["rag_k10"]["truncated_items"] == 3
     assert truncation["by_arm"]["cke_n12"]["rate"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# What produced the numbers
+# ---------------------------------------------------------------------------
+
+
+def test_the_summary_records_the_identity_of_every_model_loaded():
+    """A results file that names no commit cannot be reproduced from itself.
+
+    The environment report printed at the start of a run cannot carry this:
+    nothing has been constructed yet, so its model list is empty. The summary
+    is written after the work, which is the only point at which the question
+    "which weights produced these numbers" has an answer.
+    """
+    from cke.diagnostics import clear_runtime_state, record_loaded_model
+
+    clear_runtime_state()
+    try:
+        record_loaded_model("EmbeddingModel", "some/model", "some/model@" + "a" * 40)
+
+        summary = bench.produce_summary({}, TokenCounter(), SpanExtractiveQA())
+        environment = summary["environment"]
+
+        assert {
+            "component": "EmbeddingModel",
+            "requested": "some/model",
+            "loaded": "some/model@" + "a" * 40,
+        } in environment["loaded_models"]
+        assert environment["python_version"]
+        assert environment["platform"]
+        # The libraries around the model move too, and their versions are as
+        # much a part of a number's provenance as the weights are.
+        assert any(dep["import_name"] for dep in environment["dependencies"])
+    finally:
+        clear_runtime_state()
+
+
+def test_the_summary_carries_what_degraded_beside_the_figures():
+    """A degradation printed only to a console is lost the moment it scrolls."""
+    from cke.diagnostics import clear_runtime_state, record_degradation
+
+    clear_runtime_state()
+    try:
+        record_degradation("EmbeddingModel", "it hashed tokens instead")
+
+        summary = bench.produce_summary({}, TokenCounter(), SpanExtractiveQA())
+
+        assert summary["environment"]["degradations"] == [
+            {"component": "EmbeddingModel", "reason": "it hashed tokens instead"}
+        ]
+    finally:
+        clear_runtime_state()
