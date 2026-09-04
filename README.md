@@ -149,9 +149,17 @@ quality claim.
 
 ## Datasets
 
-`scripts/download_datasets.py` fetches HotpotQA and 2WikiMultiHopQA through the
-HuggingFace `datasets` library. It fails with an error if a dataset cannot be
-obtained. It does not generate substitute data.
+`scripts/download_datasets.py` fetches three multi-hop QA dev splits into
+`data/`. HotpotQA and MuSiQue come from the HuggingFace `datasets` library;
+2WikiMultiHopQA comes from the archive its authors publish, because the copies
+on the Hub are either loading scripts that `datasets` 5 will not run or carry
+model-generated questions in place of the originals. Each fails with an error
+naming the dataset and its source if it cannot be obtained. None generates
+substitute data.
+
+`--limit` takes a prefix of a split rather than a sample. MuSiQue's dev split
+is ordered by hop count, so a capped MuSiQue run holds only its two-hop
+questions.
 
 ## License
 

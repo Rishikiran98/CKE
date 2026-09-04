@@ -10,13 +10,27 @@ evaluation can run against substitute data.
 from __future__ import annotations
 
 import json
+import tempfile
+import zipfile
 from pathlib import Path
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 
 HOTPOTQA_SOURCE = "https://huggingface.co/datasets/hotpotqa/hotpot_qa"
-WIKI2_SOURCE = "https://huggingface.co/datasets/xanhho/2WikiMultihopQA"
+WIKI2_SOURCE = "https://github.com/Alab-NII/2wikimultihop"
+
+#: The dataset archive the 2WikiMultiHopQA authors publish from that
+#: repository. Their own release rather than a mirror: a third-party copy
+#: cannot be told from a copy someone has edited, and several on the Hub
+#: carry model-generated questions in place of the originals.
+_WIKI2_ARCHIVE_URL = "https://www.dropbox.com/s/npidmtadreo6df2/data.zip?dl=1"
+
+#: How many times to fetch an archive before giving up. Transfers of this one
+#: are intermittently truncated: of three consecutive attempts here, two
+#: stopped 19 MB and 12 MB short and the third completed.
+_ARCHIVE_ATTEMPTS = 3
 MUSIQUE_SOURCE = "https://huggingface.co/datasets/dgslibisey/MuSiQue"
 
 # Item ids written by the synthetic generator that this script used to carry.
@@ -124,70 +138,94 @@ def _try_hf_hotpotqa(
     return True
 
 
-def _try_hf_wiki2(
+def _stream_archive(url: str, handle, log: list[str]) -> bool:
+    """Copy ``url`` into ``handle``, true only if the whole body arrived.
+
+    ``urlopen``'s ``read`` returns empty on a dropped connection rather than
+    raising, so a truncated body is indistinguishable from a complete one
+    until something downstream chokes on it. Comparing what arrived against
+    ``Content-Length`` is what makes the difference visible; without it a
+    short read becomes a corrupt file, and a corrupt file that happens to
+    parse becomes evaluation data.
+    """
+    handle.seek(0)
+    handle.truncate()
+    with urlopen(url, timeout=600) as response:  # noqa: S310
+        declared = int(response.headers.get("Content-Length") or 0)
+        written = 0
+        while True:
+            chunk = response.read(1 << 20)
+            if not chunk:
+                break
+            handle.write(chunk)
+            written += len(chunk)
+    handle.flush()
+
+    if declared and written != declared:
+        log.append(
+            f"transfer of {url} stopped {declared - written} bytes short "
+            f"of the {declared} it declared"
+        )
+        return False
+    return True
+
+
+def _try_official_wiki2(
     out_path: Path, limit: int | None = None, reasons: list[str] | None = None
 ) -> bool:
-    """Download the 2WikiMultiHopQA dev split via HuggingFace datasets."""
+    """Download the 2WikiMultiHopQA dev split from the authors' release.
+
+    This replaces a HuggingFace attempt that could never have succeeded: it
+    tried one dataset id, ``2wikimultihop``, which does not exist on the Hub,
+    while the source URL it printed on failure named ``xanhho/2WikiMultihopQA``
+    and never tried it. That copy is a loading script, which ``datasets`` 5
+    refuses to execute, so the path was dead at both ends.
+
+    The archive is 246 MB and holds the train, dev and test splits. Only the
+    dev split is read, and it is read from inside the zip so the 682 MB train
+    file is never written to disk.
+
+    Transfers of it are intermittently truncated, so each attempt is checked
+    against the declared length and a short one is retried rather than
+    unpacked.
+    """
     log = reasons if reasons is not None else []
     try:
-        from datasets import load_dataset  # type: ignore
-    except ImportError as exc:
-        log.append(f"`datasets` library not importable: {exc}")
+        with tempfile.NamedTemporaryFile(suffix=".zip") as archive:
+            for attempt in range(1, _ARCHIVE_ATTEMPTS + 1):
+                if _stream_archive(_WIKI2_ARCHIVE_URL, archive, log):
+                    break
+                log.append(f"  (attempt {attempt} of {_ARCHIVE_ATTEMPTS})")
+            else:
+                return False
+
+            with zipfile.ZipFile(archive.name) as bundle:
+                names = [
+                    name
+                    for name in bundle.namelist()
+                    if name.endswith("dev.json") and not name.startswith("__MACOSX")
+                ]
+                if not names:
+                    log.append(
+                        f"archive at {_WIKI2_ARCHIVE_URL} holds no dev.json "
+                        f"(members: {bundle.namelist()[:6]})"
+                    )
+                    return False
+                with bundle.open(names[0]) as handle:
+                    raw = json.load(handle)
+    except Exception as exc:  # noqa: BLE001 - network and archive errors vary
+        log.append(f"download of {_WIKI2_ARCHIVE_URL} failed: {exc}")
         return False
 
-    ds = None
-    for name, cfg in [("2wikimultihop", None)]:
-        try:
-            kwargs: dict = {"trust_remote_code": True}
-            if cfg:
-                kwargs["name"] = cfg
-            ds = load_dataset(name, split="validation", **kwargs)
-            break
-        except Exception as exc:  # noqa: BLE001 - the hub raises varied errors
-            log.append(f"HuggingFace load of {name!r} failed: {exc}")
-
-    if ds is None:
+    if not isinstance(raw, list) or not raw:
+        log.append("the archive's dev.json is not a non-empty JSON list")
         return False
 
-    rows = []
-    for item in ds:
-        context = []
-        titles = (
-            item.get("context", {}).get("title", [])
-            if isinstance(item.get("context"), dict)
-            else []
-        )
-        sentences_list = (
-            item.get("context", {}).get("sentences", [])
-            if isinstance(item.get("context"), dict)
-            else []
-        )
-        if not titles and isinstance(item.get("context"), list):
-            context = item["context"]
-        else:
-            for title, sents in zip(titles, sentences_list):
-                context.append([title, list(sents)])
-        rows.append(
-            {
-                "_id": str(item.get("id", item.get("_id", ""))),
-                "question": item.get("question", ""),
-                "answer": item.get("answer", ""),
-                "context": context,
-                "supporting_facts": item.get("supporting_facts", []),
-                "type": item.get("type", ""),
-            }
-        )
-        if limit and len(rows) >= limit:
-            break
-
-    if not rows:
-        log.append("HuggingFace returned an empty validation split")
-        return False
-
+    rows = raw[:limit] if limit else raw
     out_path.write_text(
         json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    print(f"[download] 2WikiMultiHopQA: {len(rows)} items → {out_path}")
+    print(f"[download] 2WikiMultiHopQA: {len(rows)} items \u2192 {out_path}")
     return True
 
 
@@ -333,7 +371,7 @@ def download_wiki2(out_path: Path, limit: int = 500) -> None:
         return
 
     reasons: list[str] = []
-    if _try_hf_wiki2(out_path, limit=limit, reasons=reasons):
+    if _try_official_wiki2(out_path, limit=limit, reasons=reasons):
         return
 
     raise DatasetUnavailableError("2WikiMultiHopQA (dev)", WIKI2_SOURCE, reasons)
