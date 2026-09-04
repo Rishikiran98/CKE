@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import re
 import tempfile
 
 import pytest
@@ -80,6 +79,27 @@ class _HealthyGraphEngine:
 
     def add_statement(self, *args, **kwargs):
         return None
+
+
+class _DegradedEmbedder:
+    """An embedder that declares itself strict and has already degraded.
+
+    Supplied so that the two retrievers below are shown to refuse. Left to
+    build their own, whichever inner component is constructed first refuses,
+    and the case says nothing about the retriever it names.
+    """
+
+    strict = True
+    degraded = True
+    degraded_reason = "sentence-transformers was absent when it was built"
+    model_name = "stub-embedder"
+    model_revision = None
+
+    def embed_text(self, text):
+        return [0.0, 0.0]
+
+    def embed_texts(self, texts):
+        return [[0.0, 0.0] for _ in texts]
 
 
 class _RaisingExtractor:
@@ -203,8 +223,16 @@ def _cases(tmp: pathlib.Path):
     return [
         ("EmbeddingModel", lambda s: EmbeddingModel(strict=s), None),
         ("FaissIndex", lambda s: FaissIndex(strict=s), None),
-        ("RAGRetriever", lambda s: RAGRetriever(strict=s), None),
-        ("DenseRetriever", lambda s: DenseRetriever(strict=s), None),
+        (
+            "RAGRetriever",
+            lambda s: RAGRetriever(embedding_model=_DegradedEmbedder(), strict=s),
+            None,
+        ),
+        (
+            "DenseRetriever",
+            lambda s: DenseRetriever(embedding_model=_DegradedEmbedder(), strict=s),
+            None,
+        ),
         ("LLMExtractor", lambda s: LLMExtractor(strict=s), None),
         (
             # The fallback is supplied rather than built, so this case is
@@ -224,7 +252,11 @@ def _cases(tmp: pathlib.Path):
             lambda s: TrustEngine(config_path=tmp / "absent.yaml", strict=s),
             None,
         ),
-        ("PathReasoner", lambda s: PathReasoner(strict=s), None),
+        (
+            "PathReasoner",
+            lambda s: PathReasoner(embedding_model=_DegradedEmbedder(), strict=s),
+            None,
+        ),
         (
             "DenseEvidenceRetriever",
             lambda s: DenseEvidenceRetriever(_NoScoreRetriever(), strict=s),
@@ -358,16 +390,6 @@ def _cases(tmp: pathlib.Path):
     ]
 
 
-#: The reason clause inside a DegradedComponentError raised by _degrade.
-_REFUSAL = re.compile(r"would run degraded: (.*?)\. It was constructed with strict")
-
-
-def _refusal_reason(error: str) -> str:
-    """The degradation a strict refusal is about, without its advice."""
-    match = _REFUSAL.search(error)
-    return match.group(1) if match else error
-
-
 def _names():
     with tempfile.TemporaryDirectory() as d:
         return [name for name, _, _ in _cases(pathlib.Path(d))]
@@ -399,10 +421,7 @@ def test_component_honours_all_three_obligations(name, bare, caplog, tmp_path):
     # when the component under test never refused anything and something it
     # constructed did.
     refused = str(raised.value)
-    assert refused.startswith(name) or _refusal_reason(refused) in (
-        component.degraded_reason
-    ), (
-        f"{name} was expected to refuse under strict for the degradation it "
-        f"declared non-strict ({component.degraded_reason!r}), but the "
-        f"refusal was: {refused}"
+    assert refused.startswith(name), (
+        f"{name} was expected to refuse under strict, but the refusal came "
+        f"from elsewhere: {refused}"
     )

@@ -47,13 +47,15 @@ inspectable `degraded` flag with a `degraded_reason`, and raises
 `strict=True`.
 
 This number is not maintained by hand. `tests/test_contract_census.py` walks
-`cke/` and requires every declaring class to be held to the contract by name:
-thirty-four are driven into their own degraded state and checked against all
-three obligations, twelve are composed of other components and must refuse a
-supplied collaborator that has degraded or that cannot say whether it has, and
-one carries the flag and substitutes nothing. The number said twenty-six for
-as long as it was maintained by hand, and matched the test that asserted it
-while thirteen components sat outside both.
+`cke/` and requires every declaring class to be held to the contract by name.
+Thirty-four are driven into their own degraded state and checked against all
+three obligations. Fifteen accept an injected collaborator and must refuse one
+that has degraded and one that cannot say whether it has — that list is read
+out of the package rather than curated, so a guard added without a test for it
+fails the census. Three components are in both. One carries the flag and
+substitutes nothing, with its reason stated. The number said twenty-six for as
+long as it was maintained by hand, and matched the test that asserted it while
+thirteen components sat outside both.
 
 Every benchmark, evaluation and experiment entry point constructs its
 components with `strict=True`, prints the environment report before it starts,

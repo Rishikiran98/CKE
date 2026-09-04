@@ -14,7 +14,7 @@ from cke.reasoning.pattern_memory import PatternMemory
 from cke.reasoning.reasoner import TemplateReasoner
 from cke.reasoning.reasoning_trace import ReasoningTrace, ReasoningTraceLogger
 from cke.reasoning.verifier import ReasoningVerifier
-from cke.diagnostics import DegradationMixin
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.pipeline.types import ReasonerOutcome
 from cke.retrieval.embedding_model import EmbeddingModel
 
@@ -65,6 +65,12 @@ class PathReasoner(DegradationMixin):
         strict: bool = False,
     ) -> None:
         self._init_degradation(strict)
+        # An embedder built elsewhere may already have degraded. Accepting one
+        # unchecked let a strict reasoner run on hashed vectors and still
+        # report itself strict.
+        require_strict_component(
+            type(self).__name__, embedding_model, "embedding model", self.strict
+        )
         self.rules = rules or [
             InferenceRule(
                 name="located_in_transitivity",

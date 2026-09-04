@@ -268,6 +268,34 @@
       "old": "            lambda s: LLMReasoner(fallback=TemplateReasoner(), strict=s),",
       "new": "            lambda s: LLMReasoner(strict=s),",
       "tests": "tests/test_contract_obligations.py"
+    },
+    {
+      "label": "the dense baseline stops guarding a prebuilt degraded embedder",
+      "path": "cke/retrieval/rag_baseline.py",
+      "old": "        require_strict_component(\n            type(self).__name__, embedding_model, \"embedding model\", self.strict\n        )\n",
+      "new": "",
+      "tests": "tests/test_contract_obligations.py"
+    },
+    {
+      "label": "the DenseRetriever case goes back to refusing through the embedder it builds",
+      "path": "tests/test_contract_obligations.py",
+      "old": "            lambda s: DenseRetriever(embedding_model=_DegradedEmbedder(), strict=s),",
+      "new": "            lambda s: DenseRetriever(strict=s),",
+      "tests": "tests/test_contract_obligations.py"
+    },
+    {
+      "label": "the path reasoner stops guarding a prebuilt degraded embedder",
+      "path": "cke/reasoning/path_reasoner.py",
+      "old": "        require_strict_component(\n            type(self).__name__, embedding_model, \"embedding model\", self.strict\n        )\n",
+      "new": "",
+      "tests": "tests/test_contract_census.py"
+    },
+    {
+      "label": "the guard list and the package drift apart",
+      "path": "cke/router/query_router.py",
+      "old": "        require_strict_component(\n            type(self).__name__, domain_classifier, \"domain classifier\", self.strict\n        )\n",
+      "new": "",
+      "tests": "tests/test_contract_census.py"
     }
   ]
 }

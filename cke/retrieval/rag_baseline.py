@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from cke.diagnostics import DegradationMixin
+from cke.diagnostics import DegradationMixin, require_strict_component
 from cke.retrieval.embedding_model import EmbeddingModel
 from cke.retrieval.faiss_index import FaissIndex
 
@@ -32,6 +32,13 @@ class RAGRetriever(DegradationMixin):
         strict: bool = False,
     ) -> None:
         self._init_degradation(strict)
+        # The docstring above already promised this and nothing enforced it:
+        # a prebuilt degraded embedder was accepted in silence, and the
+        # baseline CKE is measured against reported itself strict while
+        # embedding by hashing.
+        require_strict_component(
+            type(self).__name__, embedding_model, "embedding model", self.strict
+        )
         self.embedding_model = embedding_model or EmbeddingModel(strict=strict)
         self.index = FaissIndex(strict=strict)
 

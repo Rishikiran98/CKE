@@ -17,13 +17,18 @@ Each list states what its members owe:
 
 * ``DRIVEN_INTO_DEGRADATION`` — ``test_contract_obligations`` builds it,
   drives it into its own degraded state, and checks all three obligations.
-* ``REFUSES_A_DEGRADED_COLLABORATOR`` — its own degradations are not
-  reachable from a constructor, but it accepts components that can degrade,
-  so a strict run must refuse those. Tested below.
+* ``GUARDS_A_COLLABORATOR`` — it accepts a component that can degrade, so a
+  strict run must refuse one that has degraded and one that cannot say
+  whether it has. Tested below. This list is not curated: it must equal the
+  set of declaring classes that call ``require_strict_component``, so adding
+  a guard without a test for it fails here.
 * ``NO_DEGRADATION_PATH`` — it carries the flag so that a strict caller can
   read it, and never substitutes anything. Nothing to drive. A member that
   grows a ``_degrade`` or a ``require_strict_component`` call stops belonging
   here, and this file says so.
+
+The first two overlap: a component can both substitute a value of its own and
+compose something that substitutes. Only ``NO_DEGRADATION_PATH`` is exclusive.
 """
 
 from __future__ import annotations
@@ -76,10 +81,9 @@ DRIVEN_INTO_DEGRADATION = {
     "cke/trust/confidence_model.py:ConfidenceModel",
 }
 
-#: Composed of other components. A strict run must refuse a supplied
-#: collaborator that has degraded or that cannot say whether it has.
-REFUSES_A_DEGRADED_COLLABORATOR = {
-    # (component, the slot the collaborator goes in, the label it is refused by)
+#: Every declaring class that guards an injected collaborator, mapped to the
+#: label its refusal names. Checked against cke/ below, not maintained by hand.
+GUARDS_A_COLLABORATOR = {
     "cke/conversation/memory_store.py:ConversationMemoryStore": "graph engine",
     "cke/conversation/retriever.py:ConversationalRetriever": "memory store",
     "cke/evaluation/experiment_runner.py:ExperimentRunner": "retriever",
@@ -97,6 +101,12 @@ REFUSES_A_DEGRADED_COLLABORATOR = {
     "cke/retrieval/graph_retriever.py:GraphRetriever": "entity resolver",
     "cke/retrieval/retriever.py:GraphRetriever": "router",
     "cke/router/query_router.py:QueryRouter": "domain classifier",
+    # These three also declare substitutions of their own and are driven above.
+    # Their own check reads getattr(embedder, "degraded", False), which reads
+    # an embedder with no contract as healthy; the guard is what refuses it.
+    "cke/experiments/retrieval_eval_pipeline.py:DenseRetriever": "embedding model",
+    "cke/reasoning/path_reasoner.py:PathReasoner": "embedding model",
+    "cke/retrieval/rag_baseline.py:RAGRetriever": "embedding model",
 }
 
 #: Carries the flag, substitutes nothing, composes nothing that can degrade.
@@ -150,9 +160,7 @@ def _obligation_case_names():
 def test_every_declaring_component_is_accounted_for():
     """A new contract component cannot be added without an entry here."""
     listed = (
-        DRIVEN_INTO_DEGRADATION
-        | set(REFUSES_A_DEGRADED_COLLABORATOR)
-        | set(NO_DEGRADATION_PATH)
+        DRIVEN_INTO_DEGRADATION | set(GUARDS_A_COLLABORATOR) | set(NO_DEGRADATION_PATH)
     )
     declaring = set(_declaring())
 
@@ -165,14 +173,21 @@ def test_every_declaring_component_is_accounted_for():
     ), "these names are listed here but no longer declare the contract"
 
 
-def test_the_three_lists_do_not_overlap():
-    pairs = (
-        (DRIVEN_INTO_DEGRADATION, set(REFUSES_A_DEGRADED_COLLABORATOR)),
-        (DRIVEN_INTO_DEGRADATION, set(NO_DEGRADATION_PATH)),
-        (set(REFUSES_A_DEGRADED_COLLABORATOR), set(NO_DEGRADATION_PATH)),
-    )
-    for left, right in pairs:
-        assert left & right == set(), "a component owes exactly one of the three"
+def test_nothing_exempt_is_also_owed_something():
+    """DRIVEN and GUARDS may overlap; the exempt list may overlap neither."""
+    exempt = set(NO_DEGRADATION_PATH)
+    assert exempt & DRIVEN_INTO_DEGRADATION == set()
+    assert exempt & set(GUARDS_A_COLLABORATOR) == set()
+
+
+def test_the_guard_list_is_every_guard_in_the_package():
+    """A guard added without a test for it fails here rather than passing."""
+    guarding = {
+        key
+        for key, node in _declaring().items()
+        if _calls(node, "require_strict_component")
+    }
+    assert guarding == set(GUARDS_A_COLLABORATOR)
 
 
 def test_anything_taking_strict_can_say_whether_it_degraded():
@@ -239,7 +254,7 @@ def test_nothing_with_a_fallback_is_parked_in_the_exempt_list(key):
         f"and write a case that drives it"
     )
     assert _calls(node, "require_strict_component") == 0, (
-        f"{key} guards a collaborator; move it to " f"REFUSES_A_DEGRADED_COLLABORATOR"
+        f"{key} guards a collaborator; move it to " f"GUARDS_A_COLLABORATOR"
     )
 
 
@@ -263,12 +278,15 @@ def _build(key, collaborator, strict=True):
     from cke.conversation.retriever import ConversationalRetriever
     from cke.evaluation.experiment_runner import ExperimentRunner
     from cke.experiments.reasoning_eval_pipeline import ReasoningEvalPipeline
+    from cke.experiments.retrieval_eval_pipeline import DenseRetriever
     from cke.extractor.extraction_pipeline import ExtractionPipeline
     from cke.graph.deduplicator import AssertionDeduplicator
     from cke.graph.update_pipeline import GraphUpdatePipeline
     from cke.pipeline.conversational_orchestrator import ConversationalOrchestrator
     from cke.pipeline.query_orchestrator import QueryOrchestrator
+    from cke.reasoning.path_reasoner import PathReasoner
     from cke.retrieval.graph_retriever import GraphRetriever
+    from cke.retrieval.rag_baseline import RAGRetriever
     from cke.retrieval.retriever import GraphRetriever as SimpleGraphRetriever
     from cke.router.query_router import QueryRouter
 
@@ -313,13 +331,22 @@ def _build(key, collaborator, strict=True):
         "cke/router/query_router.py:QueryRouter": (
             lambda: QueryRouter(domain_classifier=collaborator, strict=strict)
         ),
+        "cke/experiments/retrieval_eval_pipeline.py:DenseRetriever": (
+            lambda: DenseRetriever(embedding_model=collaborator, strict=strict)
+        ),
+        "cke/reasoning/path_reasoner.py:PathReasoner": (
+            lambda: PathReasoner(embedding_model=collaborator, strict=strict)
+        ),
+        "cke/retrieval/rag_baseline.py:RAGRetriever": (
+            lambda: RAGRetriever(embedding_model=collaborator, strict=strict)
+        ),
     }
     return builders[key]()
 
 
-@pytest.mark.parametrize("key", sorted(REFUSES_A_DEGRADED_COLLABORATOR))
+@pytest.mark.parametrize("key", sorted(GUARDS_A_COLLABORATOR))
 def test_a_strict_component_refuses_a_degraded_collaborator(key):
-    label = REFUSES_A_DEGRADED_COLLABORATOR[key]
+    label = GUARDS_A_COLLABORATOR[key]
     name = key.split(":", 1)[1]
 
     with pytest.raises(DegradedComponentError) as raised:
@@ -331,10 +358,10 @@ def test_a_strict_component_refuses_a_degraded_collaborator(key):
     assert "already degraded" in message
 
 
-@pytest.mark.parametrize("key", sorted(REFUSES_A_DEGRADED_COLLABORATOR))
+@pytest.mark.parametrize("key", sorted(GUARDS_A_COLLABORATOR))
 def test_a_strict_component_refuses_a_collaborator_that_cannot_report(key):
     """The check above is vacuous against an object with no degraded flag."""
-    label = REFUSES_A_DEGRADED_COLLABORATOR[key]
+    label = GUARDS_A_COLLABORATOR[key]
     name = key.split(":", 1)[1]
 
     with pytest.raises(DegradedComponentError) as raised:
@@ -346,7 +373,7 @@ def test_a_strict_component_refuses_a_collaborator_that_cannot_report(key):
     assert "cannot report whether it has degraded" in message
 
 
-@pytest.mark.parametrize("key", sorted(REFUSES_A_DEGRADED_COLLABORATOR))
+@pytest.mark.parametrize("key", sorted(GUARDS_A_COLLABORATOR))
 def test_a_non_strict_component_accepts_what_a_strict_one_refuses(key):
     """A guard that refused everything would pass the two tests above.
 
