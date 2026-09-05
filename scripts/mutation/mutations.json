@@ -322,6 +322,34 @@
       "old": "    \"cke/diagnostics.py\",\n    \"cke/datasets/hotpot_loader.py\",",
       "new": "    \"cke/datasets/hotpot_loader.py\",",
       "tests": "tests/test_typecheck_ratchet.py"
+    },
+    {
+      "label": "a share over nothing is reported as a measured zero",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "        \"share\": round(yielding / total, 4) if total else None,",
+      "new": "        \"share\": round(yielding / total, 4) if total else 0.0,",
+      "tests": "tests/test_extraction_coverage.py"
+    },
+    {
+      "label": "the frame breakdown stops honouring the extractor's pattern order",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "    for _, template in RuleExtractor.PATTERNS:\n        if \"{\" not in template:",
+      "new": "    for _, template in reversed(RuleExtractor.PATTERNS):\n        if \"{\" not in template:",
+      "tests": "tests/test_extraction_coverage.py"
+    },
+    {
+      "label": "a missing dataset exits zero instead of refusing",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "        return 2\n",
+      "new": "        return 0\n",
+      "tests": "tests/test_extraction_coverage.py"
+    },
+    {
+      "label": "the twelve-statement count becomes strictly greater than twelve",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "        \"at_least_12\": sum(1 for value in ordered if value >= 12),",
+      "new": "        \"at_least_12\": sum(1 for value in ordered if value > 12),",
+      "tests": "tests/test_extraction_coverage.py"
     }
   ],
   "census": [
