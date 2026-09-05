@@ -93,8 +93,6 @@ class ReasonerAdapter(DegradationMixin):
                     operator_checks=[],
                     summary="reasoner_abstained",
                 )
-            if not answer:
-                return None
             reasoning_path = (
                 list(adapted.selected_path.statements)
                 if adapted.selected_path is not None

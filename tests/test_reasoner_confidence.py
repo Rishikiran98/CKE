@@ -131,6 +131,32 @@ def test_the_adapter_still_declares_for_a_reasoner_that_has_no_confidence():
         )
 
 
+@pytest.mark.parametrize("answer", ["", None], ids=["empty", "none"])
+def test_a_reasoner_that_returns_no_answer_abstains_rather_than_vanishing(answer):
+    """Why the branch below it was unreachable.
+
+    The adapter carried `if not answer: return None` immediately after the
+    branch that already returns INSUFFICIENT_EVIDENCE for a falsy answer, so
+    nothing could reach it. Deleting an unreachable line is safe only while
+    the line above keeps handling the case; this holds it there.
+
+    Abstaining rather than returning None matters downstream: None reads as
+    "the adapter had nothing to say", and an abstention is something the
+    reasoner said.
+    """
+
+    class _SilentReasoner:
+        def answer(self, query, context):
+            return answer
+
+    outcome = ReasonerAdapter(_SilentReasoner()).reason(_QUESTION, _chain(0.9))
+
+    assert outcome is not None
+    assert outcome.answer == "INSUFFICIENT_EVIDENCE"
+    assert outcome.confidence == 0.0
+    assert outcome.summary == "reasoner_abstained"
+
+
 # ---------------------------------------------------------------------------
 # The test that did not exist
 # ---------------------------------------------------------------------------

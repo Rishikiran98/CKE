@@ -582,6 +582,27 @@
       "old": "def __getattr__(name: str):",
       "new": "app = None\n\n\ndef __getattr__(name: str):",
       "tests": "tests/test_api_server_import.py"
+    },
+    {
+      "label": "an item with no documents is scored as a zero instead of refused",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    documents = item.get(\"documents\")\n    if documents is None:\n        raise ValueError(",
+      "new": "    documents = item.get(\"documents\")\n    if documents is None:\n        return []\n    if False:\n        raise ValueError(",
+      "tests": "tests/test_docs_from_item.py"
+    },
+    {
+      "label": "the empty-text documents are kept",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    return [d for d in documents if d.get(\"text\")]\n",
+      "new": "    return list(documents)\n",
+      "tests": "tests/test_docs_from_item.py"
+    },
+    {
+      "label": "a reasoner that returns nothing vanishes instead of abstaining",
+      "path": "cke/reasoning/reasoner_adapter.py",
+      "old": "            if (\n                not answer\n                or \"don't have enough\" in answer.lower()",
+      "new": "            if (\n                False\n                or \"don't have enough\" in answer.lower()",
+      "tests": "tests/test_reasoner_confidence.py"
     }
   ]
 }
