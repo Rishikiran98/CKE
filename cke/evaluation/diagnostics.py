@@ -25,8 +25,19 @@ STAGE_LABELS = [
 ]
 
 
+def answer_is_abstention(answer: object) -> bool:
+    """Whether an answer is one of the declared abstentions.
+
+    Split out of :func:`is_abstained` so the benchmark driver, which handles
+    answer strings rather than QueryResults, asks the same question of the
+    same set. A second notion of "the system declined" is how two figures come
+    to share a name.
+    """
+    return answer in ABSTAIN_ANSWERS
+
+
 def is_abstained(result: QueryResult) -> bool:
-    return result.answer in ABSTAIN_ANSWERS or result.failure_mode is not None
+    return answer_is_abstention(result.answer) or result.failure_mode is not None
 
 
 def extract_stage_diagnostics(
