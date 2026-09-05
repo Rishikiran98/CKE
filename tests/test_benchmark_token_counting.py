@@ -687,7 +687,10 @@ def test_the_summary_file_carries_the_abstention_block():
     """
     summary = bench.produce_summary(
         {"rag_k10": {"median_tokens": 100.0}, "cke_n12": {"median_tokens": 10.0}},
-        TokenCounter(strict=True),
+        # Not a real TokenCounter: this is about the abstention block reaching
+        # summary.json, and a strict counter would make the test depend on a
+        # tiktoken download it has no use for.
+        _HealthyCounter(),
         SpanExtractiveQA(),
     )
 
