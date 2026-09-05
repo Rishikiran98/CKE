@@ -250,6 +250,34 @@
       "old": "        substitutions={str(directory): \"<output-dir>\" for directory in directories},\n",
       "new": "",
       "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "--twice goes back to comparing only the summaries",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    return report_comparison(\n        directories[0],\n        directories[1],\n",
+      "new": "    return report_comparison(\n        directories[0] / \"summary.json\",\n        directories[1] / \"summary.json\",\n",
+      "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "an undecodable results file escapes as a traceback again",
+      "path": "cke/evaluation/run_comparison.py",
+      "old": "    except UnicodeDecodeError as broken:\n        raise ResultsUnreadable(f\"{path}: not valid UTF-8 ({broken})\") from broken\n",
+      "new": "",
+      "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "two empty run directories are reported as agreeing",
+      "path": "cke/evaluation/run_comparison.py",
+      "old": "    if not names:\n        raise ResultsUnreadable(",
+      "new": "    if False:\n        raise ResultsUnreadable(",
+      "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "--twice stops refusing an output directory git does not ignore",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    refusal = _output_dir_would_dirty_the_tree(parent)\n",
+      "new": "    refusal = None\n",
+      "tests": "tests/test_compare_runs.py"
     }
   ],
   "measurement": [
