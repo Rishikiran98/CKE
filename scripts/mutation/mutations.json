@@ -322,6 +322,20 @@
       "old": "    \"cke/diagnostics.py\",\n    \"cke/datasets/hotpot_loader.py\",",
       "new": "    \"cke/datasets/hotpot_loader.py\",",
       "tests": "tests/test_typecheck_ratchet.py"
+    },
+    {
+      "label": "the hit rate goes back to being called Recall@k in the summary",
+      "path": "cke/experiments/retrieval_eval_pipeline.py",
+      "old": "            print(f\"{name} hit rate@{args.top_k}: {hit_rate[name]:.4f}\")",
+      "new": "            print(f\"{name} Recall@{args.top_k}: {hit_rate[name]:.4f}\")",
+      "tests": "tests/test_retrieval_eval_pipeline.py"
+    },
+    {
+      "label": "the hit rate counts every relevant document instead of any",
+      "path": "cke/experiments/retrieval_eval_pipeline.py",
+      "old": "        if any(\n            _is_relevant(documents[position], query.relevant_hints)",
+      "new": "        if all(\n            _is_relevant(documents[position], query.relevant_hints)",
+      "tests": "tests/test_retrieval_eval_pipeline.py"
     }
   ],
   "census": [
