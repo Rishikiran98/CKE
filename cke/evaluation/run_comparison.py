@@ -30,6 +30,7 @@ from typing import Any, TextIO
 
 __all__ = [
     "NON_REPRODUCIBLE_FIELDS",
+    "ResultsUnreadable",
     "compare_runs",
     "deterministic_view",
     "main",
@@ -55,6 +56,27 @@ DIFFERENCES_FOUND = 1
 #: "these runs disagree" and "I could not tell" are different answers, and a
 #: caller scripting this gate needs to tell them apart.
 COULD_NOT_COMPARE = 2
+
+
+class ResultsUnreadable(Exception):
+    """A results file could not be read, and the message says which one.
+
+    Raised instead of letting the decoder's own exception out: json.load on a
+    file that is not valid UTF-8 raises UnicodeDecodeError, which is neither
+    JSONDecodeError nor OSError, so it escaped both handlers and produced a
+    traceback where the exit code should have been. Found by review.
+    """
+
+
+def _read_json(path: Path) -> Any:
+    """Load a results file, naming it in every way it can fail."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except UnicodeDecodeError as broken:
+        raise ResultsUnreadable(f"{path}: not valid UTF-8 ({broken})") from broken
+    except json.JSONDecodeError as broken:
+        raise ResultsUnreadable(f"{path}: not valid JSON ({broken})") from broken
 
 
 def deterministic_view(payload: Any) -> Any:
@@ -97,6 +119,32 @@ def substituted(payload: Any, substitutions: Mapping[str, str]) -> Any:
     return payload
 
 
+def _differences(left: Any, right: Any, path: str) -> list[str]:
+    """Every place two deterministic views disagree, named by where it is."""
+    if isinstance(left, dict) and isinstance(right, dict):
+        differences: list[str] = []
+        for key in sorted(set(left) | set(right)):
+            where = f"{path}.{key}" if path else key
+            if key not in left:
+                differences.append(f"{where}: only in the second run")
+            elif key not in right:
+                differences.append(f"{where}: only in the first run")
+            else:
+                differences += _differences(left[key], right[key], where)
+        return differences
+    if isinstance(left, list) and isinstance(right, list):
+        if len(left) != len(right):
+            return [f"{path}: {len(left)} entries then {len(right)}"]
+        return [
+            difference
+            for index, (a, b) in enumerate(zip(left, right))
+            for difference in _differences(a, b, f"{path}[{index}]")
+        ]
+    if left != right:
+        return [f"{path}: {left!r} then {right!r}"]
+    return []
+
+
 def compare_runs(
     first: Path,
     second: Path,
@@ -110,36 +158,58 @@ def compare_runs(
     does not exclude. An empty list is the pass.
     """
 
-    def _walk(left: Any, right: Any, path: str) -> list[str]:
-        if isinstance(left, dict) and isinstance(right, dict):
-            differences: list[str] = []
-            for key in sorted(set(left) | set(right)):
-                where = f"{path}.{key}" if path else key
-                if key not in left:
-                    differences.append(f"{where}: only in the second run")
-                elif key not in right:
-                    differences.append(f"{where}: only in the first run")
-                else:
-                    differences += _walk(left[key], right[key], where)
-            return differences
-        if isinstance(left, list) and isinstance(right, list):
-            if len(left) != len(right):
-                return [f"{path}: {len(left)} entries then {len(right)}"]
-            return [
-                difference
-                for index, (a, b) in enumerate(zip(left, right))
-                for difference in _walk(a, b, f"{path}[{index}]")
-            ]
-        if left != right:
-            return [f"{path}: {left!r} then {right!r}"]
-        return []
-
     rewrites = substitutions or {}
-    with open(first, encoding="utf-8") as handle:
-        left = substituted(deterministic_view(json.load(handle)), rewrites)
-    with open(second, encoding="utf-8") as handle:
-        right = substituted(deterministic_view(json.load(handle)), rewrites)
-    return _walk(left, right, "")
+    if first.is_dir() or second.is_dir():
+        return _compare_directories(first, second, rewrites)
+
+    left = substituted(deterministic_view(_read_json(first)), rewrites)
+    right = substituted(deterministic_view(_read_json(second)), rewrites)
+    return _differences(left, right, "")
+
+
+def _compare_directories(
+    first: Path,
+    second: Path,
+    substitutions: Mapping[str, str],
+) -> list[str]:
+    """Every results file the two runs wrote, not just the summary.
+
+    Comparing only summary.json passed a gate that nondeterminism in the
+    per-item rows could walk straight through: a different predicted answer
+    or a different retrieved document that leaves the aggregate EM and the
+    medians unchanged is invisible in the summary and plain in
+    full_results_*.json. Found by review, on the first version of this.
+
+    Only the .json files. The .md tables are rendered from them and the .png
+    is a plot of them, so comparing the JSON compares what they are made of;
+    comparing rendered text as text would report formatting as a defect.
+    """
+    names = sorted(
+        {path.name for path in first.glob("*.json")}
+        | {path.name for path in second.glob("*.json")}
+    )
+    if not names:
+        raise ResultsUnreadable(
+            f"neither {first} nor {second} holds a .json results file, so "
+            f"there is nothing to compare — agreeing on nothing is not a pass"
+        )
+
+    differences: list[str] = []
+    for name in names:
+        left_path, right_path = first / name, second / name
+        if not left_path.exists():
+            differences.append(f"{name}: written by the second run only")
+        elif not right_path.exists():
+            differences.append(f"{name}: written by the first run only")
+        else:
+            left = substituted(deterministic_view(_read_json(left_path)), substitutions)
+            right = substituted(
+                deterministic_view(_read_json(right_path)), substitutions
+            )
+            differences += [
+                f"{name} {entry}" for entry in _differences(left, right, "")
+            ]
+    return differences
 
 
 def report_comparison(
@@ -163,8 +233,8 @@ def report_comparison(
     except FileNotFoundError as missing:
         print(f"[error] cannot compare: {missing.filename} does not exist", file=out)
         return COULD_NOT_COMPARE
-    except json.JSONDecodeError as broken:
-        print(f"[error] cannot compare: not valid JSON ({broken})", file=out)
+    except ResultsUnreadable as unreadable:
+        print(f"[error] cannot compare: {unreadable}", file=out)
         return COULD_NOT_COMPARE
     except OSError as unreadable:
         print(f"[error] cannot compare: {unreadable}", file=out)
@@ -208,8 +278,10 @@ def main(argv: list[str] | None = None) -> int:
             "when a file could not be read."
         ),
     )
-    parser.add_argument("first", help="a results file from the first run")
-    parser.add_argument("second", help="the same file from the second run")
+    parser.add_argument(
+        "first", help="a results file, or a whole output directory, from one run"
+    )
+    parser.add_argument("second", help="the same file or directory from the other run")
     args = parser.parse_args(argv)
 
     return report_comparison(Path(args.first), Path(args.second))

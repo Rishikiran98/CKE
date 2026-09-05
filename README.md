@@ -145,7 +145,9 @@ check is a command, and it has two spellings of one implementation:
 # Perform the gate: run twice into <dir>/run-1 and <dir>/run-2, then compare.
 python scripts/run_cke_benchmark.py --twice --limit 20 --output-dir results/gate
 
-# Or compare two results files that already exist.
+# Or compare two runs that already exist: a pair of files, or whole
+# output directories, in which case every .json in them is compared.
+cke-compare-runs results/a results/b
 cke-compare-runs results/a/summary.json results/b/summary.json
 ```
 
@@ -155,6 +157,12 @@ timestamp are excused, and the excused fields are printed with the reason each
 cannot repeat. `--twice` additionally rewrites each pass's own output directory
 before comparing — the two commands differ in exactly that argument, and
 provenance records the command line — and prints the rewrite it made.
+
+Comparing directories rather than the summaries alone is the point: aggregate
+EM, F1 and the medians can agree while the per-item rows behind them do not.
+`--twice` refuses an `--output-dir` inside the repository that `.gitignore`
+does not cover, because the first pass's files would be on disk when the second
+pass records its working-tree state. `results/` is covered.
 
 Nothing in CI runs this yet: it needs two real benchmark runs, which is
 separate work.
