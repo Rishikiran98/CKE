@@ -278,6 +278,20 @@
       "old": "    refusal = _output_dir_would_dirty_the_tree(parent)\n",
       "new": "    refusal = None\n",
       "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "the lint workflow stops naming the flake8 configuration",
+      "path": ".github/workflows/lint.yml",
+      "old": "        run: flake8 --config .flake8 .",
+      "new": "        run: flake8 .",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the security scan stops naming its bandit configuration",
+      "path": ".github/workflows/security.yml",
+      "old": "        run: bandit -c bandit.yaml -r cke scripts",
+      "new": "        run: bandit -c missing.yaml -r cke scripts",
+      "tests": "tests/test_ci_gates.py"
     }
   ],
   "measurement": [
