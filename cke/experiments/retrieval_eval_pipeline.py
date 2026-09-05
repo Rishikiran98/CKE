@@ -2,7 +2,7 @@
 
 Indexes MS MARCO full documents with a sentence-transformer and a vector
 index, retrieves the top-k documents for each HotpotQA and LoCoMo query, and
-reports Recall@k against each query's relevance hints.
+reports a hit rate against each query's relevance hints.
 
 Contract
 --------
@@ -14,7 +14,7 @@ composes :class:`~cke.retrieval.embedding_model.EmbeddingModel` and
 evaluation path uses, and inherits their degradation: without
 sentence-transformers or faiss it declares what is missing and, under
 ``strict`` (the command line's default), refuses to run rather than report a
-Recall@k measured on a hashed embedder or a numpy scan.
+a hit rate measured on a hashed embedder or a numpy scan.
 
 Two readers stay local to this module rather than coming from the dataset
 registry, because the registry's are the wrong shape for what the metric
@@ -24,8 +24,17 @@ reads two-column rows and would swallow the title the relevance test matches
 on. The LoCoMo reader keeps the relevance fields the registry loader drops.
 Reconciling them belongs to the evaluation rebuild, not to this change.
 
-What Recall@k means here
-------------------------
+What this measures, and what it is called
+----------------------------------------
+The figure is the fraction of queries with **at least one** relevant document
+in the top k. That is a hit rate, and it was called Recall@k. Recall@k is
+something else: the share of a query's relevant documents that the top k
+holds, which is what ``_retrieval_recall`` in scripts/run_cke_benchmark.py
+computes for the benchmark. Two numbers under one name, differing whenever a
+query has more than one relevant document — the hit rate reaches 1.0 on the
+first of them and recall does not. Neither figure was wrong; reading one as
+the other was, and nothing here said which was which.
+
 A retrieved document counts as relevant when its id is among the query's
 hints or a hint is a substring of its lower-cased title. Hints come from
 HotpotQA's supporting-fact titles and answer, and from whichever relevance
@@ -64,7 +73,7 @@ __all__ = [
     "DenseRetriever",
     "MSMARCOCorpus",
     "QueryExample",
-    "evaluate_recall_at_k",
+    "evaluate_hit_rate_at_k",
     "load_hotpot_queries",
     "load_locomo_queries",
     "run_pipeline",
@@ -101,7 +110,7 @@ class MSMARCOCorpus(DegradationMixin):
     A three-column file (``id, title, body``) is accepted too. Rows with fewer
     columns carry no title and no body; they are not padded into empty
     documents, since an empty document that can never be relevant would lower
-    every recall figure without anyone seeing why. They are counted and the
+    every hit rate without anyone seeing why. They are counted and the
     count is declared as a degradation.
     """
 
@@ -180,7 +189,7 @@ class DenseRetriever(DegradationMixin):
         embedding_model: an embedder to reuse. Under ``strict`` it must
             itself be strict and not already degraded.
         strict: when True, refuse to construct on a hashed embedder or a
-            numpy-scan index instead of measuring recall against them.
+            numpy-scan index instead of measuring a hit rate against them.
     """
 
     def __init__(
@@ -399,12 +408,18 @@ def _is_relevant(document: CorpusDocument, hints: set[str]) -> bool:
     return any(hint and hint in title_norm for hint in hints)
 
 
-def evaluate_recall_at_k(
+def evaluate_hit_rate_at_k(
     queries: Sequence[QueryExample],
     ranked_positions: Sequence[Sequence[int]],
     documents: Sequence[CorpusDocument],
 ) -> float:
-    """Fraction of queries with at least one relevant document retrieved."""
+    """Fraction of queries with at least one relevant document retrieved.
+
+    A hit rate, not Recall@k. Recall@k is the share of a query's relevant
+    documents the top k holds; this reaches 1.0 on the first one found. The
+    benchmark's ``_retrieval_recall`` computes the other, and for years both
+    were printed under the word "Recall".
+    """
     if len(queries) == 0:
         return 0.0
     if len(ranked_positions) != len(queries):
@@ -424,7 +439,7 @@ def evaluate_recall_at_k(
 
 
 def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, float]:
-    """Index the corpus, run both query sets, print and return Recall@k."""
+    """Index the corpus, run both query sets, print and return the hit rate."""
     corpus = MSMARCOCorpus(args.msmarco_path, max_docs=args.max_docs, strict=strict)
     retriever = DenseRetriever(args.model_name, args.model_revision, strict=strict)
     retriever.build_index(corpus.documents, batch_size=args.batch_size)
@@ -438,7 +453,7 @@ def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, flo
     if not any(query_sets.values()):
         raise ValueError("No valid queries loaded from HotpotQA or LoCoMo.")
 
-    recall: dict[str, float] = {}
+    hit_rate: dict[str, float] = {}
     for name, queries in query_sets.items():
         if not queries:
             continue
@@ -447,7 +462,7 @@ def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, flo
             top_k=args.top_k,
             batch_size=args.batch_size,
         )
-        recall[name] = evaluate_recall_at_k(queries, ranked, corpus.documents)
+        hit_rate[name] = evaluate_hit_rate_at_k(queries, ranked, corpus.documents)
 
     print("=== Retrieval Evaluation Summary ===")
     print(f"MS MARCO docs indexed: {len(corpus.documents)}")
@@ -455,20 +470,20 @@ def run_pipeline(args: argparse.Namespace, strict: bool = True) -> dict[str, flo
     print(f"top_k: {args.top_k}")
     for name, queries in query_sets.items():
         print(f"{name} queries: {len(queries)}")
-        if name in recall:
-            print(f"{name} Recall@{args.top_k}: {recall[name]:.4f}")
+        if name in hit_rate:
+            print(f"{name} hit rate@{args.top_k}: {hit_rate[name]:.4f}")
         else:
-            # Not 0.0: a dataset with no queries has no recall, and printing
+            # Not 0.0: a dataset with no queries has no hit rate, and printing
             # a zero for it would read as a measured miss.
-            print(f"{name} Recall@{args.top_k}: not measured, no queries loaded")
-    return recall
+            print(f"{name} hit rate@{args.top_k}: not measured, no queries loaded")
+    return hit_rate
 
 
 def _positive_int(value: str) -> int:
     """argparse type for a count that must be at least one.
 
     ``--top-k 0`` used to be accepted: the index clamps k to one, so one
-    document was retrieved and the summary was labelled Recall@0. A cap of
+    document was retrieved and the summary was labelled hit rate@0. A cap of
     zero or less is the same kind of misstatement about what ran.
     """
     try:
@@ -534,9 +549,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--allow-degraded",
         action="store_true",
         help=(
-            "Permit components to run degraded. Off by default: a recall "
-            "figure from a hashed embedder or a numpy scan is not a "
-            "measurement of dense retrieval."
+            "Permit components to run degraded. Off by default: a hit rate "
+            "from a hashed embedder or a numpy scan is not a measurement of "
+            "dense retrieval."
         ),
     )
     return parser.parse_args(argv)

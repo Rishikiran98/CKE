@@ -87,10 +87,14 @@ These are stated here rather than left for a reader to discover.
   answerer is a lexical span baseline. Confidence values are in places
   substituted constants rather than scores: `ReasonerAdapter` reports 0.8 for
   the path reasoner, which reports none, and refuses to do so under strict.
-- `cke/experiments/retrieval_eval_pipeline.py` measures Recall@k by matching
-  retrieved MS MARCO titles against HotpotQA and LoCoMo relevance hints. That
-  is a title-matching proxy, not a judged relevance set, and it needs the MS
-  MARCO full-document TSV, HotpotQA and LoCoMo files to run.
+- `cke/experiments/retrieval_eval_pipeline.py` measures a **hit rate** — the
+  share of queries with at least one relevant document in the top k — by
+  matching retrieved MS MARCO titles against HotpotQA and LoCoMo relevance
+  hints. That is a title-matching proxy, not a judged relevance set, and it
+  needs the MS MARCO full-document TSV, HotpotQA and LoCoMo files to run. It
+  is not the "Recall of supporting docs" the benchmark tables report: that one
+  is the share of an item's gold documents retrieved, and the two differ
+  whenever an item has more than one.
 
 ## Repository layout
 

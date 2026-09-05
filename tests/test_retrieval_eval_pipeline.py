@@ -22,7 +22,7 @@ from cke.experiments.retrieval_eval_pipeline import (
     DenseRetriever,
     MSMARCOCorpus,
     QueryExample,
-    evaluate_recall_at_k,
+    evaluate_hit_rate_at_k,
     load_hotpot_queries,
 )
 
@@ -127,7 +127,7 @@ def test_allow_degraded_runs_and_says_so(bare, tmp_path, capsys):
     pipeline.main(paths + ["--allow-degraded"])
 
     out = capsys.readouterr().out
-    assert "Recall@10" in out
+    assert "hit rate@10" in out
     assert "DenseRetriever" in out
     assert "sentence-transformers" in out
 
@@ -194,23 +194,55 @@ def test_search_before_build_is_an_error():
     ],
     ids=["doc-id", "title-substring", "missed", "no-hints"],
 )
-def test_recall_at_k(hints, ranked, expected):
+def test_hit_rate_at_k(hints, ranked, expected):
     documents = _corpus(("d1", "Stanford University", "text"), ("d2", "Other", "text"))
     queries = [QueryExample("q1", "who?", hints)]
 
-    assert evaluate_recall_at_k(queries, ranked, documents) == expected
+    assert evaluate_hit_rate_at_k(queries, ranked, documents) == expected
 
 
-def test_recall_is_averaged_over_queries():
+def test_the_hit_rate_is_averaged_over_queries():
     documents = _corpus(("d1", "A", "x"), ("d2", "B", "y"))
     queries = [QueryExample("q1", "?", {"d1"}), QueryExample("q2", "?", {"d2"})]
 
-    assert evaluate_recall_at_k(queries, [[0], [0]], documents) == 0.5
+    assert evaluate_hit_rate_at_k(queries, [[0], [0]], documents) == 0.5
 
 
-def test_recall_refuses_mismatched_result_lists():
+def test_the_hit_rate_is_not_the_benchmark_recall_they_were_both_called():
+    """The two figures the word "Recall" used to cover, on one case.
+
+    A query with two relevant documents, one of them retrieved. The hit rate
+    is 1.0 — something relevant came back. The benchmark's recall is 0.5 —
+    half the relevant documents came back. Both are right about what they
+    measure, and reading either as the other is wrong by a factor that grows
+    with the number of relevant documents an item has.
+
+    This is here so the names cannot quietly converge again.
+    """
+    import importlib.util
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "run_cke_benchmark_hitrate", root / "scripts" / "run_cke_benchmark.py"
+    )
+    bench = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bench)
+
+    documents = _corpus(("d1", "A", "x"), ("d2", "B", "y"))
+    queries = [QueryExample("q1", "?", {"d1", "d2"})]
+
+    hit_rate = evaluate_hit_rate_at_k(queries, [[0]], documents)
+    recall = bench._retrieval_recall(["d1"], {"d1", "d2"})
+
+    assert hit_rate == 1.0
+    assert recall == 0.5
+    assert hit_rate != recall, "the same word covered both of these"
+
+
+def test_the_hit_rate_refuses_mismatched_result_lists():
     with pytest.raises(ValueError, match="result lists"):
-        evaluate_recall_at_k([QueryExample("q", "?", set())], [], [])
+        evaluate_hit_rate_at_k([QueryExample("q", "?", set())], [], [])
 
 
 # ---------------------------------------------------------------------------
@@ -355,15 +387,15 @@ def test_the_parser_rejects_counts_below_one(flag, value, tmp_path, capsys):
     assert "at least 1" in capsys.readouterr().err
 
 
-def test_a_query_set_with_no_queries_is_not_reported_as_zero_recall(
+def test_a_query_set_with_no_queries_is_not_reported_as_a_zero_hit_rate(
     bare, tmp_path, capsys
 ):
     paths = _write_inputs(tmp_path, locomo=[])
     pipeline.main(paths + ["--allow-degraded"])
 
     out = capsys.readouterr().out
-    assert "LoCoMo Recall@10: not measured" in out
-    assert "LoCoMo Recall@10: 0.0000" not in out
+    assert "LoCoMo hit rate@10: not measured" in out
+    assert "LoCoMo hit rate@10: 0.0000" not in out
 
 
 def _write_inputs(tmp_path, locomo=None) -> list[str]:
