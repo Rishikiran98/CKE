@@ -219,6 +219,12 @@ MAY_READ_SOURCE = {
         "Same sweep, for declare_degradation called from a method rather "
         "than a module-level function."
     ),
+    "test_module_reachability.py": (
+        "Reachability is a property of the import graph, and an import graph "
+        "can only be read out of the source. Running the package cannot show "
+        "it: an unreachable module is precisely one no execution touches, so "
+        "its absence has no runtime witness."
+    ),
     "test_contract_census.py": (
         "The census itself: every declaring class must be accounted for, "
         "which is a question about what cke/ contains."

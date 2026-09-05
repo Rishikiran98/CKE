@@ -74,8 +74,6 @@ strict as well.
 
 These are stated here rather than left for a reader to discover.
 
-- `cke.sdk.client` is a client for `cke.api.server`, which has no
-  authentication and does not use the main query pipeline (next bullet).
 - `cke.api.server` has no authentication and does not use the main query
   pipeline. It is importable without FastAPI, but `create_app()` needs it.
 - There is no evaluation harness that can produce a trustworthy number. Building

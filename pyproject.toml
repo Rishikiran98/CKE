@@ -130,7 +130,7 @@ branch = true
 # is 78.80 either way now, because that test names dataset paths that do not
 # exist and asserts the run stopped looking for them — a coverage number that
 # moves with the checkout is not a number a gate can hold.
-fail_under = 78.5
+fail_under = 79.5
 precision = 2
 skip_covered = true
 

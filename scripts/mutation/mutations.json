@@ -254,7 +254,7 @@
     {
       "label": "a mutation target goes stale and nothing notices",
       "path": "scripts/mutation/mutations.json",
-      "old": "      \"old\": \"fail_under = 78.5\",",
+      "old": "      \"old\": \"fail_under = 79.5\",",
       "new": "      \"old\": \"fail_under = 78.0\",",
       "tests": "tests/test_mutation_manifest.py"
     },
@@ -354,7 +354,7 @@
     {
       "label": "the coverage floor is lowered",
       "path": "pyproject.toml",
-      "old": "fail_under = 78.5",
+      "old": "fail_under = 79.5",
       "new": "fail_under = 40.0",
       "tests": "tests/test_coverage_floor.py"
     },
@@ -506,6 +506,27 @@
       "old": "        require_strict_component(\n            type(self).__name__, domain_classifier, \"domain classifier\", self.strict\n        )\n",
       "new": "",
       "tests": "tests/test_contract_census.py"
+    },
+    {
+      "label": "the version module is counted as an orphan it is not",
+      "path": "tests/test_module_reachability.py",
+      "old": "    entries.add(\"cke.version\")\n",
+      "new": "",
+      "tests": "tests/test_module_reachability.py"
+    },
+    {
+      "label": "a package __init__ stops being reached through its submodule",
+      "path": "tests/test_module_reachability.py",
+      "old": "            parent = dependency.rsplit(\".\", 1)[0]\n            if parent in graph and parent not in reached:\n                stack.append(parent)\n",
+      "new": "",
+      "tests": "tests/test_module_reachability.py"
+    },
+    {
+      "label": "a newly unreachable module stops failing the census",
+      "path": "tests/test_module_reachability.py",
+      "old": "    return orphans - known, known - orphans\n",
+      "new": "    return set(), known - orphans\n",
+      "tests": "tests/test_module_reachability.py"
     }
   ],
   "hygiene": [
