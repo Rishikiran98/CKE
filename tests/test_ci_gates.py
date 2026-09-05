@@ -34,14 +34,14 @@ def _triggers(workflow: dict) -> dict:
     return workflow.get("on", workflow.get(True, {})) or {}
 
 
-@pytest.mark.parametrize("name", ["ci.yml", "lint.yml", "security.yml"])
+@pytest.mark.parametrize("name", ["ci.yml", "lint.yml", "security.yml", "mutation.yml"])
 def test_every_workflow_runs_on_pull_requests(name):
     """security.yml ran only on push to main, so it could never block a
     merge: a finding appeared afterwards, on a branch nobody was gating."""
     assert "pull_request" in _triggers(_workflow(name))
 
 
-@pytest.mark.parametrize("name", ["ci.yml", "lint.yml", "security.yml"])
+@pytest.mark.parametrize("name", ["ci.yml", "lint.yml", "security.yml", "mutation.yml"])
 def test_no_workflow_restricts_pull_requests_to_one_branch(name):
     """ci.yml restricted pull_request to [main] while push covered
     [main, dev], so a pull request into dev ran only the linters."""
@@ -50,7 +50,7 @@ def test_no_workflow_restricts_pull_requests_to_one_branch(name):
     assert pull_request is None or "branches" not in (pull_request or {})
 
 
-@pytest.mark.parametrize("name", ["ci.yml", "lint.yml", "security.yml"])
+@pytest.mark.parametrize("name", ["ci.yml", "lint.yml", "security.yml", "mutation.yml"])
 def test_every_workflow_is_read_only_and_bounded(name):
     workflow = _workflow(name)
 
@@ -84,3 +84,91 @@ def test_the_security_scan_reads_the_code_that_produces_the_numbers():
     scan = next(step["run"] for step in steps if "bandit" in step.get("run", ""))
 
     assert "cke" in scan and "scripts" in scan
+
+
+# ---------------------------------------------------------------------------
+# The mutation suite is run by something other than its author
+# ---------------------------------------------------------------------------
+
+
+def _mutation_steps() -> list[dict]:
+    workflow = _workflow("mutation.yml")
+    return [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+
+
+def test_the_mutation_suite_is_run_by_ci():
+    """Sixty-seven mutations existed and nothing ran them but their author.
+
+    Every pull request in this programme ended with "every mutation was
+    caught", produced by a command one person ran on one machine. A survivor
+    was found whenever somebody next happened to run the suite.
+    """
+    # Not "mentions mutate.py": the matrix is built by a step that runs
+    # `mutate.py --list`, so looking for the filename alone stays true when
+    # the step that actually runs the mutations is gutted. A mutation proved
+    # exactly that. What matters is a step that runs a suite.
+    runs = [
+        run
+        for step in _mutation_steps()
+        if "mutate.py" in (run := str(step.get("run", ""))) and "--list" not in run
+    ]
+
+    assert runs, (
+        "no step in mutation.yml runs a suite; the only mention of the "
+        "script builds the job matrix, which runs nothing"
+    )
+    assert any("matrix.suite" in run for run in runs), (
+        "the suite each job runs does not come from the matrix, so the jobs "
+        "either all run the same thing or all run everything"
+    )
+
+
+def _listed_suites(capsys) -> list:
+    """What `mutate.py --list` prints, run in process.
+
+    In process rather than through subprocess.run: the workflow shells out,
+    but a subprocess is invisible to coverage, and a branch the suite never
+    executes is a branch the floor does not guard.
+    """
+    import json
+    import sys
+
+    import scripts.mutation.mutate as runner
+
+    argv = sys.argv
+    sys.argv = ["mutate.py", "--list"]
+    try:
+        assert runner.main() == 0
+    finally:
+        sys.argv = argv
+    return json.loads(capsys.readouterr().out)
+
+
+def test_the_job_matrix_is_read_from_the_suite_file(capsys):
+    """A hardcoded list is a list that goes stale.
+
+    The matrix comes from `mutate.py --list`, so a suite added to
+    mutations.json cannot be left unrun by forgetting to name it here. This
+    asserts the workflow holds no copy of the names.
+    """
+    listed = _listed_suites(capsys)
+    text = (WORKFLOWS / "mutation.yml").read_text(encoding="utf-8")
+
+    assert listed, "the mutation runner reports no suites at all"
+    for suite in listed:
+        assert f'"{suite}"' not in text and f"'{suite}'" not in text, (
+            f"mutation.yml names the {suite!r} suite. Build the matrix from "
+            f"`mutate.py --list` instead, so a new suite cannot go unrun."
+        )
+
+
+def test_every_suite_in_the_file_is_reachable_by_name(capsys):
+    """--list and the runner's own argument parser must agree.
+
+    The matrix passes each listed name straight back to the script, which
+    errors on an unknown suite; if the two disagreed, CI would fail on a name
+    the file contains.
+    """
+    import scripts.mutation.mutate as runner
+
+    assert set(_listed_suites(capsys)) == set(runner.load_suites())

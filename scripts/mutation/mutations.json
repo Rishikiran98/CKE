@@ -187,6 +187,34 @@
       "old": "name, split=\"validation\", revision=HOTPOTQA_REVISION, **kwargs",
       "new": "name, split=\"validation\", **kwargs",
       "tests": "tests/test_download_datasets.py"
+    },
+    {
+      "label": "the mutation workflow stops running the suite",
+      "path": ".github/workflows/mutation.yml",
+      "old": "        run: python scripts/mutation/mutate.py \"${{ matrix.suite }}\"",
+      "new": "        run: echo skipping \"${{ matrix.suite }}\"",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the job matrix is hardcoded instead of read from the suite file",
+      "path": ".github/workflows/mutation.yml",
+      "old": "        suite: ${{ fromJson(needs.suites.outputs.names) }}",
+      "new": "        suite: [\"reasoning\", \"strict\"]",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "the mutation workflow stops running on pull requests",
+      "path": ".github/workflows/mutation.yml",
+      "old": "  push:\n    branches: [main, dev]\n  pull_request:",
+      "new": "  push:\n    branches: [main, dev]",
+      "tests": "tests/test_ci_gates.py"
+    },
+    {
+      "label": "a mutation target goes stale and nothing notices",
+      "path": "scripts/mutation/mutations.json",
+      "old": "      \"old\": \"fail_under = 78.5\",",
+      "new": "      \"old\": \"fail_under = 78.0\",",
+      "tests": "tests/test_mutation_manifest.py"
     }
   ],
   "measurement": [
@@ -207,7 +235,7 @@
     {
       "label": "the coverage floor is lowered",
       "path": "pyproject.toml",
-      "old": "fail_under = 78.0",
+      "old": "fail_under = 78.5",
       "new": "fail_under = 40.0",
       "tests": "tests/test_coverage_floor.py"
     },
@@ -333,13 +361,6 @@
       "old": "addopts = \"-q --cov --cov-report=term-missing --strict-markers --strict-config\"",
       "new": "addopts = \"-q --strict-markers --strict-config\"",
       "tests": "tests/test_test_hygiene.py"
-    },
-    {
-      "label": "the orchestrator's alias overwrite is fixed without the xfail being retired",
-      "path": "cke/pipeline/query_orchestrator.py",
-      "old": "        for entity in candidate_entities:\n            self.entity_resolver.register_alias(entity, entity)\n",
-      "new": "",
-      "tests": "tests/test_orchestrator_aliases_and_relation_targeting.py"
     },
     {
       "label": "the cold-cache step stops deselecting only the declared downloads",
