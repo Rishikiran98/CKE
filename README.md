@@ -113,8 +113,8 @@ pip install -e .
 
 That installs the library and its dependencies from `requirements.txt`, each
 bounded below by a verified version and above by the next major release (the
-next minor for a library still at 0.x), and four console commands for the
-in-package entry points: `cke-eval`,
+next minor for a library still at 0.x), and five console commands for the
+in-package entry points: `cke-compare-runs`, `cke-eval`,
 `cke-experiment`, `cke-reasoning-eval` and `cke-retrieval-eval`. The drivers
 under `scripts/` and `demo.py` are run as files from the repository root.
 Components that read `configs/*.yaml` look for that directory relative to the
@@ -135,6 +135,29 @@ use. It is a demonstration of the pipeline's shape, not of general question
 answering: the reasoner resolves a target relation only from "located in",
 "nationality", or a relation named as the question's last word. CI runs the
 demo and fails if the answer or the rule application changes.
+
+## Checking that a run reproduces
+
+Two runs of one benchmark command must agree on everything a seed fixes. The
+check is a command, and it has two spellings of one implementation:
+
+```bash
+# Perform the gate: run twice into <dir>/run-1 and <dir>/run-2, then compare.
+python scripts/run_cke_benchmark.py --twice --limit 20 --output-dir results/gate
+
+# Or compare two results files that already exist.
+cke-compare-runs results/a/summary.json results/b/summary.json
+```
+
+It exits 0 when the runs agree, 1 when they disagree — naming every field
+that moved — and 2 when a file could not be read. Timings and the start
+timestamp are excused, and the excused fields are printed with the reason each
+cannot repeat. `--twice` additionally rewrites each pass's own output directory
+before comparing — the two commands differ in exactly that argument, and
+provenance records the command line — and prints the rewrite it made.
+
+Nothing in CI runs this yet: it needs two real benchmark runs, which is
+separate work.
 
 ## Running the tests
 

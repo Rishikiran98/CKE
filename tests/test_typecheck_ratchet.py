@@ -28,6 +28,7 @@ FLOOR = {
     "cke/datasets/locomo_loader.py",
     "cke/datasets/musique_loader.py",
     "cke/datasets/wiki2_loader.py",
+    "cke/evaluation/run_comparison.py",
     "cke/evaluation/span_qa.py",
     "cke/evaluation/token_counter.py",
     "cke/observability/token_tracker.py",
