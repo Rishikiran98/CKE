@@ -129,6 +129,7 @@ class LLMAnswerer(DegradationMixin):
         #: triples that did not fit.
         self.last_truncated: bool = False
         self.last_dropped_tokens: int = 0
+        self.last_context_used: str | None = None
         self._tokenizer = None
         self._model = None
         self._window = 0
@@ -218,6 +219,18 @@ class LLMAnswerer(DegradationMixin):
         return self.backend == "local"
 
     @property
+    def context_measured(self) -> bool:
+        """Whether the context the model read can be reported.
+
+        The same condition as ``truncation_measured``, delegated rather than
+        restated so the two cannot come apart: only the local backend fits the
+        context itself, so only it knows what survived. An api provider
+        truncates out of sight, and a token count taken here would be the
+        assembled size wearing the read one's name.
+        """
+        return self.truncation_measured
+
+    @property
     def available(self) -> bool:
         if self.backend == "local":
             return self._model is not None
@@ -250,6 +263,7 @@ class LLMAnswerer(DegradationMixin):
             )
         self.last_truncated = False
         self.last_dropped_tokens = 0
+        self.last_context_used = None
         if self.backend == "local":
             return self._answer_local(question.strip(), context.strip())
         return self._answer_api(
@@ -289,9 +303,13 @@ class LLMAnswerer(DegradationMixin):
     def _answer_local(self, question: str, context: str) -> str:
         import torch
 
-        prompt = PROMPT.format(
-            context=self._fit_context(question, context), question=question
-        )
+        # Kept, so a caller can count what the model was actually given. The
+        # context handed in may be several times this after the window bites,
+        # and a token figure taken before this call describes what was
+        # assembled rather than what was read.
+        fitted = self._fit_context(question, context)
+        self.last_context_used = fitted
+        prompt = PROMPT.format(context=fitted, question=question)
         ids = self._tokenizer(prompt, return_tensors="pt")
         with torch.no_grad():
             out = self._model.generate(
