@@ -172,3 +172,63 @@ def test_every_suite_in_the_file_is_reachable_by_name(capsys):
     import scripts.mutation.mutate as runner
 
     assert set(_listed_suites(capsys)) == set(runner.load_suites())
+
+
+# ---------------------------------------------------------------------------
+# One configuration per tool, and CI names the one that exists
+# ---------------------------------------------------------------------------
+
+#: The files flake8 finds on its own. More than one of these and a bare
+#: `flake8` can read different settings from the ones CI passes with
+#: --config, which is what was happening: setup.cfg and .flake8 both declared
+#: [flake8], setup.cfg won a bare run, and the two agreed only by coincidence.
+FLAKE8_DISCOVERS = ("setup.cfg", "tox.ini", ".flake8")
+
+
+def _run_step(workflow: str, job: str, needle: str, avoid: str = "--version") -> str:
+    steps = _workflow(workflow)["jobs"][job]["steps"]
+    return next(
+        step["run"]
+        for step in steps
+        if needle in step.get("run", "") and avoid not in step.get("run", "")
+    )
+
+
+def test_flake8_reads_one_configuration_and_the_workflow_names_it():
+    """A contributor's `flake8` and CI's must be the same check.
+
+    They were not guaranteed to be. Both files said max-line-length = 88, so
+    nothing diverged — but nothing held them together either, and the copy a
+    contributor's bare run used was not the copy CI passed.
+    """
+    present = [name for name in FLAKE8_DISCOVERS if (ROOT / name).exists()]
+
+    assert len(present) == 1, (
+        f"flake8 would discover {present}. Keep one: a second copy is read by "
+        f"a bare run and not by CI, so the two can drift apart silently."
+    )
+    assert f"--config {present[0]}" in _run_step("lint.yml", "lint", "flake8")
+
+
+def test_bandit_reads_one_configuration_and_the_workflow_names_it():
+    """`.bandit` and [tool.bandit] were read by nothing at all.
+
+    bandit consults `.bandit` only under --ini and pyproject only under
+    -c pyproject.toml; the workflow passes -c bandit.yaml. Both said the same
+    as bandit.yaml, so deleting them changed no result — demonstrated by
+    making each contradict it and watching the scan not care.
+    """
+    import tomllib
+
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        pyproject = tomllib.load(handle)
+
+    assert not (ROOT / ".bandit").exists(), "bandit reads this only under --ini"
+    assert "bandit" not in pyproject.get("tool", {}), (
+        "bandit reads pyproject only under -c pyproject.toml, and the "
+        "workflow passes -c bandit.yaml"
+    )
+
+    scan = _run_step("security.yml", "security", "bandit")
+    named = scan.split("-c ", 1)[1].split()[0]
+    assert (ROOT / named).exists(), f"the scan names {named}, which is not here"
