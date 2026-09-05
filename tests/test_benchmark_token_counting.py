@@ -484,3 +484,121 @@ def test_the_comparison_table_still_counts_what_was_measured():
         "Items with context truncated" in line and "| 2 |" in line
         for line in table.splitlines()
     )
+
+
+# ---------------------------------------------------------------------------
+# What the model read, as against what was assembled for it
+# ---------------------------------------------------------------------------
+
+
+class _WindowedAnswerer:
+    """An answerer that cuts the context, and can say what survived."""
+
+    description = "a model with a window"
+    uses_language_model = True
+    truncation_measured = True
+    context_measured = True
+
+    def __init__(self, keeps: str):
+        self._keeps = keeps
+        self.last_context_used: str | None = None
+
+    def answer(self, question: str, context: str) -> str:
+        self.last_context_used = self._keeps
+        return "an answer"
+
+
+class _BlindAnswerer(_WindowedAnswerer):
+    """An answerer whose provider truncates out of sight."""
+
+    context_measured = False
+
+
+def test_the_read_count_is_smaller_than_the_assembled_one_when_the_window_bites():
+    """The figure the token claim belongs to.
+
+    A context assembled at some size and cut to another is two numbers, and
+    the ratio the benchmark headlines is the one the model actually read.
+    """
+    counter = TokenCounter()
+    answerer = _WindowedAnswerer(keeps="short")
+
+    answerer.answer("q", "a much longer context than the model will be given")
+    read = bench._tokens_read(answerer, "q", counter)
+
+    assembled = counter.count("q") + counter.count(
+        "a much longer context than the model will be given"
+    )
+    assert read == counter.count("q") + counter.count("short")
+    assert read < assembled
+
+
+def test_an_answerer_that_cannot_say_reports_no_read_count():
+    """None, not the assembled figure and not zero.
+
+    An api provider cuts out of sight and the span baseline has no window;
+    reporting either one's assembled size as "read" would state a measurement
+    nobody took.
+    """
+    counter = TokenCounter()
+    answerer = _BlindAnswerer(keeps="short")
+    answerer.answer("q", "a long context")
+
+    assert bench._tokens_read(answerer, "q", counter) is None
+    assert bench._tokens_read(SpanExtractiveQA(), "q", counter) is None
+
+
+def _read_rows(read):
+    """Two items on one arm, each reporting *read* tokens as consumed."""
+    return [
+        {
+            "rag_k10": {
+                "em": 1.0,
+                "f1": 1.0,
+                "prompt_tokens": 1200,
+                "prompt_tokens_read": read,
+                "latency_ms": 1.0,
+                "answer_truncated": None,
+                "answer_dropped_tokens": None,
+            }
+        }
+        for _ in range(2)
+    ]
+
+
+def test_an_arm_that_reported_no_read_count_publishes_no_figure():
+    """Not a zero, and not the assembled median wearing the read one's name."""
+    metrics = bench.aggregate_metrics(_read_rows(None))["rag_k10"]
+
+    assert "median_tokens_read" not in metrics
+    assert "tokens_read_measured_items" not in metrics
+    assert metrics["median_tokens"] == 1200, "the assembled figure still stands"
+
+
+def test_a_measured_arm_publishes_the_read_median_beside_the_assembled_one():
+    metrics = bench.aggregate_metrics(_read_rows(500))["rag_k10"]
+
+    assert metrics["median_tokens"] == 1200
+    assert metrics["median_tokens_read"] == 500
+    assert metrics["tokens_read_measured_items"] == 2
+
+
+def test_the_read_figure_carries_an_interval_like_every_other_headline():
+    """A point estimate over two items and one over two thousand print alike."""
+    intervals = bench.bootstrap_intervals(_read_rows(500), replicates=64, seed=1)
+
+    assert "median_tokens_read" in intervals["rag_k10"]
+    assert "median_tokens" in intervals["rag_k10"]
+
+
+def test_the_table_names_which_token_figure_each_row_is():
+    """Neither can be quoted as the other."""
+    metrics = bench.with_intervals(
+        bench.aggregate_metrics(_read_rows(500)), _read_rows(500)
+    )
+    table = bench.produce_comparison_table(
+        {"hotpotqa": metrics}, metrics, TokenCounter(), _WindowedAnswerer("x")
+    )
+
+    assert "Median prompt tokens (assembled)" in table
+    assert "Median prompt tokens (read)" in table

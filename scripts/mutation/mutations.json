@@ -364,6 +364,27 @@
       "old": "        if any(\n            _is_relevant(documents[position], query.relevant_hints)",
       "new": "        if all(\n            _is_relevant(documents[position], query.relevant_hints)",
       "tests": "tests/test_retrieval_eval_pipeline.py"
+    },
+    {
+      "label": "the read token count falls back to the assembled one",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    if not getattr(answerer, \"context_measured\", False):\n        return None\n",
+      "new": "",
+      "tests": "tests/test_benchmark_token_counting.py"
+    },
+    {
+      "label": "an arm that measured no read tokens publishes a zero",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "        read = [value for value in lists[\"tokens_read\"] if value is not None]",
+      "new": "        read = [value or 0 for value in lists[\"tokens_read\"]]",
+      "tests": "tests/test_benchmark_token_counting.py"
+    },
+    {
+      "label": "the token table stops saying which figure each row is",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "        lines.append(row(\"Median prompt tokens (assembled)\", \"median_tokens\", \"{:.0f}\"))",
+      "new": "        lines.append(row(\"Median prompt tokens\", \"median_tokens\", \"{:.0f}\"))",
+      "tests": "tests/test_benchmark_token_counting.py"
     }
   ],
   "census": [

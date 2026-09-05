@@ -212,6 +212,34 @@ def _truncation_of(answerer) -> tuple[bool | None, int | None]:
     )
 
 
+def _tokens_read(answerer, question: str, counter) -> int | None:
+    """What the model was actually given, or ``None`` when it cannot be said.
+
+    Every arm counts its prompt before answering, and the answerer cuts the
+    context to its window afterwards. Dense context at k=10 runs to about
+    1250 tokens against a 512-token window; graph triples run to about thirty
+    and are never cut. So a ratio taken from the assembled figures says the
+    graph arm saved far more than the model ever read, which is the token
+    claim being fixed by the units rather than measured — the defect that
+    invalidated this project's first result, in a new place.
+
+    Counted with the same tiktoken encoding as the assembled figure, from the
+    context the answerer kept. ``last_dropped_tokens`` is in the model's own
+    tokenizer and subtracting it here would produce a third number belonging
+    to neither.
+
+    ``None``, not zero, where the answerer has no window and no truncation to
+    report: the api backend, whose provider cuts out of sight, and the span
+    baseline, which has no window at all.
+    """
+    if not getattr(answerer, "context_measured", False):
+        return None
+    used = getattr(answerer, "last_context_used", None)
+    if used is None:
+        return None
+    return counter.count(question) + counter.count(used)
+
+
 def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
     """The documents an item carries, refusing an item that has none.
 
@@ -282,6 +310,7 @@ class RAGPipeline:
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
         completion_tokens = self._counter.count(answer)
+        tokens_read = _tokens_read(self._qa, question, self._counter)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -290,6 +319,7 @@ class RAGPipeline:
             "answer_truncated": truncated,
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
+            "prompt_tokens_read": tokens_read,
             "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "retrieved_texts": retrieved_texts,
@@ -379,6 +409,7 @@ class CKELitePipeline:
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
         completion_tokens = self._counter.count(answer)
+        tokens_read = _tokens_read(self._qa, question, self._counter)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -387,6 +418,7 @@ class CKELitePipeline:
             "answer_truncated": truncated,
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
+            "prompt_tokens_read": tokens_read,
             "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "n_statements": len(evidence),
@@ -488,6 +520,7 @@ class HybridPipeline:
         prompt_tokens = self._counter.count(question) + self._counter.count(context)
         answer = self._qa.answer(question, context)
         completion_tokens = self._counter.count(answer)
+        tokens_read = _tokens_read(self._qa, question, self._counter)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -496,6 +529,7 @@ class HybridPipeline:
             "answer_truncated": truncated,
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
+            "prompt_tokens_read": tokens_read,
             "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "n_statements": n_statements,
@@ -538,6 +572,8 @@ def _score_row(
     scored = {
         "answer": r["answer"],
         "prompt_tokens": r["prompt_tokens"],
+        # What the model read, beside what was assembled for it.
+        "prompt_tokens_read": r.get("prompt_tokens_read"),
         # What the answer itself cost. The token figures in every table so far
         # counted only what went in, and a context-size comparison that
         # ignores what comes out is half a cost.
@@ -666,6 +702,7 @@ _BOOTSTRAP_STATISTICS: dict[str, tuple[str, str]] = {
     "em": ("em", "mean"),
     "f1": ("f1", "mean"),
     "median_tokens": ("prompt_tokens", "median"),
+    "median_tokens_read": ("prompt_tokens_read", "median"),
     "median_completion_tokens": ("completion_tokens", "median"),
     "median_latency_ms": ("latency_ms", "median"),
     "retrieval_recall": ("retrieval_recall", "mean"),
@@ -786,6 +823,7 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             "latency_ms": [],
             "truncated": [],
             "recall": [],
+            "tokens_read": [],
             "abstained": [],
         }
         for c in CONFIGS
@@ -800,6 +838,7 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             agg[cfg]["truncated"].append(d.get("answer_truncated"))
             agg[cfg]["f1"].append(d.get("f1", 0.0))
             agg[cfg]["tokens"].append(d.get("prompt_tokens", 0))
+            agg[cfg]["tokens_read"].append(d.get("prompt_tokens_read"))
             agg[cfg]["completion"].append(d.get("completion_tokens"))
             agg[cfg]["latency_ms"].append(d.get("latency_ms", 0.0))
             agg[cfg]["recall"].append(d.get("retrieval_recall"))
@@ -839,6 +878,16 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
         if measured:
             result[cfg]["retrieval_recall"] = round(sum(measured) / len(measured), 4)
             result[cfg]["recall_measured_items"] = len(measured)
+        # What the model was given, as against what was assembled for it. The
+        # two differ by the window on the dense arms and not at all on the
+        # graph arms, so a ratio taken from the assembled figures credits the
+        # graph arm with a saving on tokens the model never processed. Absent
+        # rather than zero when the answerer cannot say.
+        read = [value for value in lists["tokens_read"] if value is not None]
+        if read:
+            result[cfg]["median_tokens_read"] = round(statistics.median(read), 1)
+            result[cfg]["tokens_read_measured_items"] = len(read)
+
         # Which arm the answerer's window cut. One answerer serves every arm,
         # so its shared totals cannot say; this can — but only when the
         # answerer measured. An unmeasured item carries None, and a count
@@ -918,7 +967,11 @@ def produce_comparison_table(
 
         lines.append(row("Answer EM", "em"))
         lines.append(row("Answer F1", "f1"))
-        lines.append(row("Median prompt tokens", "median_tokens", "{:.0f}"))
+        lines.append(row("Median prompt tokens (assembled)", "median_tokens", "{:.0f}"))
+        if any("median_tokens_read" in metrics.get(c, {}) for c in CONFIGS):
+            lines.append(
+                row("Median prompt tokens (read)", "median_tokens_read", "{:.0f}")
+            )
         if any("median_completion_tokens" in metrics.get(c, {}) for c in CONFIGS):
             lines.append(
                 row("Median completion tokens", "median_completion_tokens", "{:.0f}")
@@ -1242,6 +1295,11 @@ def produce_summary(
         "prompt_token_figures_are_estimates": token_counter.is_estimate,
         "rag_k10_median_tokens": rag.get("median_tokens", 0.0),
         "cke_n12_median_tokens": cke.get("median_tokens", 0.0),
+        # What the model actually read. The pair above is what was assembled
+        # for it, which on the dense arm is several times larger once the
+        # window bites. A token ratio belongs to this pair, not that one.
+        "rag_k10_median_tokens_read": rag.get("median_tokens_read"),
+        "cke_n12_median_tokens_read": cke.get("median_tokens_read"),
         # What each arm's answers cost to produce, beside what they cost to
         # ask. Absent rather than zero when an arm did not report it.
         "rag_k10_median_completion_tokens": rag.get("median_completion_tokens"),
