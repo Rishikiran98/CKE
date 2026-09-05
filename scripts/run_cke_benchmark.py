@@ -45,6 +45,12 @@ from cke.diagnostics import (  # noqa: E402
 )
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.evaluation.llm_qa import LLMAnswerer  # noqa: E402
+from cke.evaluation.run_comparison import (  # noqa: E402,F401
+    NON_REPRODUCIBLE_FIELDS,
+    compare_runs,
+    deterministic_view,
+    report_comparison,
+)
 from cke.evaluation.span_qa import SpanExtractiveQA  # noqa: E402
 from cke.evaluation.token_counter import TokenCounter  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
@@ -1396,18 +1402,6 @@ def load_selected(
     return items, provenance
 
 
-#: Fields of the results that cannot repeat, and why. A run is reproducible
-#: everywhere else; naming the exceptions is what lets "run it twice and diff"
-#: be a check rather than a hope.
-NON_REPRODUCIBLE_FIELDS = {
-    "started_at": "the wall clock reads differently on the second run",
-    "median_latency_ms": "a timing, which no seed fixes",
-    "rag_k10_median_latency_ms": "a timing, which no seed fixes",
-    "cke_n12_median_latency_ms": "a timing, which no seed fixes",
-    "latency_ms": "a timing, which no seed fixes",
-}
-
-
 def _git_description() -> dict[str, Any]:
     """The commit this ran from, and whether the tree was clean.
 
@@ -1477,64 +1471,6 @@ def run_provenance(
         "started_at": _STARTED_AT,
         "non_reproducible_fields": NON_REPRODUCIBLE_FIELDS,
     }
-
-
-def compare_runs(first: Path, second: Path) -> list[str]:
-    """Where two runs' results disagree on anything a seed should have fixed.
-
-    The gate for this work is "run it twice and diff". Diffing the files
-    themselves always reports a difference, because they carry timings and a
-    timestamp, so the useful comparison is of what NON_REPRODUCIBLE_FIELDS
-    does not exclude. An empty list is the pass.
-    """
-
-    def _walk(left: Any, right: Any, path: str) -> list[str]:
-        if isinstance(left, dict) and isinstance(right, dict):
-            differences: list[str] = []
-            for key in sorted(set(left) | set(right)):
-                where = f"{path}.{key}" if path else key
-                if key not in left:
-                    differences.append(f"{where}: only in the second run")
-                elif key not in right:
-                    differences.append(f"{where}: only in the first run")
-                else:
-                    differences += _walk(left[key], right[key], where)
-            return differences
-        if isinstance(left, list) and isinstance(right, list):
-            if len(left) != len(right):
-                return [f"{path}: {len(left)} entries then {len(right)}"]
-            return [
-                difference
-                for index, (a, b) in enumerate(zip(left, right))
-                for difference in _walk(a, b, f"{path}[{index}]")
-            ]
-        if left != right:
-            return [f"{path}: {left!r} then {right!r}"]
-        return []
-
-    with open(first, encoding="utf-8") as handle:
-        left = deterministic_view(json.load(handle))
-    with open(second, encoding="utf-8") as handle:
-        right = deterministic_view(json.load(handle))
-    return _walk(left, right, "")
-
-
-def deterministic_view(payload: Any) -> Any:
-    """The part of a results payload that two runs must agree on exactly.
-
-    Drops the fields NON_REPRODUCIBLE_FIELDS names, at any depth. Two runs of
-    one command whose deterministic views differ have a defect in this
-    harness, not noise.
-    """
-    if isinstance(payload, dict):
-        return {
-            key: deterministic_view(value)
-            for key, value in payload.items()
-            if key not in NON_REPRODUCIBLE_FIELDS
-        }
-    if isinstance(payload, list):
-        return [deterministic_view(value) for value in payload]
-    return payload
 
 
 def _load_hotpotqa(
@@ -1652,6 +1588,71 @@ def run_retrieval_mode_ablation(
     return agg
 
 
+def _run_twice(args: argparse.Namespace) -> int:
+    """Run this command twice into separate directories, then compare them.
+
+    Two processes, not two calls to one function in this one. The gate says
+    "run it twice and diff", and a single process shares an embedding cache,
+    a degradation registry and whatever else is module-global — any of which
+    could make a second pass agree with the first for reasons that have
+    nothing to do with the run being reproducible. Re-invoking the command is
+    the check; calling a function twice is a rehearsal of it.
+
+    Every argument is passed through unchanged except --output-dir, which
+    becomes the parent of the two runs, and --twice itself, which would
+    otherwise recurse.
+    """
+    parent = Path(args.output_dir)
+    directories = [parent / "run-1", parent / "run-2"]
+
+    passthrough: list[str] = []
+    skip_next = False
+    for argument in sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if argument == "--twice":
+            continue
+        if argument == "--output-dir":
+            skip_next = True
+            continue
+        if argument.startswith("--output-dir="):
+            continue
+        passthrough.append(argument)
+
+    for index, directory in enumerate(directories, start=1):
+        print(f"\n[twice] run {index} of 2 into {directory}", flush=True)
+        # Fixed argv built from this process's own arguments, no shell.
+        completed = subprocess.run(  # nosec B603
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                *passthrough,
+                "--output-dir",
+                str(directory),
+            ],
+            cwd=str(ROOT),
+        )
+        if completed.returncode != 0:
+            print(
+                f"[twice] run {index} exited {completed.returncode}; "
+                f"there is nothing to compare",
+                flush=True,
+            )
+            return completed.returncode
+
+    # The two commands differ in exactly one argument, and provenance records
+    # the command line, so without this the comparison always reports a
+    # difference and --twice could never say the runs agree. Rewritten rather
+    # than excused by name: excusing `command` would hide a passthrough bug,
+    # and report_comparison prints every rewrite it is given.
+    return report_comparison(
+        directories[0] / "summary.json",
+        directories[1] / "summary.json",
+        substitutions={str(directory): "<output-dir>" for directory in directories},
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CKE benchmark: RAG vs CKE-lite")
     parser.add_argument(
@@ -1735,7 +1736,39 @@ def main() -> None:
         action="store_true",
         help="Run retrieval mode ablation (graph_only vs dense_only vs hybrid)",
     )
+    parser.add_argument(
+        "--compare-runs",
+        nargs=2,
+        metavar=("A", "B"),
+        default=None,
+        help=(
+            "Compare two results files instead of running a benchmark, and "
+            "exit non-zero if they disagree on anything a seed should have "
+            "fixed. The same check as `cke-compare-runs`, which is the same "
+            "function."
+        ),
+    )
+    parser.add_argument(
+        "--twice",
+        action="store_true",
+        help=(
+            "Run this command twice into separate output directories and "
+            "compare the two summaries. Performs the reproducibility gate "
+            "rather than checking the leftovers of one. Every other argument "
+            "is passed to both runs; --output-dir names the parent."
+        ),
+    )
     args = parser.parse_args()
+
+    # Before the environment report and before a strict TokenCounter, which
+    # refuses on a machine with no cached tokenizer: diffing two files that
+    # already exist must not depend on a model being reachable.
+    if args.compare_runs:
+        first, second = args.compare_runs
+        sys.exit(report_comparison(Path(first), Path(second)))
+
+    if args.twice:
+        sys.exit(_run_twice(args))
 
     print(environment_report().render(), flush=True)
     strict = not args.allow_degraded

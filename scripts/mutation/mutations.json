@@ -215,6 +215,41 @@
       "old": "      \"old\": \"fail_under = 78.5\",",
       "new": "      \"old\": \"fail_under = 78.0\",",
       "tests": "tests/test_mutation_manifest.py"
+    },
+    {
+      "label": "the comparison stops exiting non-zero on a real difference",
+      "path": "cke/evaluation/run_comparison.py",
+      "old": "    return DIFFERENCES_FOUND\n",
+      "new": "    return 0\n",
+      "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "an excused field is added that hides a reported figure",
+      "path": "cke/evaluation/run_comparison.py",
+      "old": "    \"latency_ms\": \"a timing, which no seed fixes\",\n}\n",
+      "new": "    \"latency_ms\": \"a timing, which no seed fixes\",\n    \"rag_k10_em\": \"no reason at all\",\n}\n",
+      "tests": "tests/test_compare_runs.py tests/test_intervals_and_latency.py"
+    },
+    {
+      "label": "the console script stops calling the shared comparison",
+      "path": "cke/evaluation/run_comparison.py",
+      "old": "    return report_comparison(Path(args.first), Path(args.second))\n",
+      "new": "    return 0\n",
+      "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "--twice runs both passes into the same output directory",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    directories = [parent / \"run-1\", parent / \"run-2\"]\n",
+      "new": "    directories = [parent / \"run-1\", parent / \"run-1\"]\n",
+      "tests": "tests/test_compare_runs.py"
+    },
+    {
+      "label": "--twice stops rewriting each run's own output directory",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "        substitutions={str(directory): \"<output-dir>\" for directory in directories},\n",
+      "new": "",
+      "tests": "tests/test_compare_runs.py"
     }
   ],
   "measurement": [

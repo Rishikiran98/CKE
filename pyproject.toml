@@ -26,6 +26,7 @@ Repository = "https://github.com/Rishikiran98/CKE"
 # scripts/ and demo.py are files outside it and stay invocable as files.
 [project.scripts]
 cke-eval = "cke.evaluation.run_eval:main"
+cke-compare-runs = "cke.evaluation.run_comparison:main"
 cke-experiment = "cke.experiments.run_experiment:main"
 cke-reasoning-eval = "cke.experiments.reasoning_eval_pipeline:main"
 cke-retrieval-eval = "cke.experiments.retrieval_eval_pipeline:main"
@@ -73,6 +74,7 @@ files = [
     "cke/datasets/locomo_loader.py",
     "cke/datasets/musique_loader.py",
     "cke/datasets/wiki2_loader.py",
+    "cke/evaluation/run_comparison.py",
     "cke/evaluation/span_qa.py",
     "cke/evaluation/token_counter.py",
     "cke/observability/token_tracker.py",

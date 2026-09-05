@@ -66,11 +66,36 @@ def test_the_declared_console_scripts_are_the_installed_ones():
     }
     assert installed == _project()["scripts"]
     assert set(installed) == {
+        "cke-compare-runs",
         "cke-eval",
         "cke-experiment",
         "cke-reasoning-eval",
         "cke-retrieval-eval",
     }
+
+
+def test_the_readme_lists_the_console_scripts_it_installs():
+    """The README named four commands, and this change installs a fifth.
+
+    Derived from the table rather than compared against a second copy of the
+    list, so the sentence cannot go stale the next time one is added — the
+    same reason the mypy ratchet and the contract census read their lists out
+    of the code.
+    """
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    paragraph = next(
+        block for block in readme.split("\n\n") if "console commands for the" in block
+    )
+
+    named = set(re.findall(r"`(cke-[a-z-]+)`", paragraph))
+    assert named == set(_project()["scripts"]), (
+        "the README's list of installed commands and [project.scripts] " "disagree"
+    )
+
+    counts = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
+    assert (
+        f"{counts[len(named)]} console commands" in paragraph
+    ), f"the README counts the commands, and there are {len(named)}"
 
 
 def test_the_declared_dependencies_are_requirements_txt():
