@@ -57,6 +57,10 @@ if str(ROOT) not in sys.path:
 _STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 from cke.datasets.hotpot_loader import HotpotDataset  # noqa: E402
+from cke.diagnostics import (  # noqa: E402
+    degradation_summary,
+    environment_report,
+)
 from cke.datasets.wiki2_loader import WikiMultiHopDataset  # noqa: E402
 from cke.extractor.rule_extractor import RuleExtractor  # noqa: E402
 
@@ -139,9 +143,17 @@ def measure(
     seed: int,
     method: str,
     driver: Any,
+    strict: bool = True,
 ) -> dict[str, Any]:
-    """Every figure this script reports, for one dataset."""
-    loader = LOADERS[name](strict=False)
+    """Every figure this script reports, for one dataset.
+
+    Strict by default, like every other entry point that produces a figure. A
+    loader that drops malformed records changes the denominator of every share
+    below, and a coverage figure over silently fewer records is a figure about
+    a different corpus. Both published dev splits normalise cleanly under
+    strict, so this refuses nothing that was being measured before.
+    """
+    loader = LOADERS[name](strict=strict)
     extractor = RuleExtractor()
 
     with open(path, "r", encoding="utf-8") as handle:
@@ -333,7 +345,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="write the figures here as JSON, for cke-compare-runs",
     )
+    parser.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help=(
+            "Permit a loader to run degraded. Off by default: a loader that "
+            "drops malformed records changes the denominator of every share "
+            "reported here, so the figure would describe a corpus this run "
+            "cannot name."
+        ),
+    )
     args = parser.parse_args(argv)
+    strict = not args.allow_degraded
 
     data_dir = Path(args.data_dir)
     paths = {
@@ -354,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 2
 
+    print(environment_report().render(), flush=True)
+
     driver = _driver()
     report: dict[str, Any] = {
         "started_at": _STARTED_AT,
@@ -365,9 +390,13 @@ def main(argv: list[str] | None = None) -> int:
                 args.sample_seed,
                 args.select,
                 driver,
+                strict=strict,
             )
             for name in LOADERS
         },
+        # What ran, recorded beside the figures rather than only printed, so a
+        # saved report says whether anything was degraded when it was taken.
+        "environment": environment_report().as_dict(),
     }
 
     print(render(report))
@@ -378,6 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         out.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"\n[output] {out}")
 
+    print(degradation_summary(), flush=True)
     return 0
 
 

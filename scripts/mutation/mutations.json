@@ -85,6 +85,27 @@
       "old": "        if not dataset:",
       "new": "        if False:",
       "tests": "tests/test_strict_reaches_everything.py"
+    },
+    {
+      "label": "the coverage measurement goes back to loading non-strict",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "    strict: bool = True,\n",
+      "new": "    strict: bool = False,\n",
+      "tests": "tests/test_extraction_coverage.py"
+    },
+    {
+      "label": "the coverage run stops saying whether anything degraded",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "    print(degradation_summary(), flush=True)\n",
+      "new": "",
+      "tests": "tests/test_extraction_coverage.py"
+    },
+    {
+      "label": "the saved coverage report stops recording its environment",
+      "path": "scripts/measure_extraction_coverage.py",
+      "old": "        \"environment\": environment_report().as_dict(),\n",
+      "new": "",
+      "tests": "tests/test_extraction_coverage.py"
     }
   ],
   "substitutions": [

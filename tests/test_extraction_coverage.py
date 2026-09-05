@@ -212,6 +212,65 @@ def test_a_run_over_both_datasets_writes_what_it_counted(tmp_path):
     assert "started_at" in written
 
 
+# --- strict, like every other entry point that produces a figure ----------
+
+
+def test_the_loader_is_strict_unless_the_run_asks_otherwise(tmp_path, monkeypatch):
+    """A loader that drops malformed records changes the denominator.
+
+    Every share this script reports is over the records that normalised. A
+    coverage figure taken while a loader was quietly discarding entries
+    describes a corpus the report cannot name. This script shipped with
+    strict=False and no way to ask for anything else, which made it a third
+    exception to a rule the README states as universal.
+    """
+    seen = {}
+
+    class _Recording(coverage.LOADERS["hotpotqa"]):
+        def __init__(self, strict=False, **kwargs):
+            seen["strict"] = strict
+            super().__init__(strict=strict, **kwargs)
+
+    monkeypatch.setitem(coverage.LOADERS, "hotpotqa", _Recording)
+    hotpot = _write(tmp_path, "h.json", [_record("a")])
+
+    coverage.measure("hotpotqa", hotpot, None, 42, "prefix", coverage._driver())
+    assert seen["strict"] is True, "the default must be strict"
+
+    coverage.measure(
+        "hotpotqa", hotpot, None, 42, "prefix", coverage._driver(), strict=False
+    )
+    assert seen["strict"] is False, "and it must still be askable"
+
+
+def test_a_run_says_what_it_ran_on_and_whether_anything_degraded(tmp_path, capsys):
+    """The environment report and the degradation summary, as the driver does.
+
+    Without them a saved figure cannot say whether a component was degraded
+    when it was taken.
+    """
+    hotpot = _write(tmp_path, "h.json", [_record("a")])
+    wiki2 = _write(tmp_path, "w.json", [_record("b")])
+    out = tmp_path / "coverage.json"
+
+    coverage.main(
+        [
+            "--hotpot-path",
+            str(hotpot),
+            "--wiki2-path",
+            str(wiki2),
+            "--output",
+            str(out),
+        ]
+    )
+    printed = capsys.readouterr().out
+
+    assert "CKE environment report" in printed
+    assert "degraded" in printed
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert "environment" in written, "the saved report must carry it too"
+
+
 def test_the_rendered_report_names_what_each_figure_decides(tmp_path, capsys):
     """A number nobody can interpret is the kind this programme keeps removing."""
     hotpot = _write(tmp_path, "h.json", [_record("a")])
