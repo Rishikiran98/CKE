@@ -602,3 +602,103 @@ def test_the_table_names_which_token_figure_each_row_is():
 
     assert "Median prompt tokens (assembled)" in table
     assert "Median prompt tokens (read)" in table
+
+
+# ---------------------------------------------------------------------------
+# Declining is a judgement only an answerer that can decline gets to make
+# ---------------------------------------------------------------------------
+
+
+class _DecliningAnswerer:
+    """An answerer whose vocabulary holds a declared abstention."""
+
+    description = "a model that can decline"
+    uses_language_model = True
+    can_abstain = True
+
+
+def test_an_answerer_that_cannot_decline_records_no_judgement():
+    """Not False. False is a judgement, and this one could not have made it.
+
+    Neither shipped answerer can emit a value in ABSTAIN_ANSWERS: the span
+    baseline returns "" when it has nothing and the language model returns
+    whatever it generated.
+    """
+    assert bench._abstention_of(SpanExtractiveQA(), "") is None
+    assert bench._abstention_of(_MeasuringAnswerer(), "INSUFFICIENT_EVIDENCE") is None
+
+
+def test_an_answerer_that_can_decline_has_its_answer_read():
+    answerer = _DecliningAnswerer()
+
+    assert bench._abstention_of(answerer, "INSUFFICIENT_EVIDENCE") is True
+    assert bench._abstention_of(answerer, "Istanbul") is False
+
+
+def _abstention_rows(abstained, em=1.0):
+    return [
+        {
+            "rag_k10": {
+                "em": em,
+                "f1": 1.0,
+                "prompt_tokens": 100,
+                "latency_ms": 1.0,
+                "abstained": abstained,
+                "answer_truncated": None,
+                "answer_dropped_tokens": None,
+            }
+        }
+        for _ in range(2)
+    ]
+
+
+def test_no_abstention_rate_is_published_when_nothing_could_abstain():
+    """ablation.json carried false_abstention_rate 0.0 for every arm on every
+    dataset, with nothing beside it saying the figure was never taken."""
+    metrics = bench.aggregate_metrics(_abstention_rows(None))["rag_k10"]
+
+    assert "false_abstention_rate" not in metrics
+    assert "abstention_rate" not in metrics
+    assert metrics["n"] == 2, "the arm is still aggregated, only the rate is not"
+
+
+def test_a_false_abstention_is_published_when_declining_was_possible():
+    metrics = bench.aggregate_metrics(_abstention_rows(True))["rag_k10"]
+
+    assert metrics["false_abstention_rate"] == 1.0
+    assert "abstention_rate" not in metrics, "no item here was unanswerable"
+
+
+def test_the_summary_says_the_abstention_figure_was_never_available():
+    """A missing block reads as nothing to say; this says why."""
+    block = bench._abstention_summary(SpanExtractiveQA(), {"rag_k10": {"em": 0.3}})
+
+    assert block["measured"] is False
+    assert block["answerer_can_abstain"] is False
+    assert "zero whatever the arm did" in block["reason"]
+
+
+def test_the_summary_file_carries_the_abstention_block():
+    """Reaching summary.json is the point; a helper nobody calls says nothing.
+
+    Written after a mutation deleting this line from produce_summary survived:
+    the tests exercised the helper and never checked that its answer was
+    published.
+    """
+    summary = bench.produce_summary(
+        {"rag_k10": {"median_tokens": 100.0}, "cke_n12": {"median_tokens": 10.0}},
+        TokenCounter(strict=True),
+        SpanExtractiveQA(),
+    )
+
+    assert summary["abstention"]["measured"] is False
+    assert "zero whatever the arm did" in summary["abstention"]["reason"]
+
+
+def test_the_summary_reports_the_rates_when_an_arm_measured_them():
+    combined = {"rag_k10": {"abstention_rate": 0.5, "unanswerable_items": 4}}
+
+    block = bench._abstention_summary(_DecliningAnswerer(), combined)
+
+    assert block["measured"] is True
+    assert block["by_arm"]["rag_k10"]["abstention_rate"] == 0.5

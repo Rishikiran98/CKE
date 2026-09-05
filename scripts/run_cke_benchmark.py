@@ -108,6 +108,16 @@ UNMEASURED_TRUNCATION = (
     "from here"
 )
 
+#: Why no arm reports an abstention rate. Neither shipped answerer can produce
+#: a value in ABSTAIN_ANSWERS: SpanExtractiveQA returns "" when it has nothing
+#: and LLMAnswerer returns whatever the model generated. A rate over answers
+#: that cannot carry an abstention is zero by construction, and a structural
+#: zero printed beside measured figures is read as a result.
+NO_ABSTENTION_VOCABULARY = (
+    "no answerer in this run can emit a declared abstention, so a rate over "
+    "its answers would be zero whatever the arm did"
+)
+
 
 #: What a latency figure here covers. Each arm is timed from an empty index
 #: or graph to an answer, so the figure includes building that arm's structure
@@ -212,6 +222,25 @@ def _truncation_of(answerer) -> tuple[bool | None, int | None]:
     )
 
 
+def _abstention_of(answerer, answer) -> bool | None:
+    """Whether the arm declined, or ``None`` when it could not have.
+
+    Declining is a judgement, and only an answerer whose vocabulary contains
+    one can make it. Neither shipped answerer can: the span baseline returns
+    an empty string when it has nothing, and the language model returns
+    whatever it generated. Recording ``False`` for those would put a
+    structural zero where a measurement belongs, and ablation.json would carry
+    ``false_abstention_rate: 0.0`` for every arm on every dataset with nothing
+    saying the figure was never taken.
+
+    An answerer that can abstain sets ``can_abstain``; none does today, which
+    is the disclosure rather than an oversight.
+    """
+    if not getattr(answerer, "can_abstain", False):
+        return None
+    return answer_is_abstention(answer)
+
+
 def _tokens_read(answerer, question: str, counter) -> int | None:
     """What the model was actually given, or ``None`` when it cannot be said.
 
@@ -311,6 +340,7 @@ class RAGPipeline:
         answer = self._qa.answer(question, context)
         completion_tokens = self._counter.count(answer)
         tokens_read = _tokens_read(self._qa, question, self._counter)
+        abstained = _abstention_of(self._qa, answer)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -320,6 +350,7 @@ class RAGPipeline:
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "prompt_tokens_read": tokens_read,
+            "abstained": abstained,
             "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "retrieved_texts": retrieved_texts,
@@ -410,6 +441,7 @@ class CKELitePipeline:
         answer = self._qa.answer(question, context)
         completion_tokens = self._counter.count(answer)
         tokens_read = _tokens_read(self._qa, question, self._counter)
+        abstained = _abstention_of(self._qa, answer)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -419,6 +451,7 @@ class CKELitePipeline:
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "prompt_tokens_read": tokens_read,
+            "abstained": abstained,
             "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "n_statements": len(evidence),
@@ -521,6 +554,7 @@ class HybridPipeline:
         answer = self._qa.answer(question, context)
         completion_tokens = self._counter.count(answer)
         tokens_read = _tokens_read(self._qa, question, self._counter)
+        abstained = _abstention_of(self._qa, answer)
         truncated, dropped = _truncation_of(self._qa)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -530,6 +564,7 @@ class HybridPipeline:
             "answer_dropped_tokens": dropped,
             "prompt_tokens": prompt_tokens,
             "prompt_tokens_read": tokens_read,
+            "abstained": abstained,
             "completion_tokens": completion_tokens,
             "latency_ms": latency_ms,
             "n_statements": n_statements,
@@ -584,7 +619,7 @@ def _score_row(
         "answer_dropped_tokens": r.get("answer_dropped_tokens"),
         # Measured on every item: on an answerable one this is a false
         # abstention, which is as much worth knowing as a correct one.
-        "abstained": answer_is_abstention(r["answer"]),
+        "abstained": r.get("abstained"),
         # None, not zero, when the item has no answer to match. Folding an
         # abstention judgement into EM would make one figure mean two things,
         # which is the defect this harness just finished removing from
@@ -888,15 +923,23 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             result[cfg]["median_tokens_read"] = round(statistics.median(read), 1)
             result[cfg]["tokens_read_measured_items"] = len(read)
 
-        # Which arm the answerer's window cut. One answerer serves every arm,
-        # so its shared totals cannot say; this can — but only when the
-        # answerer measured. An unmeasured item carries None, and a count
-        # taken over those would read as a measured zero in ablation.json.
         # Two rates, kept apart because they mean opposite things. On an
-        # unanswerable item declining is the right answer; on an answerable
-        # one it is a miss with a different cause from a wrong answer.
-        unanswerable = [flag for em, flag in lists["abstained"] if em is None]
-        answerable = [flag for em, flag in lists["abstained"] if em is not None]
+        # unanswerable item declining is the right answer; on an answerable one
+        # it is a miss with a different cause from a wrong answer.
+        #
+        # Both are dropped entirely where the answerer could not have declined.
+        # An arm whose vocabulary holds no abstention scores zero on both
+        # whatever it did, and ablation.json published that zero for every arm
+        # on every dataset with nothing beside it saying the figure was never
+        # taken.
+        unanswerable = [
+            flag for em, flag in lists["abstained"] if em is None and flag is not None
+        ]
+        answerable = [
+            flag
+            for em, flag in lists["abstained"]
+            if em is not None and flag is not None
+        ]
         if unanswerable:
             result[cfg]["unanswerable_items"] = len(unanswerable)
             result[cfg]["abstention_rate"] = round(
@@ -907,6 +950,10 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
                 sum(bool(flag) for flag in answerable) / len(answerable), 4
             )
 
+        # Which arm the answerer's window cut. One answerer serves every arm,
+        # so its shared totals cannot say; this can — but only when the
+        # answerer measured. An unmeasured item carries None, and a count
+        # taken over those would read as a measured zero in ablation.json.
         cut = lists["truncated"]
         if all(item is not None for item in cut):
             result[cfg]["truncated_items"] = sum(bool(item) for item in cut)
@@ -1309,6 +1356,9 @@ def produce_summary(
         "rag_k10_median_latency_ms": rag.get("median_latency_ms"),
         "cke_n12_median_latency_ms": cke.get("median_latency_ms"),
         "latency_includes": LATENCY_INCLUDES,
+        # Whether any arm could have declined, and what it did. False here is
+        # a statement about the answerer, not about the arms.
+        "abstention": _abstention_summary(answerer, combined),
         # Every figure above, with the range the items support. A point
         # estimate over fifteen items and one over fifteen thousand print
         # identically; these do not.
@@ -1350,6 +1400,34 @@ def produce_summary(
         "cke_n12_em": cke.get("em", 0.0),
         "rag_k10_f1": rag.get("f1", 0.0),
         "cke_n12_f1": cke.get("f1", 0.0),
+    }
+
+
+def _abstention_summary(answerer, combined: dict[str, dict[str, float]]):
+    """The abstention figures, or that no answerer could have produced them.
+
+    Reported rather than omitted. A missing block reads as "nothing to say";
+    this says the measurement was never available and why, which is the
+    difference between a figure not taken and a figure of zero.
+    """
+    if any("abstention_rate" in metrics for metrics in combined.values()):
+        return {
+            "measured": True,
+            "by_arm": {
+                cfg: {
+                    "abstention_rate": metrics.get("abstention_rate"),
+                    "false_abstention_rate": metrics.get("false_abstention_rate"),
+                    "unanswerable_items": metrics.get("unanswerable_items"),
+                }
+                for cfg, metrics in combined.items()
+                if "abstention_rate" in metrics
+            },
+        }
+
+    return {
+        "measured": False,
+        "answerer_can_abstain": bool(getattr(answerer, "can_abstain", False)),
+        "reason": NO_ABSTENTION_VOCABULARY,
     }
 
 

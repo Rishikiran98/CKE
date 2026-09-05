@@ -136,6 +136,27 @@
       "old": "        if unscored:",
       "new": "        if False:",
       "tests": "tests/test_undeclared_substitutions.py tests/test_substituted_values.py"
+    },
+    {
+      "label": "an answerer that cannot decline is recorded as not having declined",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "    if not getattr(answerer, \"can_abstain\", False):\n        return None\n",
+      "new": "",
+      "tests": "tests/test_benchmark_token_counting.py"
+    },
+    {
+      "label": "the abstention rate is published over answers that could not carry one",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "        answerable = [\n            flag\n            for em, flag in lists[\"abstained\"]\n            if em is not None and flag is not None\n        ]",
+      "new": "        answerable = [flag for em, flag in lists[\"abstained\"] if em is not None]",
+      "tests": "tests/test_benchmark_token_counting.py"
+    },
+    {
+      "label": "the summary stops saying why no abstention figure was taken",
+      "path": "scripts/run_cke_benchmark.py",
+      "old": "        \"abstention\": _abstention_summary(answerer, combined),\n",
+      "new": "",
+      "tests": "tests/test_benchmark_token_counting.py"
     }
   ],
   "gates": [
