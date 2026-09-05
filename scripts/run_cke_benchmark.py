@@ -212,12 +212,27 @@ def _truncation_of(answerer) -> tuple[bool | None, int | None]:
 
 
 def _docs_from_item(item: dict[str, Any]) -> list[dict[str, str]]:
-    """Normalise HotpotQA and 2WikiMultiHopQA item formats to a doc list."""
-    if "documents" in item:
-        return [d for d in item["documents"] if d.get("text")]
-    # 2WikiMultiHopQA: contexts is a flat list of strings
-    contexts = item.get("contexts", [])
-    return [{"doc_id": f"ctx_{i}", "text": str(c)} for i, c in enumerate(contexts) if c]
+    """The documents an item carries, refusing an item that has none.
+
+    There was a fallback here for a flat list under "contexts", commented
+    "2WikiMultiHopQA". wiki2_loader has never produced that: it calls
+    _context_to_documents and emits "documents", as hotpot, musique, locomo
+    and msmarco all do. Nothing in this package reached it.
+
+    Dead was not the worst of it. An item of an unrecognised shape fell
+    through to an empty document list, the pipeline retrieved nothing from it,
+    and the run recorded EM and F1 of zero — a figure indistinguishable from a
+    real retrieval failure and reported as one.
+    """
+    documents = item.get("documents")
+    if documents is None:
+        raise ValueError(
+            f"item {item.get('id', '<no id>')!r} carries no 'documents'. Every "
+            f"loader in cke.datasets emits that key; scoring this item would "
+            f"report a zero that says nothing about retrieval. It has "
+            f"{sorted(item)}."
+        )
+    return [d for d in documents if d.get("text")]
 
 
 # ---------------------------------------------------------------------------
