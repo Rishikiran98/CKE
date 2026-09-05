@@ -46,6 +46,7 @@ from cke.diagnostics import (  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.evaluation.llm_qa import LLMAnswerer  # noqa: E402
 from cke.evaluation.run_comparison import (  # noqa: E402,F401
+    COULD_NOT_COMPARE,
     NON_REPRODUCIBLE_FIELDS,
     compare_runs,
     deterministic_view,
@@ -1588,6 +1589,52 @@ def run_retrieval_mode_ablation(
     return agg
 
 
+def _output_dir_would_dirty_the_tree(parent: Path) -> str | None:
+    """Why --twice cannot use this directory, or None if it can.
+
+    The first pass writes its files before the second pass reads `git status`,
+    so an output directory inside the repository that git does not ignore
+    makes the second run record a dirtier tree than the first. The comparison
+    then reports a provenance difference that says nothing about whether the
+    benchmark is reproducible. Refusing is the honest answer: the alternative
+    is excusing the tree state, which is the provenance this programme exists
+    to keep. Found by review.
+
+    Only a directory git actually reports as untracked-and-not-ignored is
+    refused. Where git cannot answer, both runs record the same unknown and
+    there is nothing to protect against.
+    """
+    try:
+        resolved = parent.resolve()
+        resolved.relative_to(ROOT.resolve())
+    except (OSError, ValueError):
+        return None
+
+    try:
+        # Fixed argv, no shell.
+        ignored = subprocess.run(  # nosec B603 B607
+            ["git", "check-ignore", "-q", str(resolved)],
+            cwd=str(ROOT),
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    # 0 ignored, 1 not ignored, anything else is git failing to answer.
+    if ignored.returncode != 1:
+        return None
+
+    return (
+        f"--output-dir {parent} is inside the repository and git does not "
+        f"ignore it, so the first run's files would make the second run "
+        f"record a dirtier working tree and the comparison would report a "
+        f"provenance difference that is this command's doing. Use a "
+        f"directory outside the repository, or one .gitignore covers "
+        f"(results/ is)."
+    )
+
+
 def _run_twice(args: argparse.Namespace) -> int:
     """Run this command twice into separate directories, then compare them.
 
@@ -1603,6 +1650,11 @@ def _run_twice(args: argparse.Namespace) -> int:
     otherwise recurse.
     """
     parent = Path(args.output_dir)
+    refusal = _output_dir_would_dirty_the_tree(parent)
+    if refusal:
+        print(f"[error] {refusal}", flush=True)
+        return COULD_NOT_COMPARE
+
     directories = [parent / "run-1", parent / "run-2"]
 
     passthrough: list[str] = []
@@ -1646,9 +1698,12 @@ def _run_twice(args: argparse.Namespace) -> int:
     # difference and --twice could never say the runs agree. Rewritten rather
     # than excused by name: excusing `command` would hide a passthrough bug,
     # and report_comparison prints every rewrite it is given.
+    # The directories, not their summaries: nondeterminism in the per-item
+    # rows can leave every aggregate figure unchanged, and comparing only
+    # summary.json passed a gate that walks straight through. Found by review.
     return report_comparison(
-        directories[0] / "summary.json",
-        directories[1] / "summary.json",
+        directories[0],
+        directories[1],
         substitutions={str(directory): "<output-dir>" for directory in directories},
     )
 

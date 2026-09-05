@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -235,6 +237,60 @@ def test_the_flag_compares_before_the_benchmark_machinery_starts(
     ), "something ran before the comparison did"
 
 
+def test_a_file_written_by_only_one_run_is_a_difference(tmp_path):
+    first, second = tmp_path / "one", tmp_path / "two"
+    for directory in (first, second):
+        directory.mkdir()
+        (directory / "summary.json").write_text("{}", encoding="utf-8")
+    (first / "ablation.json").write_text("{}", encoding="utf-8")
+
+    assert run_comparison.compare_runs(first, second) == [
+        "ablation.json: written by the first run only"
+    ]
+
+
+def test_two_directories_holding_nothing_do_not_agree(tmp_path, capsys):
+    """Agreeing on nothing is not a pass.
+
+    Two empty directories have no difference to find, so a comparison that
+    only looked for differences would call this the gate passing.
+    """
+    first, second = tmp_path / "one", tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    code = run_comparison.report_comparison(first, second)
+    out = capsys.readouterr().out
+
+    assert code == run_comparison.COULD_NOT_COMPARE
+    assert "nothing to compare" in out
+
+
+def test_a_file_that_is_not_utf8_is_a_message_and_names_the_file(tmp_path, capsys):
+    """json.load raises UnicodeDecodeError here, which is neither
+    JSONDecodeError nor OSError, so it escaped both handlers."""
+    first, second = _summaries(tmp_path, *AGREEING)
+    second.write_bytes(b'{"rag_k10_em": "\xff\xfe"}')
+
+    code = run_comparison.report_comparison(first, second)
+    out = capsys.readouterr().out
+
+    assert code == run_comparison.COULD_NOT_COMPARE
+    assert "not valid UTF-8" in out
+    assert second.name in out
+    assert "Traceback" not in out
+
+
+def test_every_unreadable_file_is_named(tmp_path, capsys):
+    """The missing-file message names its file; so must the others."""
+    first, second = _summaries(tmp_path, *AGREEING)
+    second.write_text("{not json", encoding="utf-8")
+
+    run_comparison.report_comparison(first, second)
+
+    assert second.name in capsys.readouterr().out
+
+
 class _StubRuns:
     """Stands in for ``subprocess`` so ``--twice`` performs no benchmark.
 
@@ -250,20 +306,45 @@ class _StubRuns:
     the stub.
     """
 
-    def __init__(self, summaries, returncode=0):
+    def __init__(self, summaries, rows=None, returncode=0):
         self.summaries = list(summaries)
+        # A real run writes per-item results beside the summary, and the gate
+        # has to compare those too.
+        self.rows = list(rows) if rows is not None else [[{"em": 1.0}]] * 2
         self.returncode = returncode
         self.commands: list[list[str]] = []
 
+    def __getattr__(self, name):
+        """Everything but `run` is the real module.
+
+        The driver calls `subprocess.run` for the two passes and also reads
+        `subprocess.SubprocessError` while deciding whether the output
+        directory is usable. A stub that replaced the module wholesale broke
+        the second, which is a stub shaped like the test rather than like the
+        thing it stands in for.
+        """
+        return getattr(subprocess, name)
+
     def run(self, command, **kwargs):
+        if command[0] != sys.executable:
+            # git, asked whether the output directory is ignored. This stub
+            # stands in for the benchmark run, not for every subprocess the
+            # driver makes; answering that one itself would be testing the
+            # stub's idea of .gitignore.
+            return subprocess.run(command, **kwargs)
+
         self.commands.append(list(command))
         directory = Path(command[command.index("--output-dir") + 1])
         directory.mkdir(parents=True, exist_ok=True)
+        index = len(self.commands) - 1
         payload = {
-            **self.summaries[len(self.commands) - 1],
+            **self.summaries[index],
             "provenance": {"command": list(command)},
         }
         (directory / "summary.json").write_text(json.dumps(payload), encoding="utf-8")
+        (directory / "full_results_hotpotqa.json").write_text(
+            json.dumps(self.rows[index]), encoding="utf-8"
+        )
 
         class _Completed:
             returncode = self.returncode
@@ -302,6 +383,29 @@ def test_twice_runs_into_two_distinct_directories(tmp_path, monkeypatch, capsys)
     for directory in stub.output_dirs:
         assert Path(directory).parent == tmp_path
         assert f"[compare] {directory}" in out
+
+
+def test_twice_compares_the_per_item_results_not_only_the_summary(
+    tmp_path, monkeypatch, capsys
+):
+    """Aggregates can agree while the rows behind them do not.
+
+    A different predicted answer or a different retrieved document that
+    leaves EM, F1 and the medians unchanged is invisible in summary.json and
+    plain in full_results_*.json. The first version of --twice compared only
+    the summary and would have passed this.
+    """
+    stub = _StubRuns(
+        AGREEING,
+        rows=[[{"em": 1.0, "predicted": "Rome"}], [{"em": 1.0, "predicted": "Paris"}]],
+    )
+
+    code = _twice(monkeypatch, stub, tmp_path)
+    out = capsys.readouterr().out
+
+    assert code == run_comparison.DIFFERENCES_FOUND
+    assert "full_results_hotpotqa.json" in out
+    assert "'Rome' then 'Paris'" in out
 
 
 def test_twice_reports_a_difference_between_its_own_two_runs(
@@ -348,6 +452,60 @@ def test_twice_accepts_the_joined_form_of_the_parent_directory(tmp_path, monkeyp
     for command in stub.commands:
         assert command.count("--output-dir") == 1
         assert not any(entry.startswith("--output-dir=") for entry in command)
+
+
+def test_twice_refuses_an_output_dir_that_would_dirty_the_tree(monkeypatch, capsys):
+    """The first pass's files are on disk when the second reads git status.
+
+    An unignored directory inside the repository therefore makes the second
+    run record a dirtier tree than the first, and the comparison reports a
+    provenance difference that is this command's own doing. Found by review.
+    """
+    stub = _StubRuns(AGREEING)
+    # git answers for a path whether or not it exists, and the guard refuses
+    # before anything is created — but a version of this that did not would
+    # leave the directory behind, so it is removed either way.
+    inside = ROOT / "gate-output-under-test"
+
+    monkeypatch.setattr(bench, "subprocess", stub)
+    monkeypatch.setattr(
+        sys, "argv", ["run_cke_benchmark.py", "--twice", "--output-dir", str(inside)]
+    )
+    try:
+        with pytest.raises(SystemExit) as exited:
+            bench.main()
+        out = capsys.readouterr().out
+
+        assert exited.value.code == run_comparison.COULD_NOT_COMPARE
+        assert stub.commands == [], "it ran the benchmark before refusing"
+        assert "git does not ignore it" in out
+        assert not inside.exists(), "it created the directory before refusing"
+    finally:
+        shutil.rmtree(inside, ignore_errors=True)
+
+
+def test_twice_accepts_a_directory_git_ignores(monkeypatch, capsys):
+    """results/ is the default and is ignored, so the guard must let it pass.
+
+    A guard that refused every path inside the repository would refuse the
+    documented invocation.
+    """
+    stub = _StubRuns(AGREEING)
+    ignored = ROOT / "results" / "gate-check"
+
+    monkeypatch.setattr(bench, "subprocess", stub)
+    monkeypatch.setattr(
+        sys, "argv", ["run_cke_benchmark.py", "--twice", "--output-dir", str(ignored)]
+    )
+    try:
+        with pytest.raises(SystemExit) as exited:
+            bench.main()
+
+        assert exited.value.code == 0
+        assert len(stub.commands) == 2
+        assert "git does not ignore it" not in capsys.readouterr().out
+    finally:
+        shutil.rmtree(ignored, ignore_errors=True)
 
 
 def test_twice_stops_when_a_run_fails_rather_than_comparing_nothing(
