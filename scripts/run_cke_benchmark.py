@@ -43,6 +43,7 @@ from cke.diagnostics import (  # noqa: E402
     degradation_summary,
     environment_report,
 )
+from cke.evaluation.diagnostics import answer_is_abstention  # noqa: E402
 from cke.evaluation.extended_metrics import EvaluationMetrics  # noqa: E402
 from cke.evaluation.llm_qa import LLMAnswerer  # noqa: E402
 from cke.evaluation.run_comparison import (  # noqa: E402,F401
@@ -545,8 +546,17 @@ def _score_row(
         "retrieval_recall": _retrieval_recall(r.get("retrieved_doc_ids"), gold_docs),
         "answer_truncated": r.get("answer_truncated"),
         "answer_dropped_tokens": r.get("answer_dropped_tokens"),
-        "em": EvaluationMetrics.exact_match(r["answer"], gold),
-        "f1": EvaluationMetrics.f1_score(r["answer"], gold),
+        # Measured on every item: on an answerable one this is a false
+        # abstention, which is as much worth knowing as a correct one.
+        "abstained": answer_is_abstention(r["answer"]),
+        # None, not zero, when the item has no answer to match. Folding an
+        # abstention judgement into EM would make one figure mean two things,
+        # which is the defect this harness just finished removing from
+        # "Recall". The abstention rate is reported separately.
+        "em": (
+            None if gold is None else EvaluationMetrics.exact_match(r["answer"], gold)
+        ),
+        "f1": None if gold is None else EvaluationMetrics.f1_score(r["answer"], gold),
     }
     for key in extra:
         scored[key] = r[key]
@@ -776,6 +786,7 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             "latency_ms": [],
             "truncated": [],
             "recall": [],
+            "abstained": [],
         }
         for c in CONFIGS
     }
@@ -792,18 +803,29 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
             agg[cfg]["completion"].append(d.get("completion_tokens"))
             agg[cfg]["latency_ms"].append(d.get("latency_ms", 0.0))
             agg[cfg]["recall"].append(d.get("retrieval_recall"))
+            # Paired with the item's own em, which is None exactly when the
+            # dataset gives no answer to match, so the two rates below can be
+            # taken over the right items without a second flag on the row.
+            agg[cfg]["abstained"].append((d.get("em"), d.get("abstained")))
 
     result: dict[str, dict[str, float]] = {}
     for cfg, lists in agg.items():
         if not lists["em"]:
             continue
+        # EM and F1 over the items that had an answer to match. An item the
+        # dataset marks unanswerable carries None and contributes no
+        # measurement; averaging it in as a zero would report a miss on a
+        # question that had nothing to hit.
+        scored_em = [value for value in lists["em"] if value is not None]
+        scored_f1 = [value for value in lists["f1"] if value is not None]
         result[cfg] = {
-            "em": round(sum(lists["em"]) / len(lists["em"]), 4),
-            "f1": round(sum(lists["f1"]) / len(lists["f1"]), 4),
             "median_tokens": round(statistics.median(lists["tokens"]), 1),
             "median_latency_ms": round(statistics.median(lists["latency_ms"]), 2),
-            "n": len(lists["em"]),
+            "n": len(scored_em),
         }
+        if scored_em:
+            result[cfg]["em"] = round(sum(scored_em) / len(scored_em), 4)
+            result[cfg]["f1"] = round(sum(scored_f1) / len(scored_f1), 4)
         completion = [tokens for tokens in lists["completion"] if tokens is not None]
         if len(completion) == len(lists["em"]):
             result[cfg]["median_completion_tokens"] = round(
@@ -821,6 +843,21 @@ def aggregate_metrics(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]
         # so its shared totals cannot say; this can — but only when the
         # answerer measured. An unmeasured item carries None, and a count
         # taken over those would read as a measured zero in ablation.json.
+        # Two rates, kept apart because they mean opposite things. On an
+        # unanswerable item declining is the right answer; on an answerable
+        # one it is a miss with a different cause from a wrong answer.
+        unanswerable = [flag for em, flag in lists["abstained"] if em is None]
+        answerable = [flag for em, flag in lists["abstained"] if em is not None]
+        if unanswerable:
+            result[cfg]["unanswerable_items"] = len(unanswerable)
+            result[cfg]["abstention_rate"] = round(
+                sum(bool(flag) for flag in unanswerable) / len(unanswerable), 4
+            )
+        if answerable:
+            result[cfg]["false_abstention_rate"] = round(
+                sum(bool(flag) for flag in answerable) / len(answerable), 4
+            )
+
         cut = lists["truncated"]
         if all(item is not None for item in cut):
             result[cfg]["truncated_items"] = sum(bool(item) for item in cut)
