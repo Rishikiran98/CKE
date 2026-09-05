@@ -208,17 +208,8 @@ def test_the_hit_rate_is_averaged_over_queries():
     assert evaluate_hit_rate_at_k(queries, [[0], [0]], documents) == 0.5
 
 
-def test_the_hit_rate_is_not_the_benchmark_recall_they_were_both_called():
-    """The two figures the word "Recall" used to cover, on one case.
-
-    A query with two relevant documents, one of them retrieved. The hit rate
-    is 1.0 — something relevant came back. The benchmark's recall is 0.5 —
-    half the relevant documents came back. Both are right about what they
-    measure, and reading either as the other is wrong by a factor that grows
-    with the number of relevant documents an item has.
-
-    This is here so the names cannot quietly converge again.
-    """
+def _benchmark():
+    """The driver, for the recall the benchmark tables actually print."""
     import importlib.util
     import pathlib
 
@@ -226,18 +217,58 @@ def test_the_hit_rate_is_not_the_benchmark_recall_they_were_both_called():
     spec = importlib.util.spec_from_file_location(
         "run_cke_benchmark_hitrate", root / "scripts" / "run_cke_benchmark.py"
     )
-    bench = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bench)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
+
+@pytest.mark.parametrize(
+    "retrieved, hit_rate_is, recall_is, agree",
+    [
+        ([], 0.0, 0.0, True),
+        ([0], 1.0, 0.5, False),
+        ([0, 1], 1.0, 1.0, True),
+    ],
+    ids=["none-retrieved", "partial-hit", "all-retrieved"],
+)
+def test_where_the_hit_rate_and_the_benchmark_recall_part_company(
+    retrieved, hit_rate_is, recall_is, agree
+):
+    """Both figures, from their real implementations, over one query.
+
+    The two agree at both ends — nothing relevant retrieved, or everything —
+    and diverge only on a partial hit, where the hit rate has already reached
+    1.0 on the first relevant document and recall is still counting. An
+    earlier version of this comment said they differ "whenever a query has
+    more than one relevant document", which overstates it: review caught that,
+    and the correction is a test rather than a reworded sentence.
+    """
+    bench = _benchmark()
     documents = _corpus(("d1", "A", "x"), ("d2", "B", "y"))
     queries = [QueryExample("q1", "?", {"d1", "d2"})]
 
-    hit_rate = evaluate_hit_rate_at_k(queries, [[0]], documents)
-    recall = bench._retrieval_recall(["d1"], {"d1", "d2"})
+    hit_rate = evaluate_hit_rate_at_k(queries, [retrieved], documents)
+    recall = bench._retrieval_recall(
+        [documents[position].doc_id for position in retrieved], {"d1", "d2"}
+    )
 
-    assert hit_rate == 1.0
-    assert recall == 0.5
-    assert hit_rate != recall, "the same word covered both of these"
+    assert hit_rate == hit_rate_is
+    assert recall == recall_is
+    assert (hit_rate == recall) is agree
+
+
+def test_one_relevant_document_can_never_separate_the_two_figures():
+    """No partial hit exists when there is only one to find."""
+    bench = _benchmark()
+    documents = _corpus(("d1", "A", "x"), ("d2", "B", "y"))
+    queries = [QueryExample("q1", "?", {"d1"})]
+
+    for retrieved in ([], [0], [1], [0, 1]):
+        hit_rate = evaluate_hit_rate_at_k(queries, [retrieved], documents)
+        recall = bench._retrieval_recall(
+            [documents[position].doc_id for position in retrieved], {"d1"}
+        )
+        assert hit_rate == recall, f"they parted on {retrieved}"
 
 
 def test_the_hit_rate_refuses_mismatched_result_lists():

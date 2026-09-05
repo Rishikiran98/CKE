@@ -30,10 +30,15 @@ The figure is the fraction of queries with **at least one** relevant document
 in the top k. That is a hit rate, and it was called Recall@k. Recall@k is
 something else: the share of a query's relevant documents that the top k
 holds, which is what ``_retrieval_recall`` in scripts/run_cke_benchmark.py
-computes for the benchmark. Two numbers under one name, differing whenever a
-query has more than one relevant document — the hit rate reaches 1.0 on the
-first of them and recall does not. Neither figure was wrong; reading one as
-the other was, and nothing here said which was which.
+computes for the benchmark.
+
+Two numbers under one name. They agree at both ends: when the top k holds none
+of a query's relevant documents both read 0, and when it holds all of them both
+read 1. They diverge on a partial hit — some but not all — where the hit rate
+is already 1.0 and recall is the fraction found. A query with a single relevant
+document has no partial hit available, so the gap opens only where there are
+several and the top k catches some of them. Neither figure was wrong; reading
+one as the other was, and nothing here said which was which.
 
 A retrieved document counts as relevant when its id is among the query's
 hints or a hint is a substring of its lower-cased title. Hints come from

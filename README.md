@@ -93,8 +93,8 @@ These are stated here rather than left for a reader to discover.
   hints. That is a title-matching proxy, not a judged relevance set, and it
   needs the MS MARCO full-document TSV, HotpotQA and LoCoMo files to run. It
   is not the "Recall of supporting docs" the benchmark tables report: that one
-  is the share of an item's gold documents retrieved, and the two differ
-  whenever an item has more than one.
+  is the share of an item's gold documents retrieved. The two agree when none
+  or all of an item's gold documents come back, and diverge on a partial hit.
 
 ## Repository layout
 
